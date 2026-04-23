@@ -1,5 +1,5 @@
-run_id: hermes_protocol_smoke_001
-run_root: /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_001
+run_id: hermes_protocol_smoke_002
+run_root: /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_002
 working_directory: /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke
 command_prefix: /Users/daiduo2/pde-agent/.venv/bin/pde-agent
 
@@ -40,9 +40,9 @@ required_artifacts: []
 
 allowed_commands:
   - name: init_run
-    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id hermes_protocol_smoke_001 --runs-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id hermes_protocol_smoke_002 --runs-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs
   - name: resolve_config
-    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id hermes_protocol_smoke_001 --base-config-file base_config.json --override-file override.json --task-spec-file task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_001
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id hermes_protocol_smoke_002 --base-config-file base_config.json --override-file override.json --task-spec-file task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_002
 
 success_transition:
   on_complete: BASELINE_READY
