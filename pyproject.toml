@@ -1,0 +1,21 @@
+[project]
+name = "pde-agent"
+version = "0.1.0"
+description = "CLI-first diagnostic harness for PDE agent experiments"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+pde-agent = "pde_agent.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
