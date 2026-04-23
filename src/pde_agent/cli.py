@@ -2,11 +2,15 @@ import json
 
 import typer
 
+from pde_agent.commands.analyze_spectrum import analyze_spectrum
+from pde_agent.commands.build_submission import build_submission
+from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
+from pde_agent.commands.train_baseline import train_baseline
 from pde_agent.commands.resolve_config import resolve_config
 
 
@@ -83,6 +87,46 @@ def collect_artifacts_cmd(
             )
         )
     )
+
+
+@app.command("train-baseline")
+def train_baseline_cmd(
+    run_id: str = typer.Option(...),
+    run_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(json.dumps(train_baseline(run_id=run_id, run_root=run_root)))
+
+
+@app.command("analyze-spectrum")
+def analyze_spectrum_cmd(
+    run_id: str = typer.Option(...),
+    run_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(json.dumps(analyze_spectrum(run_id=run_id, run_root=run_root)))
+
+
+@app.command("check-physics")
+def check_physics_cmd(
+    run_id: str = typer.Option(...),
+    run_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(json.dumps(check_physics(run_id=run_id, run_root=run_root)))
+
+
+@app.command("build-submission")
+def build_submission_cmd(
+    run_id: str = typer.Option(...),
+    run_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(json.dumps(build_submission(run_id=run_id, run_root=run_root)))
 
 
 @app.command("resolve-config")
