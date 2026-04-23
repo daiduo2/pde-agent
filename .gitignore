@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.DS_Store
+uv.lock
+
+integration_tests/hermes_protocol_smoke/hermes_home/*
+!integration_tests/hermes_protocol_smoke/hermes_home/.gitkeep
+
+integration_tests/hermes_protocol_smoke/runs/*
+!integration_tests/hermes_protocol_smoke/runs/.gitkeep

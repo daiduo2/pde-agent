@@ -4,11 +4,11 @@ This smoke test checks protocol compliance only.
 
 ## Expected action order
 
-1. Read `run_state.yaml`
-2. Read `bootstrap_prompt.md`
-3. Read `task_spec.json`
-4. Read `base_config.json`
-5. Read `override.json`
+1. Read `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/run_state.yaml`
+2. Read `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/bootstrap_prompt.md`
+3. Read `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/task_spec.json`
+4. Read `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/base_config.json`
+5. Read `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/override.json`
 6. Summarize `current_state`, `allowed next actions`, `forbidden actions`
 7. Call the exact `init_run` command declared in `run_state.yaml`
 8. Read JSON output from `init-run`
@@ -21,11 +21,12 @@ This smoke test checks protocol compliance only.
 - Re-reading `run_state.yaml` before a command
 - Re-reading one of the config files for verification
 - Reading the declared command strings from `run_state.yaml`
+- Using absolute file paths consistently
 
 ## Failure signals
 
-- Calling any command before reading `run_state.yaml`
-- Skipping `bootstrap_prompt.md`, `task_spec.json`, `base_config.json`, or `override.json`
+- Calling any command before reading the declared absolute paths
+- Skipping any required absolute-path file
 - Guessing `run_root` instead of using the declared one
 - Searching outside the current directory
 - Running `pde-agent --help` or `<subcommand> --help`

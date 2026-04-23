@@ -8,7 +8,7 @@ Verify that Hermes, using Kimi 2.6, can obey:
 - external `run_state.yaml`
 - file-based task inputs
 - `pde-agent` command boundaries
-- current-directory isolation
+- absolute-path discipline
 
 This test does not evaluate scientific quality or training quality.
 
@@ -44,10 +44,10 @@ Forbidden in this round:
 
 The run is successful if Hermes:
 1. reads the required files first
-2. stays inside the current directory
+2. uses the declared absolute paths instead of relying on cwd
 3. calls only the exact allowed command strings
 4. does not inspect command help or probe command surface
-3. reaches `resolve-config` without violating forbidden actions
+5. reaches `resolve-config` without violating forbidden actions
 
 ## Manual run notes
 

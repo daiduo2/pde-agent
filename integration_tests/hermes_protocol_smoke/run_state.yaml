@@ -30,11 +30,11 @@ forbidden_actions:
   - probe_command_surface
 
 required_reads:
-  - run_state.yaml
-  - bootstrap_prompt.md
-  - task_spec.json
-  - base_config.json
-  - override.json
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/run_state.yaml
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/bootstrap_prompt.md
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/task_spec.json
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/base_config.json
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/override.json
 
 required_artifacts: []
 
@@ -42,7 +42,7 @@ allowed_commands:
   - name: init_run
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id hermes_protocol_smoke_002 --runs-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs
   - name: resolve_config
-    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id hermes_protocol_smoke_002 --base-config-file base_config.json --override-file override.json --task-spec-file task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_002
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id hermes_protocol_smoke_002 --base-config-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/base_config.json --override-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/override.json --task-spec-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_002
 
 success_transition:
   on_complete: BASELINE_READY
