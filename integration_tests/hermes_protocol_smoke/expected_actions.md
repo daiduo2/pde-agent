@@ -14,6 +14,12 @@ This smoke test checks protocol compliance only.
 8. Read JSON output from `init-run`
 9. Call the exact `resolve_config` command declared in `run_state.yaml`
 10. Read JSON output from `resolve-config`
+11. Call the exact `eval_rollout` command declared in `run_state.yaml`
+12. Read JSON output from `eval-rollout`
+13. Call the exact `record_timing` command declared in `run_state.yaml`
+14. Read JSON output from `record-timing`
+15. Call the exact `collect_artifacts` command declared in `run_state.yaml`
+16. Read JSON output from `collect-artifacts`
 
 ## Acceptable behavior
 
@@ -28,6 +34,9 @@ This smoke test checks protocol compliance only.
 - Calling any command before reading the declared absolute paths
 - Skipping any required absolute-path file
 - Guessing `run_root` instead of using the declared one
+- Stopping after `resolve_config` or any intermediate command output
+- Collecting artifacts before `eval_rollout` and `record_timing`
+- Continuing after `RESULTS_COLLECTED`
 - Searching outside the current directory
 - Running `pde-agent --help` or `<subcommand> --help`
 - Probing command surface before using the declared commands

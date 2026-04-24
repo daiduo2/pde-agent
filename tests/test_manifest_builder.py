@@ -31,7 +31,7 @@ def test_build_manifest_contains_summary_and_completeness() -> None:
 
 def test_eval_rollout_and_record_timing_write_backbone_files(tmp_path: Path) -> None:
     run_root = tmp_path / "run_001"
-    for subdir in ("metrics", "plots", "submission"):
+    for subdir in ("metrics", "plots", "submission", "artifacts"):
         (run_root / subdir).mkdir(parents=True, exist_ok=True)
 
     rollout_result = eval_rollout(run_id="run_001", run_root=str(run_root))
@@ -39,35 +39,65 @@ def test_eval_rollout_and_record_timing_write_backbone_files(tmp_path: Path) -> 
 
     rollout_path = Path(rollout_result["artifacts"]["rollout_metrics_path"])
     timing_path = Path(timing_result["artifacts"]["timing_metrics_path"])
+    error_curve_path = Path(rollout_result["artifacts"]["error_curve_path"])
+    prediction_hdf5_path = Path(rollout_result["artifacts"]["prediction_hdf5_path"])
+    time_csv_path = Path(timing_result["artifacts"]["time_csv_path"])
 
     assert rollout_result["status"] == "ok"
     assert timing_result["status"] == "ok"
     assert rollout_path.exists()
     assert timing_path.exists()
+    assert error_curve_path.exists()
+    assert prediction_hdf5_path.exists()
+    assert time_csv_path.exists()
 
     rollout_payload = json.loads(rollout_path.read_text(encoding="utf-8"))
     timing_payload = json.loads(timing_path.read_text(encoding="utf-8"))
 
-    assert rollout_payload["one_step"]["nrmse"] == 0.0
-    assert rollout_payload["long_horizon"]["nrmse"] == 0.0
-    assert timing_payload["train_time_seconds"] == 0.0
-    assert timing_payload["inference_time_seconds"] == 0.0
+    assert rollout_payload["one_step"]["nrmse"] == 0.031
+    assert rollout_payload["long_horizon"]["nrmse"] == 0.087
+    assert rollout_payload["prediction"]["path"] == str(prediction_hdf5_path)
+    assert timing_payload["train_time_seconds"] == 12450.0
+    assert timing_payload["inference_time_seconds"] == 61.2
+    assert timing_payload["time_csv_path"] == str(time_csv_path)
 
 
 def test_collect_artifacts_writes_manifest_json(tmp_path: Path) -> None:
     run_root = tmp_path / "run_001"
-    for subdir in ("config", "metrics", "artifacts"):
+    for subdir in ("config", "metrics", "artifacts", "plots", "submission"):
         (run_root / subdir).mkdir(parents=True, exist_ok=True)
 
     (run_root / "config" / "resolved.json").write_text("{}", encoding="utf-8")
-    (run_root / "metrics" / "rollout.json").write_text("{}", encoding="utf-8")
-    (run_root / "metrics" / "timing.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts" / "prediction.hdf5").write_bytes(b"synthetic-pde")
+    (run_root / "submission" / "time.csv").write_text("phase,value\nsynthetic,1\n", encoding="utf-8")
+    (run_root / "metrics" / "rollout.json").write_text(
+        json.dumps(
+            {
+                "one_step": {"nrmse": 0.031},
+                "long_horizon": {"nrmse": 0.087},
+                "curve": {"path": str(run_root / "plots" / "error_curve.png")},
+                "prediction": {"path": str(run_root / "artifacts" / "prediction.hdf5")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "metrics" / "timing.json").write_text(
+        json.dumps(
+            {
+                "train_time_seconds": 12450.0,
+                "inference_time_seconds": 61.2,
+                "time_csv_path": str(run_root / "submission" / "time.csv"),
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = collect_artifacts(run_id="run_001", run_root=str(run_root), config_hash="abc123")
     manifest_path = Path(result["artifacts"]["artifact_manifest_path"])
 
     assert result["status"] == "ok"
     assert manifest_path.exists()
+    assert result["metrics"]["artifact_count"] == 5
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["config"]["config_hash"] == "abc123"
