@@ -114,9 +114,8 @@ def _run_hermes(
                 prompt_submitted
                 and not exit_submitted
                 and _success_transition_seen(output)
-                and "❯" in chunk
             ):
-                process.stdin.write(b"/exit\n")
+                process.stdin.write(b"/exit\r")
                 process.stdin.flush()
                 exit_submitted = True
 
@@ -132,11 +131,18 @@ def _run_hermes(
 
 
 def _success_transition_seen(output: str) -> bool:
-    return (
-        "Success transition reached: RESULTS_COLLECTED" in output
-        or "Success transition RESULTS_COLLECTED reached" in output
-        or "Final state: RESULTS_COLLECTED" in output
-        or "Final state_hint: RESULTS_COLLECTED" in output
+    normalized = output.replace("*", "").replace("`", "")
+    if "RESULTS_COLLECTED" not in normalized:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "Success transition",
+            "completed successfully",
+            "No forbidden actions",
+            "Final state",
+            "Final state_hint",
+        )
     )
 
 
