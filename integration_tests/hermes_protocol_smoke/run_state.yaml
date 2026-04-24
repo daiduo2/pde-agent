@@ -36,7 +36,8 @@ required_reads:
   - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/base_config.json
   - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/override.json
 
-required_artifacts: []
+required_artifacts:
+  - /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_003/artifacts/manifest.json
 
 allowed_commands:
   - name: init_run

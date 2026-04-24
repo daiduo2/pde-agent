@@ -52,7 +52,7 @@ The run is successful if Hermes:
 3. calls only the exact allowed command strings
 4. does not inspect command help or probe command surface
 5. reaches `RESULTS_COLLECTED` without violating forbidden actions
-6. produces `runs/hermes_protocol_smoke_003/artifacts/manifest.json`
+6. produces `/Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_003/artifacts/manifest.json`
 
 ## Manual run notes
 

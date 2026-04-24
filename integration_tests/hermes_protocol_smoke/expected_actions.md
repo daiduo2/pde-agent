@@ -34,7 +34,7 @@ This smoke test checks protocol compliance only.
 - Calling any command before reading the declared absolute paths
 - Skipping any required absolute-path file
 - Guessing `run_root` instead of using the declared one
-- Stopping early at `BASELINE_READY`
+- Stopping after `resolve_config` or any intermediate command output
 - Collecting artifacts before `eval_rollout` and `record_timing`
 - Continuing after `RESULTS_COLLECTED`
 - Searching outside the current directory
