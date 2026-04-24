@@ -3,10 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import pty
 import select
-import signal
 import subprocess
 import sys
 import time
@@ -83,60 +80,64 @@ def _fixture_arg(repo_root: Path, fixture_root: Path) -> str:
 def _run_hermes(
     *, profile: str, fixture_root: Path, prompt: str, timeout_seconds: int
 ) -> str | None:
-    child_pid, master_fd = pty.fork()
-    if child_pid == 0:
-        os.chdir(fixture_root)
-        os.execvp("hermes", ["hermes", "-p", profile])
+    process = subprocess.Popen(
+        ["script", "-q", "/dev/null", "hermes", "-p", profile],
+        cwd=fixture_root,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=False,
+    )
+    if process.stdin is None or process.stdout is None:
+        raise RuntimeError("failed to open Hermes runner pipes")
 
     session_id: str | None = None
     output = ""
     deadline = time.time() + timeout_seconds
     prompt_submitted = False
     exit_submitted = False
-    child_exited = False
-    child_status = 0
 
-    try:
-        while time.time() < deadline:
-            readable, _, _ = select.select([master_fd], [], [], 0.5)
-            if readable:
-                try:
-                    chunk = os.read(master_fd, 4096).decode("utf-8", errors="replace")
-                except OSError:
-                    child_exited = True
-                    break
-                output += chunk
-                print(chunk, end="")
-                session_id = session_id or _extract_session_id(output)
-                if not prompt_submitted and "❯" in output:
-                    os.write(master_fd, (prompt + "\r").encode("utf-8"))
-                    prompt_submitted = True
-                elif (
-                    prompt_submitted
-                    and not exit_submitted
-                    and "Success transition reached: RESULTS_COLLECTED" in output
-                    and "❯" in chunk
-                ):
-                    os.write(master_fd, b"/exit\r")
-                    exit_submitted = True
-
-            wait_pid, child_status = os.waitpid(child_pid, os.WNOHANG)
-            if wait_pid == child_pid:
-                child_exited = True
+    while time.time() < deadline:
+        readable, _, _ = select.select([process.stdout], [], [], 0.5)
+        if readable:
+            chunk = process.stdout.read1(4096).decode("utf-8", errors="replace")
+            if not chunk:
                 break
+            output += chunk
+            print(chunk, end="", flush=True)
+            session_id = session_id or _extract_session_id(output)
+            if not prompt_submitted and "❯" in output:
+                process.stdin.write((prompt + "\r").encode("utf-8"))
+                process.stdin.flush()
+                prompt_submitted = True
+            elif (
+                prompt_submitted
+                and not exit_submitted
+                and _success_transition_seen(output)
+                and "❯" in chunk
+            ):
+                process.stdin.write(b"/exit\n")
+                process.stdin.flush()
+                exit_submitted = True
 
-        if not child_exited:
-            os.kill(child_pid, signal.SIGTERM)
-            os.waitpid(child_pid, 0)
-            raise TimeoutError(f"Hermes smoke run timed out after {timeout_seconds} seconds")
-    finally:
-        os.close(master_fd)
+        if process.poll() is not None:
+            break
 
-    if os.WIFEXITED(child_status) and os.WEXITSTATUS(child_status) != 0:
-        raise RuntimeError(f"Hermes exited with code {os.WEXITSTATUS(child_status)}")
-    if os.WIFSIGNALED(child_status):
-        raise RuntimeError(f"Hermes terminated by signal {os.WTERMSIG(child_status)}")
+    if process.poll() is None:
+        process.terminate()
+        raise TimeoutError(f"Hermes smoke run timed out after {timeout_seconds} seconds")
+    if process.returncode != 0:
+        raise RuntimeError(f"Hermes exited with code {process.returncode}")
     return session_id
+
+
+def _success_transition_seen(output: str) -> bool:
+    return (
+        "Success transition reached: RESULTS_COLLECTED" in output
+        or "Success transition RESULTS_COLLECTED reached" in output
+        or "Final state: RESULTS_COLLECTED" in output
+        or "Final state_hint: RESULTS_COLLECTED" in output
+    )
 
 
 def _extract_session_id(output: str) -> str | None:
