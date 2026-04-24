@@ -56,6 +56,8 @@ def validate_burgers_bundle(bundle: BurgersArrayBundle) -> BurgersArrayBundle:
         raise ArrayContractError("context space dimension must match prediction")
 
     metadata = dict(bundle.metadata)
+    _require_metadata_value(metadata, "problem_id")
+    _require_metadata_value(metadata, "source_mode")
     metadata.update(
         {
             "sample_count": prediction.shape[0],
@@ -76,3 +78,8 @@ def validate_burgers_bundle(bundle: BurgersArrayBundle) -> BurgersArrayBundle:
 def _require_rank_3(name: str, array: NDArray[np.floating]) -> None:
     if array.ndim != 3:
         raise ArrayContractError(f"{name} must be rank 3")
+
+
+def _require_metadata_value(metadata: dict[str, object], key: str) -> None:
+    if not metadata.get(key):
+        raise ArrayContractError(f"metadata.{key} is required")

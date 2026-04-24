@@ -18,7 +18,12 @@ def test_validate_burgers_bundle_accepts_matching_arrays() -> None:
         prediction=prediction,
         target=target,
         full_reference=full_reference,
-        metadata={"source": "fixture", "sample_count": 999},
+        metadata={
+            "problem_id": "burgers_1d",
+            "source": "fixture",
+            "source_mode": "npz_fixture",
+            "sample_count": 999,
+        },
     )
 
     validated = validate_burgers_bundle(bundle)
@@ -29,13 +34,20 @@ def test_validate_burgers_bundle_accepts_matching_arrays() -> None:
     assert validated.full_reference is not None
     assert validated.full_reference.dtype == np.float64
     assert validated.metadata == {
+        "problem_id": "burgers_1d",
         "source": "fixture",
+        "source_mode": "npz_fixture",
         "sample_count": 2,
         "context_time": 3,
         "forecast_time": 4,
         "space_points": 5,
     }
-    assert bundle.metadata == {"source": "fixture", "sample_count": 999}
+    assert bundle.metadata == {
+        "problem_id": "burgers_1d",
+        "source": "fixture",
+        "source_mode": "npz_fixture",
+        "sample_count": 999,
+    }
 
 
 def test_validate_burgers_bundle_rejects_prediction_target_shape_mismatch() -> None:
@@ -63,4 +75,35 @@ def test_validate_burgers_bundle_rejects_non_3d_arrays() -> None:
     )
 
     with pytest.raises(ArrayContractError, match="context must be rank 3"):
+        validate_burgers_bundle(bundle)
+
+
+def test_validate_burgers_bundle_rejects_missing_required_metadata() -> None:
+    bundle = BurgersArrayBundle(
+        context=np.ones((2, 3, 5)),
+        prediction=np.ones((2, 4, 5)),
+        target=np.ones((2, 4, 5)),
+        full_reference=None,
+        metadata={"problem_id": "burgers_1d"},
+    )
+
+    with pytest.raises(
+        ArrayContractError, match="metadata.source_mode is required"
+    ):
+        validate_burgers_bundle(bundle)
+
+
+def test_validate_burgers_bundle_rejects_complex_dtype() -> None:
+    bundle = BurgersArrayBundle(
+        context=np.ones((2, 3, 5), dtype=np.complex128),
+        prediction=np.ones((2, 4, 5)),
+        target=np.ones((2, 4, 5)),
+        full_reference=None,
+        metadata={"problem_id": "burgers_1d", "source_mode": "npz_fixture"},
+    )
+
+    with pytest.raises(
+        ArrayContractError,
+        match="context dtype cannot be converted to float safely",
+    ):
         validate_burgers_bundle(bundle)
