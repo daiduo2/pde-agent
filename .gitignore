@@ -3,7 +3,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .DS_Store
-uv.lock
 
 integration_tests/hermes_protocol_smoke/hermes_home/*
 !integration_tests/hermes_protocol_smoke/hermes_home/.gitkeep
