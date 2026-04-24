@@ -8,6 +8,7 @@ from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.init_run import init_run
+from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
@@ -79,6 +80,16 @@ def check_physics_cmd(
 ) -> None:
     _ = json_flag
     typer.echo(json.dumps(check_physics(run_id=run_id, run_root=run_root)))
+
+
+@app.command("inspect-data")
+def inspect_data_cmd(
+    run_id: str = typer.Option(...),
+    run_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(json.dumps(inspect_data(run_id=run_id, run_root=run_root)))
 
 
 @app.command("interpret-error")
