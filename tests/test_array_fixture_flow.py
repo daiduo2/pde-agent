@@ -1,4 +1,5 @@
 import json
+import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,33 @@ from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.select_hypothesis import select_hypothesis
+
+
+def test_prepare_array_fixture_smoke_renders_portable_runtime_files() -> None:
+    repo_root = Path("/tmp/example-checkout")
+    script_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "prepare_array_fixture_smoke.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "prepare_array_fixture_smoke", script_path
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    base_config = module.build_base_config(repo_root)
+    run_state = module.render_run_state(repo_root)
+
+    assert base_config["data"]["source_path"] == (
+        "/tmp/example-checkout/integration_tests/hermes_array_fixture_smoke/fixture.npz"
+    )
+    assert (
+        "command_prefix: /tmp/example-checkout/.venv/bin/pde-agent"
+        in run_state
+    )
+    assert "{{REPO_ROOT}}" not in run_state
+    assert ("/Users/" + "daiduo2") not in run_state
 
 
 def test_array_fixture_reaches_hypothesis_selected_manifest(tmp_path: Path) -> None:

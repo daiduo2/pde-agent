@@ -29,4 +29,6 @@ data/**/*.npz
 data/**/*.pt
 data/**/*.tar
 integration_tests/**/fixture.npz
+integration_tests/hermes_array_fixture_smoke/base_config.runtime.json
+integration_tests/hermes_array_fixture_smoke/run_state.yaml
 runs/

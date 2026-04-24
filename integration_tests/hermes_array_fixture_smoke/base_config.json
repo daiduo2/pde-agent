@@ -6,7 +6,7 @@
   "data": {
     "mode": "npz_fixture",
     "problem_id": "PDE_Burgers",
-    "source_path": "/Users/daiduo2/.config/superpowers/worktrees/pde-agent/phase4-pdebench-hdf5-adapter/integration_tests/hermes_array_fixture_smoke/fixture.npz",
+    "source_path": "./fixture.npz",
     "dataset_key": null,
     "context_steps": 2,
     "forecast_steps": 5,
