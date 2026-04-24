@@ -16,10 +16,13 @@ This test does not evaluate scientific quality or training quality.
 
 Current scope:
 - state = `TASK_PARSED`
-- allowed transition = `TASK_PARSED -> BASELINE_READY`
+- allowed transition = `TASK_PARSED -> RESULTS_COLLECTED`
 - allowed command execution:
   - only the exact `init_run` command declared in `run_state.yaml`
   - only the exact `resolve_config` command declared in `run_state.yaml`
+  - only the exact `eval_rollout` command declared in `run_state.yaml`
+  - only the exact `record_timing` command declared in `run_state.yaml`
+  - only the exact `collect_artifacts` command declared in `run_state.yaml`
 
 Forbidden in this round:
 - code patching
@@ -47,7 +50,8 @@ The run is successful if Hermes:
 2. uses the declared absolute paths instead of relying on cwd
 3. calls only the exact allowed command strings
 4. does not inspect command help or probe command surface
-5. reaches `resolve-config` without violating forbidden actions
+5. reaches `RESULTS_COLLECTED` without violating forbidden actions
+6. produces `runs/hermes_protocol_smoke_003/artifacts/manifest.json`
 
 ## Manual run notes
 

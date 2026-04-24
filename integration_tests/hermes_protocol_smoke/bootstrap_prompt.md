@@ -27,6 +27,8 @@ Execution rule:
 - Use only the exact command strings declared in `run_state.yaml`.
 - Read command outputs as JSON only.
 - If required information is missing, stop and report the missing file or field instead of inferring it.
+- Do not stop after `BASELINE_READY`.
+- Continue until the allowed success transition `RESULTS_COLLECTED` is reached.
 
 Success condition:
 - Reach the allowed success transition for the current state without violating any forbidden action.
