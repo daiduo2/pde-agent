@@ -1,0 +1,17 @@
+{
+  "model": {
+    "name": "none",
+    "mode": "read_only_diagnostic"
+  },
+  "data": {
+    "mode": "npz_fixture",
+    "problem_id": "PDE_Burgers",
+    "source_path": "/Users/daiduo2/.config/superpowers/worktrees/pde-agent/phase4-pdebench-hdf5-adapter/integration_tests/hermes_array_fixture_smoke/fixture.npz",
+    "dataset_key": null,
+    "context_steps": 2,
+    "forecast_steps": 5,
+    "time_reduction": 5,
+    "space_reduction": 4,
+    "sample_limit": null
+  }
+}
