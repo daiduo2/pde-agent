@@ -6,6 +6,7 @@ import json
 import os
 import pty
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -82,28 +83,28 @@ def _fixture_arg(repo_root: Path, fixture_root: Path) -> str:
 def _run_hermes(
     *, profile: str, fixture_root: Path, prompt: str, timeout_seconds: int
 ) -> str | None:
-    master_fd, slave_fd = pty.openpty()
-    process = subprocess.Popen(
-        ["hermes", "-p", profile],
-        cwd=fixture_root,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        text=False,
-        close_fds=True,
-    )
-    os.close(slave_fd)
+    child_pid, master_fd = pty.fork()
+    if child_pid == 0:
+        os.chdir(fixture_root)
+        os.execvp("hermes", ["hermes", "-p", profile])
+
     session_id: str | None = None
     output = ""
     deadline = time.time() + timeout_seconds
     prompt_submitted = False
     exit_submitted = False
+    child_exited = False
+    child_status = 0
 
     try:
         while time.time() < deadline:
             readable, _, _ = select.select([master_fd], [], [], 0.5)
             if readable:
-                chunk = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                try:
+                    chunk = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                except OSError:
+                    child_exited = True
+                    break
                 output += chunk
                 print(chunk, end="")
                 session_id = session_id or _extract_session_id(output)
@@ -119,17 +120,22 @@ def _run_hermes(
                     os.write(master_fd, b"/exit\r")
                     exit_submitted = True
 
-            if process.poll() is not None:
+            wait_pid, child_status = os.waitpid(child_pid, os.WNOHANG)
+            if wait_pid == child_pid:
+                child_exited = True
                 break
 
-        if process.poll() is None:
-            process.terminate()
+        if not child_exited:
+            os.kill(child_pid, signal.SIGTERM)
+            os.waitpid(child_pid, 0)
             raise TimeoutError(f"Hermes smoke run timed out after {timeout_seconds} seconds")
     finally:
         os.close(master_fd)
 
-    if process.returncode not in (0, None):
-        raise RuntimeError(f"Hermes exited with code {process.returncode}")
+    if os.WIFEXITED(child_status) and os.WEXITSTATUS(child_status) != 0:
+        raise RuntimeError(f"Hermes exited with code {os.WEXITSTATUS(child_status)}")
+    if os.WIFSIGNALED(child_status):
+        raise RuntimeError(f"Hermes terminated by signal {os.WTERMSIG(child_status)}")
     return session_id
 
 
