@@ -77,3 +77,19 @@ uv run python scripts/audit_hermes_smoke.py --session-id 20260424_121355_f1cb57
 ```
 
 The audit writes a JSON report under `reports/` and exits non-zero if protocol compliance fails.
+
+## Run real Hermes smoke test
+
+Run Hermes with the default `hermes-protocol-smoke` profile and audit the resulting session:
+
+```bash
+uv run python scripts/run_hermes_smoke.py --timeout-seconds 300
+```
+
+Use audit-only mode through the same entry point:
+
+```bash
+uv run python scripts/run_hermes_smoke.py --audit-only --session-id 20260424_121355_f1cb57
+```
+
+The default path calls the real Hermes CLI and may consume provider quota.
