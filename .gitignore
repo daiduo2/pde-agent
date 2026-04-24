@@ -13,3 +13,12 @@ integration_tests/hermes_protocol_smoke/runs/*
 
 integration_tests/hermes_protocol_smoke/reports/*
 !integration_tests/hermes_protocol_smoke/reports/.gitkeep
+
+integration_tests/hermes_diagnostic_smoke/hermes_home/*
+!integration_tests/hermes_diagnostic_smoke/hermes_home/.gitkeep
+
+integration_tests/hermes_diagnostic_smoke/runs/*
+!integration_tests/hermes_diagnostic_smoke/runs/.gitkeep
+
+integration_tests/hermes_diagnostic_smoke/reports/*
+!integration_tests/hermes_diagnostic_smoke/reports/.gitkeep
