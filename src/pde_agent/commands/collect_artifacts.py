@@ -34,6 +34,8 @@ def collect_artifacts(
         "has_selected_hypothesis": diagnostic["has_selected_hypothesis"],
         "has_timing": True,
     }
+    if "has_data_inspection" in diagnostic:
+        completeness["has_data_inspection"] = diagnostic["has_data_inspection"]
     phase = (
         "hypothesis_selected"
         if diagnostic["has_selected_hypothesis"]
@@ -91,6 +93,7 @@ def _base_artifacts(
 def _load_diagnostic_payloads(root: Path) -> dict[str, object]:
     spectrum_path = root / "metrics" / "spectrum.json"
     physics_path = root / "metrics" / "physics_check.json"
+    data_inspection_path = root / "metrics" / "data_inspection.json"
     interpretation_path = root / "diagnostics" / "error_interpretation.json"
     hypothesis_path = root / "diagnostics" / "selected_hypothesis.json"
 
@@ -105,6 +108,11 @@ def _load_diagnostic_payloads(root: Path) -> dict[str, object]:
         physics = json.loads(physics_path.read_text(encoding="utf-8"))
         artifacts["physics_check_path"] = str(physics_path)
         summary["physics_issue"] = physics["physics_issue"]
+    if data_inspection_path.exists():
+        data_inspection = json.loads(data_inspection_path.read_text(encoding="utf-8"))
+        artifacts["data_inspection_path"] = str(data_inspection_path)
+        summary["source_mode"] = data_inspection["source_mode"]
+        summary["data_is_compatible"] = data_inspection["is_compatible"]
     if interpretation_path.exists():
         interpretation = json.loads(interpretation_path.read_text(encoding="utf-8"))
         artifacts["error_interpretation_path"] = str(interpretation_path)
@@ -119,6 +127,11 @@ def _load_diagnostic_payloads(root: Path) -> dict[str, object]:
         "summary": summary,
         "has_spectrum": spectrum_path.exists(),
         "has_physics_check": physics_path.exists(),
+        **(
+            {"has_data_inspection": True}
+            if data_inspection_path.exists()
+            else {}
+        ),
         "has_error_interpretation": interpretation_path.exists(),
         "has_selected_hypothesis": hypothesis_path.exists(),
     }
