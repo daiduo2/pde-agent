@@ -174,6 +174,31 @@ def test_npz_inspection_uses_stable_schema(tmp_path: Path) -> None:
     }
 
 
+def test_npz_inspection_rejects_invalid_contract(tmp_path: Path) -> None:
+    source_path = tmp_path / "invalid.npz"
+    np.savez(
+        source_path,
+        context=np.ones((2, 3), dtype=np.float32),
+        prediction=np.ones((2, 4, 5), dtype=np.float64),
+        target=np.ones((2, 4, 5), dtype=np.float64),
+    )
+
+    config = DataConfig(
+        mode="npz_fixture",
+        problem_id="PDE_Burgers",
+        source_path=source_path,
+        dataset_key=None,
+        context_steps=3,
+        forecast_steps=4,
+        time_reduction=1,
+        space_reduction=1,
+        sample_limit=None,
+    )
+
+    with pytest.raises(DataInspectionError, match="context must"):
+        inspect_data_source(config)
+
+
 def test_npz_fixture_missing_source_path_fails() -> None:
     config = DataConfig(
         mode="npz_fixture",

@@ -50,28 +50,15 @@ def inspect_data_source(config: DataConfig) -> dict[str, object]:
                 raise DataInspectionError(
                     f"NPZ fixture missing keys: {', '.join(missing)}"
                 )
-            context_shape = tuple(archive["context"].shape)
-            prediction_shape = tuple(archive["prediction"].shape)
-            target_shape = tuple(archive["target"].shape)
-            return _inspection_result(
-                source_mode="npz_fixture",
-                source_path=str(source_path),
-                dataset_key=None,
-                available_keys=tuple(archive.files),
-                raw_shape=None,
-                raw_dtype=str(archive["target"].dtype),
-                reduced_shape=None,
-                contract_shape={
-                    "context": context_shape,
-                    "prediction": prediction_shape,
-                    "target": target_shape,
-                },
-                sample_count=target_shape[0],
-                context_time=context_shape[1],
-                forecast_time=target_shape[1],
-                space_points=target_shape[2],
-                warnings=[],
-            )
+            available_keys = tuple(archive.files)
+        bundle = load_array_bundle(config)
+        return _inspect_validated_bundle(
+            bundle,
+            source_mode="npz_fixture",
+            source_path=str(source_path),
+            dataset_key=None,
+            available_keys=available_keys,
+        )
     if config.mode == "pdebench_hdf5":
         return _inspect_hdf5(config)
     raise DataInspectionError(f"unsupported data mode: {config.mode}")
@@ -264,6 +251,35 @@ def _inspection_result(
         "is_compatible": True,
         "warnings": warnings,
     }
+
+
+def _inspect_validated_bundle(
+    bundle: BurgersArrayBundle,
+    *,
+    source_mode: str,
+    source_path: str | None,
+    dataset_key: str | None,
+    available_keys: list[str] | tuple[str, ...],
+) -> dict[str, object]:
+    return _inspection_result(
+        source_mode=source_mode,
+        source_path=source_path,
+        dataset_key=dataset_key,
+        available_keys=available_keys,
+        raw_shape=None,
+        raw_dtype=str(bundle.target.dtype),
+        reduced_shape=None,
+        contract_shape={
+            "context": tuple(bundle.context.shape),
+            "prediction": tuple(bundle.prediction.shape),
+            "target": tuple(bundle.target.shape),
+        },
+        sample_count=bundle.metadata["sample_count"],
+        context_time=bundle.metadata["context_time"],
+        forecast_time=bundle.metadata["forecast_time"],
+        space_points=bundle.metadata["space_points"],
+        warnings=[],
+    )
 
 
 def _import_h5py() -> Any:
