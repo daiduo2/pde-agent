@@ -26,7 +26,7 @@ def test_eval_rollout_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
     assert rollout_payload["one_step"]["nrmse"] == 0.031
     assert rollout_payload["long_horizon"]["nrmse"] == 0.087
     assert rollout_payload["curve"]["path"] == str(error_curve_path)
-    assert rollout_payload["prediction_hdf5_path"] == str(prediction_hdf5_path)
+    assert rollout_payload["prediction"]["path"] == str(prediction_hdf5_path)
 
 
 def test_record_timing_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_collect_artifacts_copies_phase2_synthetic_summary(tmp_path: Path) -> No
         "one_step": {"nrmse": 0.031},
         "long_horizon": {"nrmse": 0.087},
         "curve": {"path": str(run_root / "plots" / "error_curve.png")},
-        "prediction_hdf5_path": str(prediction_hdf5_path),
+        "prediction": {"path": str(prediction_hdf5_path)},
     }
     timing_payload = {
         "mode": "synthetic_pde_fixture",
