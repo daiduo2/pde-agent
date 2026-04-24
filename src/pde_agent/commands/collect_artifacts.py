@@ -11,27 +11,28 @@ def collect_artifacts(run_id: str, run_root: str, config_hash: str = "unknown") 
     timing_path = root / "metrics" / "timing.json"
     rollout_payload = json.loads(rollout_path.read_text(encoding="utf-8"))
     timing_payload = json.loads(timing_path.read_text(encoding="utf-8"))
-    prediction_hdf5_path = rollout_payload.get("prediction", {}).get("path")
-    error_curve_path = rollout_payload.get("curve", {}).get("path")
-    time_csv_path = timing_payload.get("time_csv_path")
+    prediction_hdf5_path = rollout_payload["prediction"]["path"]
+    error_curve_path = rollout_payload["curve"]["path"]
+    time_csv_path = timing_payload["time_csv_path"]
+    artifacts = {
+        "rollout_metrics_path": str(rollout_path),
+        "timing_metrics_path": str(timing_path),
+        "prediction_hdf5_path": prediction_hdf5_path,
+        "error_curve_path": error_curve_path,
+        "time_csv_path": time_csv_path,
+    }
     manifest = build_manifest(
         run_id=run_id,
         config={
             "resolved_config_path": str(root / "config" / "resolved.json"),
             "config_hash": config_hash,
         },
-        artifacts={
-            "rollout_metrics_path": str(rollout_path),
-            "timing_metrics_path": str(timing_path),
-            "prediction_hdf5_path": prediction_hdf5_path,
-            "error_curve_path": error_curve_path,
-            "time_csv_path": time_csv_path,
-        },
+        artifacts=artifacts,
         summary={
-            "one_step_nrmse": rollout_payload.get("one_step", {}).get("nrmse", 0.0),
-            "long_horizon_nrmse": rollout_payload.get("long_horizon", {}).get("nrmse", 0.0),
-            "train_time_seconds": timing_payload.get("train_time_seconds", 0.0),
-            "inference_time_seconds": timing_payload.get("inference_time_seconds", 0.0),
+            "one_step_nrmse": rollout_payload["one_step"]["nrmse"],
+            "long_horizon_nrmse": rollout_payload["long_horizon"]["nrmse"],
+            "train_time_seconds": timing_payload["train_time_seconds"],
+            "inference_time_seconds": timing_payload["inference_time_seconds"],
         },
         completeness={
             "has_rollout": True,
@@ -52,5 +53,5 @@ def collect_artifacts(run_id: str, run_root: str, config_hash: str = "unknown") 
             "error_curve_path": error_curve_path,
             "time_csv_path": time_csv_path,
         },
-        metrics={"artifact_count": 6},
+        metrics={"artifact_count": len(artifacts)},
     )

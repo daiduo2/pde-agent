@@ -13,6 +13,7 @@ def eval_rollout(run_id: str, run_root: str) -> dict[str, object]:
     root = Path(run_root)
     rollout_path = root / "metrics" / "rollout.json"
     rollout_payload = synthetic_rollout_payload(run_id=run_id, run_root=root)
+    rollout_path.parent.mkdir(parents=True, exist_ok=True)
     rollout_path.write_text(json.dumps(rollout_payload, indent=2), encoding="utf-8")
     return success_payload(
         run_id=run_id,

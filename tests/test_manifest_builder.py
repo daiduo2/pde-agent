@@ -64,18 +64,40 @@ def test_eval_rollout_and_record_timing_write_backbone_files(tmp_path: Path) -> 
 
 def test_collect_artifacts_writes_manifest_json(tmp_path: Path) -> None:
     run_root = tmp_path / "run_001"
-    for subdir in ("config", "metrics", "artifacts"):
+    for subdir in ("config", "metrics", "artifacts", "plots", "submission"):
         (run_root / subdir).mkdir(parents=True, exist_ok=True)
 
     (run_root / "config" / "resolved.json").write_text("{}", encoding="utf-8")
-    (run_root / "metrics" / "rollout.json").write_text("{}", encoding="utf-8")
-    (run_root / "metrics" / "timing.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts" / "prediction.hdf5").write_bytes(b"synthetic-pde")
+    (run_root / "submission" / "time.csv").write_text("phase,value\nsynthetic,1\n", encoding="utf-8")
+    (run_root / "metrics" / "rollout.json").write_text(
+        json.dumps(
+            {
+                "one_step": {"nrmse": 0.031},
+                "long_horizon": {"nrmse": 0.087},
+                "curve": {"path": str(run_root / "plots" / "error_curve.png")},
+                "prediction": {"path": str(run_root / "artifacts" / "prediction.hdf5")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "metrics" / "timing.json").write_text(
+        json.dumps(
+            {
+                "train_time_seconds": 12450.0,
+                "inference_time_seconds": 61.2,
+                "time_csv_path": str(run_root / "submission" / "time.csv"),
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = collect_artifacts(run_id="run_001", run_root=str(run_root), config_hash="abc123")
     manifest_path = Path(result["artifacts"]["artifact_manifest_path"])
 
     assert result["status"] == "ok"
     assert manifest_path.exists()
+    assert result["metrics"]["artifact_count"] == 5
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["config"]["config_hash"] == "abc123"
