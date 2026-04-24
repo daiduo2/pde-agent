@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import numpy as np
 
@@ -15,6 +16,7 @@ def _bundle(
     prediction: np.ndarray,
     target: np.ndarray,
     context: np.ndarray | None = None,
+    source_mode: str = "pdebench_hdf5",
 ) -> BurgersArrayBundle:
     if context is None:
         context = np.zeros((prediction.shape[0], 2, prediction.shape[2]))
@@ -23,7 +25,7 @@ def _bundle(
         prediction=prediction,
         target=target,
         full_reference=None,
-        metadata={"problem_id": "burgers_1d", "source_mode": "pdebench_hdf5"},
+        metadata={"problem_id": "burgers_1d", "source_mode": source_mode},
     )
 
 
@@ -81,8 +83,10 @@ def test_spectrum_metrics_identify_deterministic_band_errors() -> None:
     target = np.sin(x)[None, None, :]
     prediction = target + 0.5 * np.sin(7.0 * x)[None, None, :]
 
-    metrics = spectrum_metrics(_bundle(prediction, target))
+    metrics = spectrum_metrics(_bundle(prediction, target, source_mode="npz_fixture"))
 
+    assert metrics["mode"] == REAL_DIAGNOSTIC_MODE
+    assert metrics["source_mode"] == "npz_fixture"
     assert metrics["dominant_spectral_issue"] == "high_frequency_error"
     assert metrics["high_frequency_error"] > metrics["low_frequency_error"]
     assert metrics["high_frequency_error"] > metrics["mid_frequency_error"]
@@ -104,8 +108,10 @@ def test_physics_metrics_compute_proxy_flags() -> None:
         ]
     )
 
-    metrics = physics_metrics(_bundle(prediction, target))
+    metrics = physics_metrics(_bundle(prediction, target, source_mode="npz_fixture"))
 
+    assert metrics["mode"] == REAL_DIAGNOSTIC_MODE
+    assert metrics["source_mode"] == "npz_fixture"
     assert metrics["mass_drift"] > 0.9
     assert metrics["energy_decay_ratio"] > 1.0
     assert metrics["total_variation_ratio"] > 1.0
@@ -146,3 +152,36 @@ def test_metrics_remain_finite_for_zero_target_scale() -> None:
 
     for metrics in metric_groups:
         assert_finite(metrics)
+
+
+def test_one_space_point_metrics_remain_finite_and_json_safe() -> None:
+    target = np.array([[[1.0], [2.0], [3.0]]])
+    prediction = np.array([[[1.5], [2.5], [3.5]]])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        metric_groups = [
+            spectrum_metrics(_bundle(prediction, target)),
+            physics_metrics(_bundle(prediction, target)),
+        ]
+
+    def assert_json_safe(value: object) -> None:
+        if isinstance(value, bool) or value is None or isinstance(value, str):
+            return
+        if isinstance(value, float):
+            assert math.isfinite(value)
+            return
+        if isinstance(value, int):
+            return
+        if isinstance(value, list):
+            for item in value:
+                assert_json_safe(item)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                assert_json_safe(item)
+            return
+        raise AssertionError(f"unexpected value type {type(value)!r}")
+
+    for metrics in metric_groups:
+        assert_json_safe(metrics)

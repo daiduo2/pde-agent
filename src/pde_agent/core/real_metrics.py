@@ -57,6 +57,8 @@ def spectrum_metrics(bundle: BurgersArrayBundle) -> dict[str, object]:
     dominant_issue = max(band_errors, key=band_errors.get)
 
     return {
+        "mode": REAL_DIAGNOSTIC_MODE,
+        "source_mode": str(validated.metadata["source_mode"]),
         **band_errors,
         "high_to_low_error_ratio": high_to_low_ratio,
         "spectral_drift_score": spectral_drift,
@@ -92,8 +94,7 @@ def physics_metrics(bundle: BurgersArrayBundle) -> dict[str, object]:
         np.mean(prediction_tv) / (np.mean(target_tv) + EPS)
     )
 
-    sign_changes = np.diff(np.signbit(prediction), axis=-1)
-    oscillation_fraction = _safe_float(np.mean(sign_changes))
+    oscillation_fraction = _oscillation_fraction(prediction)
     nonphysical_oscillation = bool(oscillation_fraction > 0.35)
     blowup_like_behavior = bool(
         energy_decay_ratio > 4.0
@@ -114,6 +115,8 @@ def physics_metrics(bundle: BurgersArrayBundle) -> dict[str, object]:
         physics_issue = "mass_drift"
 
     return {
+        "mode": REAL_DIAGNOSTIC_MODE,
+        "source_mode": str(validated.metadata["source_mode"]),
         "mass_drift": mass_drift,
         "energy_decay_ratio": energy_decay_ratio,
         "total_variation_ratio": total_variation_ratio,
@@ -178,7 +181,16 @@ def _relative_band_error(
 
 
 def _total_variation(array: NDArray[np.floating]) -> NDArray[np.floating]:
+    if array.shape[-1] < 2:
+        return np.zeros(array.shape[:-1], dtype=np.float64)
     return np.sum(np.abs(np.diff(array, axis=-1)), axis=-1)
+
+
+def _oscillation_fraction(array: NDArray[np.floating]) -> float:
+    if array.shape[-1] < 3:
+        return 0.0
+    sign_changes = np.diff(np.signbit(array), axis=-1)
+    return _safe_float(np.mean(sign_changes))
 
 
 def _safe_float(value: object) -> float:
