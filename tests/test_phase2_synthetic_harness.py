@@ -1,29 +1,14 @@
 import json
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.record_timing import record_timing
-
-
-def _make_run_tree(tmp_path: Path, run_id: str = "run_001") -> Path:
-    run_root = tmp_path / run_id
-    for subdir in [
-        "config",
-        "metrics",
-        "plots",
-        "artifacts",
-        "submission",
-    ]:
-        (run_root / subdir).mkdir(parents=True, exist_ok=True)
-    return run_root
+from pde_agent.core.run_layout import create_run_tree
 
 
 def test_eval_rollout_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
-    run_root = _make_run_tree(tmp_path)
+    run_root = create_run_tree(tmp_path, "run_001")
 
     result = eval_rollout(run_id="run_001", run_root=str(run_root))
 
@@ -45,7 +30,7 @@ def test_eval_rollout_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
 
 
 def test_record_timing_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
-    run_root = _make_run_tree(tmp_path)
+    run_root = create_run_tree(tmp_path, "run_001")
 
     result = record_timing(run_id="run_001", run_root=str(run_root))
 
@@ -65,7 +50,7 @@ def test_record_timing_writes_phase2_synthetic_outputs(tmp_path: Path) -> None:
 
 
 def test_collect_artifacts_copies_phase2_synthetic_summary(tmp_path: Path) -> None:
-    run_root = _make_run_tree(tmp_path)
+    run_root = create_run_tree(tmp_path, "run_001")
 
     rollout_path = run_root / "metrics" / "rollout.json"
     timing_path = run_root / "metrics" / "timing.json"
