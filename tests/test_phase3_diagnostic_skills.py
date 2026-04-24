@@ -85,6 +85,7 @@ def test_analyze_spectrum_writes_real_npz_spectrum_metrics(tmp_path: Path) -> No
     )
     assert payload["mode"] == "real_array_diagnostic"
     assert payload["source_mode"] == "npz_fixture"
+    assert payload["run_id"] == "diagnostic_real_001"
     assert payload["spectral_drift_score"] > 0.0
     assert payload["dominant_spectral_issue"] in {
         "low_frequency_error",
@@ -128,6 +129,7 @@ def test_check_physics_writes_real_npz_physics_metrics(tmp_path: Path) -> None:
     assert result["metrics"]["mass_drift"] == pytest.approx(payload["mass_drift"])
     assert payload["mode"] == "real_array_diagnostic"
     assert payload["source_mode"] == "npz_fixture"
+    assert payload["run_id"] == "diagnostic_real_001"
     assert payload["energy_decay_ratio"] > 0.0
     assert payload["physics_issue"] in {
         "none",
@@ -222,6 +224,7 @@ def test_collect_artifacts_writes_hypothesis_selected_manifest_when_diagnostics_
     assert manifest["completeness"]["has_rollout"] is True
     assert manifest["completeness"]["has_spectrum"] is True
     assert manifest["completeness"]["has_physics_check"] is True
+    assert manifest["completeness"]["has_data_inspection"] is False
     assert manifest["completeness"]["has_error_interpretation"] is True
     assert manifest["completeness"]["has_selected_hypothesis"] is True
 

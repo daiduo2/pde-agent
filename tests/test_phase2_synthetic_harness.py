@@ -167,6 +167,7 @@ def test_collect_artifacts_copies_phase2_synthetic_summary(tmp_path: Path) -> No
     assert manifest["summary"]["inference_time_seconds"] == 61.2
     assert manifest["artifacts"]["prediction_hdf5_path"] == str(prediction_hdf5_path)
     assert manifest["artifacts"]["time_csv_path"] == str(time_csv_path)
+    assert manifest["completeness"]["has_data_inspection"] is False
     assert result["metrics"]["artifact_count"] == len(manifest["artifacts"])
 
 

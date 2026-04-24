@@ -14,6 +14,7 @@ def check_physics(run_id: str, run_root: str) -> dict[str, object]:
         data_config = load_data_config(resolved_config_path)
         if data_config.mode != "synthetic":
             payload = physics_metrics(load_array_bundle(data_config))
+            payload["run_id"] = run_id
             physics_path = root / "metrics" / "physics_check.json"
             write_json(physics_path, payload)
             return success_payload(

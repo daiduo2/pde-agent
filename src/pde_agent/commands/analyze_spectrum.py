@@ -14,6 +14,7 @@ def analyze_spectrum(run_id: str, run_root: str) -> dict[str, object]:
         data_config = load_data_config(resolved_config_path)
         if data_config.mode != "synthetic":
             payload = spectrum_metrics(load_array_bundle(data_config))
+            payload["run_id"] = run_id
             spectrum_path = root / "metrics" / "spectrum.json"
             write_json(spectrum_path, payload)
             return success_payload(

@@ -33,9 +33,8 @@ def collect_artifacts(
         "has_error_interpretation": diagnostic["has_error_interpretation"],
         "has_selected_hypothesis": diagnostic["has_selected_hypothesis"],
         "has_timing": True,
+        "has_data_inspection": diagnostic["has_data_inspection"],
     }
-    if "has_data_inspection" in diagnostic:
-        completeness["has_data_inspection"] = diagnostic["has_data_inspection"]
     phase = (
         "hypothesis_selected"
         if diagnostic["has_selected_hypothesis"]
@@ -127,11 +126,7 @@ def _load_diagnostic_payloads(root: Path) -> dict[str, object]:
         "summary": summary,
         "has_spectrum": spectrum_path.exists(),
         "has_physics_check": physics_path.exists(),
-        **(
-            {"has_data_inspection": True}
-            if data_inspection_path.exists()
-            else {}
-        ),
+        "has_data_inspection": data_inspection_path.exists(),
         "has_error_interpretation": interpretation_path.exists(),
         "has_selected_hypothesis": hypothesis_path.exists(),
     }
