@@ -18,6 +18,7 @@ allowed_actions:
   - call_check_physics
   - call_interpret_error
   - call_select_hypothesis
+  - call_record_timing
   - call_collect_artifacts
 
 forbidden_actions:
@@ -55,6 +56,8 @@ allowed_commands:
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent interpret-error --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
   - name: select_hypothesis
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent select-hypothesis --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
+  - name: record_timing
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent record-timing --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
   - name: collect_artifacts
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent collect-artifacts --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001 --config-hash diagnostic-smoke-001
 

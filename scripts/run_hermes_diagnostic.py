@@ -37,6 +37,12 @@ def main() -> int:
     else:
         session_id = args.session_id
 
+    session_path = args.session_path
+    if args.audit_only and session_path is None and session_id is None:
+        session_path = _latest_saved_session_path(repo_root, fixture_root)
+    if session_path is None and session_id:
+        session_path = _resolve_saved_session_path(repo_root, fixture_root, session_id)
+
     audit_cmd = [
         sys.executable,
         "scripts/audit_hermes_diagnostic.py",
@@ -45,8 +51,8 @@ def main() -> int:
     ]
     if session_id:
         audit_cmd.extend(["--session-id", session_id])
-    if args.session_path:
-        audit_cmd.extend(["--session-path", args.session_path])
+    if session_path:
+        audit_cmd.extend(["--session-path", session_path])
     if args.report_path:
         audit_cmd.extend(["--report-path", args.report_path])
 
@@ -75,6 +81,36 @@ def _fixture_arg(repo_root: Path, fixture_root: Path) -> str:
         return str(fixture_root.relative_to(repo_root))
     except ValueError:
         return str(fixture_root)
+
+
+def _resolve_saved_session_path(
+    repo_root: Path, fixture_root: Path, session_id: str
+) -> str | None:
+    candidates = [
+        fixture_root / "hermes_home" / "sessions" / f"session_{session_id}.json",
+        repo_root
+        / "integration_tests"
+        / "hermes_protocol_smoke"
+        / "hermes_home"
+        / "sessions"
+        / f"session_{session_id}.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _latest_saved_session_path(repo_root: Path, fixture_root: Path) -> str | None:
+    sessions: list[Path] = []
+    for sessions_dir in (
+        fixture_root / "hermes_home" / "sessions",
+        repo_root / "integration_tests" / "hermes_protocol_smoke" / "hermes_home" / "sessions",
+    ):
+        sessions.extend(sessions_dir.glob("session_*.json"))
+    if not sessions:
+        return None
+    return str(max(sessions, key=lambda path: path.stat().st_mtime))
 
 
 def _run_hermes(

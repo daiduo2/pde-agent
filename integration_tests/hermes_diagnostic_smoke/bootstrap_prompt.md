@@ -7,6 +7,8 @@ Rules:
 - Use `run_state.yaml` as the source of truth.
 - Execute only exact command strings listed under `allowed_commands`.
 - Continue past intermediate rollout results until `HYPOTHESIS_SELECTED`.
+- After `select-hypothesis`, execute `record-timing`, then `collect-artifacts`.
+- Do not manually read generated run artifacts with shell commands such as `cat`.
 - Do not patch source code.
 - Do not run training.
 - Do not inspect help output.

@@ -199,6 +199,7 @@ analyze-spectrum
 check-physics
 interpret-error
 select-hypothesis
+record-timing
 collect-artifacts
 ```
 
@@ -262,6 +263,7 @@ The prompt should tell Hermes:
 - execute only exact command strings from `allowed_commands`,
 - do not stop at intermediate `RESULTS_COLLECTED` hints from rollout commands,
 - continue until `HYPOTHESIS_SELECTED`,
+- after `select-hypothesis`, execute `record-timing` and `collect-artifacts` instead of manually reading generated artifacts,
 - summarize the diagnosis and selected hypothesis at the end,
 - do not patch code, run training, inspect help, or probe command surfaces.
 

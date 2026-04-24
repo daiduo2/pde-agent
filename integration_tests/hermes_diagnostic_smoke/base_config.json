@@ -11,6 +11,7 @@
     "check-physics",
     "interpret-error",
     "select-hypothesis",
+    "record-timing",
     "collect-artifacts"
   ]
 }

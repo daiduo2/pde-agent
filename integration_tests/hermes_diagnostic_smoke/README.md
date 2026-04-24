@@ -9,7 +9,8 @@ This fixture verifies that Hermes can execute the synthetic PDE diagnostic chain
 5. check-physics
 6. interpret-error
 7. select-hypothesis
-8. collect-artifacts
+8. record-timing
+9. collect-artifacts
 
 The fixture is deterministic and does not use real PDEBench data, checkpoints,
 training, or code patching.

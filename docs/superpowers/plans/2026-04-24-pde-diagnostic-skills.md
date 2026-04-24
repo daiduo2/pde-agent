@@ -1300,6 +1300,7 @@ Create `integration_tests/hermes_diagnostic_smoke/base_config.json`:
     "check-physics",
     "interpret-error",
     "select-hypothesis",
+    "record-timing",
     "collect-artifacts"
   ]
 }
@@ -1343,6 +1344,7 @@ allowed_actions:
   - call_check_physics
   - call_interpret_error
   - call_select_hypothesis
+  - call_record_timing
   - call_collect_artifacts
 
 forbidden_actions:
@@ -1380,6 +1382,8 @@ allowed_commands:
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent interpret-error --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
   - name: select_hypothesis
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent select-hypothesis --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
+  - name: record_timing
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent record-timing --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001
   - name: collect_artifacts
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent collect-artifacts --run-id diagnostic_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001 --config-hash diagnostic-smoke-001
 
@@ -1401,6 +1405,8 @@ Rules:
 - Use `run_state.yaml` as the source of truth.
 - Execute only exact command strings listed under `allowed_commands`.
 - Continue past intermediate rollout results until `HYPOTHESIS_SELECTED`.
+- After `select-hypothesis`, execute `record-timing`, then `collect-artifacts`.
+- Do not manually read generated run artifacts with shell commands such as `cat`.
 - Do not patch source code.
 - Do not run training.
 - Do not inspect help output.
@@ -1429,6 +1435,9 @@ Hard rules:
 - Do not patch code.
 - Do not run training.
 - Continue until the allowed success transition HYPOTHESIS_SELECTED is reached.
+- After select-hypothesis, do not inspect generated artifact files manually.
+- Execute record-timing and collect-artifacts using their exact allowed command strings.
+- Do not use cat, ls, find, grep, sed, head, tail, python, or any other shell command unless it is exactly listed under allowed_commands.
 
 At the end, briefly summarize:
 - dominant failure mode
@@ -1452,7 +1461,8 @@ This fixture verifies that Hermes can execute the synthetic PDE diagnostic chain
 5. check-physics
 6. interpret-error
 7. select-hypothesis
-8. collect-artifacts
+8. record-timing
+9. collect-artifacts
 
 The fixture is deterministic and does not use real PDEBench data, checkpoints, training, or code patching.
 

@@ -20,6 +20,7 @@ ALLOWED_COMMANDS = [
     "/repo/.venv/bin/pde-agent check-physics --run-id diagnostic_smoke_001 --run-root /repo/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001",
     "/repo/.venv/bin/pde-agent interpret-error --run-id diagnostic_smoke_001 --run-root /repo/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001",
     "/repo/.venv/bin/pde-agent select-hypothesis --run-id diagnostic_smoke_001 --run-root /repo/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001",
+    "/repo/.venv/bin/pde-agent record-timing --run-id diagnostic_smoke_001 --run-root /repo/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001",
     "/repo/.venv/bin/pde-agent collect-artifacts --run-id diagnostic_smoke_001 --run-root /repo/integration_tests/hermes_diagnostic_smoke/runs/diagnostic_smoke_001 --config-hash diagnostic-smoke-001",
 ]
 
@@ -72,6 +73,7 @@ def _session(
         "PHYSICS_CHECKED",
         "ERROR_INTERPRETED",
         "HYPOTHESIS_SELECTED",
+        "RESULTS_COLLECTED",
         final_hint,
     ]
     for index, command in enumerate(command_sequence):
