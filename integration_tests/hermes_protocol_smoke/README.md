@@ -61,3 +61,19 @@ Review its behavior through:
 - `hermes_home/logs/agent.log`
 - `hermes_home/logs/errors.log`
 - `hermes_home/sessions/`
+
+## Audit saved Hermes session
+
+After a Hermes run, audit the latest saved session:
+
+```bash
+uv run python scripts/audit_hermes_smoke.py
+```
+
+Audit a specific session:
+
+```bash
+uv run python scripts/audit_hermes_smoke.py --session-id 20260424_121355_f1cb57
+```
+
+The audit writes a JSON report under `reports/` and exits non-zero if protocol compliance fails.

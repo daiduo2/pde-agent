@@ -112,9 +112,11 @@ def _terminal_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if message.get("role") != "tool":
             continue
         try:
-            results.append(json.loads(message.get("content") or "{}"))
+            result = json.loads(message.get("content") or "{}")
         except json.JSONDecodeError:
-            results.append({"parse_error": message.get("content")})
+            result = {"parse_error": message.get("content")}
+        if "exit_code" in result or "output" in result or "parse_error" in result:
+            results.append(result)
     return results
 
 

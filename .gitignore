@@ -10,3 +10,6 @@ integration_tests/hermes_protocol_smoke/hermes_home/*
 
 integration_tests/hermes_protocol_smoke/runs/*
 !integration_tests/hermes_protocol_smoke/runs/.gitkeep
+
+integration_tests/hermes_protocol_smoke/reports/*
+!integration_tests/hermes_protocol_smoke/reports/.gitkeep
