@@ -24,4 +24,3 @@ At the end, briefly summarize:
 - data source mode
 - selected hypothesis
 - why no forbidden action was needed
-
