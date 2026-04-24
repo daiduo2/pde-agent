@@ -40,7 +40,7 @@ required_artifacts: []
 
 allowed_commands:
   - name: init_run
-    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id hermes_protocol_smoke_003 --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_003
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id hermes_protocol_smoke_003 --runs-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs
   - name: resolve_config
     command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id hermes_protocol_smoke_003 --base-config-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/base_config.json --override-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/override.json --task-spec-file /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/hermes_protocol_smoke/runs/hermes_protocol_smoke_003
   - name: eval_rollout

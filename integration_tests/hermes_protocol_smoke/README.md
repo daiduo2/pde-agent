@@ -27,12 +27,13 @@ Current scope:
 Forbidden in this round:
 - code patching
 - training
-- rollout evaluation
 - spectrum analysis
 - physics checks
 - submission building
 - searching outside the current directory
 - command help probing
+
+Rollout evaluation, timing, and artifact collection are allowed in this round, but real training remains forbidden.
 
 ## Files
 
