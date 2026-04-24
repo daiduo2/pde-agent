@@ -22,31 +22,56 @@ class DataInspectionError(RuntimeError):
 def inspect_data_source(config: DataConfig) -> dict[str, object]:
     _validate_positive_config(config)
     if config.mode == "synthetic":
-        return {
-            "mode": "synthetic",
-            "problem_id": config.problem_id,
-            "contract_shape": {
+        return _inspection_result(
+            source_mode="synthetic",
+            source_path=None,
+            dataset_key=None,
+            available_keys=[],
+            raw_shape=None,
+            raw_dtype=None,
+            reduced_shape=None,
+            contract_shape={
                 "context": (None, config.context_steps, None),
+                "prediction": (None, config.forecast_steps, None),
                 "target": (None, config.forecast_steps, None),
             },
-        }
+            sample_count=None,
+            context_time=config.context_steps,
+            forecast_time=config.forecast_steps,
+            space_points=None,
+            warnings=["synthetic mode does not inspect external array data"],
+        )
     if config.mode == "npz_fixture":
         source_path = _require_source_path(config)
         _require_existing_path(source_path)
         with np.load(source_path, allow_pickle=False) as archive:
             missing = _missing_keys(archive.files, ["context", "prediction", "target"])
             if missing:
-                raise DataInspectionError(f"NPZ fixture missing keys: {', '.join(missing)}")
-            return {
-                "mode": "npz_fixture",
-                "problem_id": config.problem_id,
-                "keys": tuple(archive.files),
-                "contract_shape": {
-                    "context": tuple(archive["context"].shape),
-                    "prediction": tuple(archive["prediction"].shape),
-                    "target": tuple(archive["target"].shape),
+                raise DataInspectionError(
+                    f"NPZ fixture missing keys: {', '.join(missing)}"
+                )
+            context_shape = tuple(archive["context"].shape)
+            prediction_shape = tuple(archive["prediction"].shape)
+            target_shape = tuple(archive["target"].shape)
+            return _inspection_result(
+                source_mode="npz_fixture",
+                source_path=str(source_path),
+                dataset_key=None,
+                available_keys=tuple(archive.files),
+                raw_shape=None,
+                raw_dtype=str(archive["target"].dtype),
+                reduced_shape=None,
+                contract_shape={
+                    "context": context_shape,
+                    "prediction": prediction_shape,
+                    "target": target_shape,
                 },
-            }
+                sample_count=target_shape[0],
+                context_time=context_shape[1],
+                forecast_time=target_shape[1],
+                space_points=target_shape[2],
+                warnings=[],
+            )
     if config.mode == "pdebench_hdf5":
         return _inspect_hdf5(config)
     raise DataInspectionError(f"unsupported data mode: {config.mode}")
@@ -92,11 +117,17 @@ def _load_hdf5_bundle(config: DataConfig) -> BurgersArrayBundle:
     dataset_key = str(info["dataset_key"])
     with h5py.File(source_path, "r") as handle:
         dataset = handle[dataset_key]
-        data = np.asarray(dataset)
+        sample_slice = (
+            slice(0, config.sample_limit) if config.sample_limit else slice(None)
+        )
+        reduced = np.asarray(
+            dataset[
+                sample_slice,
+                :: config.time_reduction,
+                :: config.space_reduction,
+            ]
+        )
         hdf5_metadata = _hdf5_metadata(handle.attrs, dataset.attrs)
-    reduced = data[:, :: config.time_reduction, :: config.space_reduction]
-    if config.sample_limit is not None:
-        reduced = reduced[: config.sample_limit]
     required_time = config.context_steps + config.forecast_steps
     if reduced.shape[1] < required_time:
         raise DataInspectionError(
@@ -168,18 +199,23 @@ def _inspect_hdf5(config: DataConfig) -> dict[str, object]:
         raise DataInspectionError(
             "reduced HDF5 time dimension is shorter than context_steps + forecast_steps"
         )
-    return {
-        "mode": "pdebench_hdf5",
-        "problem_id": config.problem_id,
-        "dataset_keys": tuple(dataset_keys),
-        "dataset_key": dataset_key,
-        "shape": shape,
-        "dtype": dtype,
-        "reduced_shape": reduced_shape,
-        "contract_shape": {
+    return _inspection_result(
+        source_mode="pdebench_hdf5",
+        source_path=str(source_path),
+        dataset_key=dataset_key,
+        available_keys=tuple(dataset_keys),
+        raw_shape=shape,
+        raw_dtype=dtype,
+        reduced_shape=reduced_shape,
+        contract_shape={
             "context": (
                 reduced_shape[0],
                 config.context_steps,
+                reduced_shape[2],
+            ),
+            "prediction": (
+                reduced_shape[0],
+                config.forecast_steps,
                 reduced_shape[2],
             ),
             "target": (
@@ -188,6 +224,45 @@ def _inspect_hdf5(config: DataConfig) -> dict[str, object]:
                 reduced_shape[2],
             ),
         },
+        sample_count=reduced_shape[0],
+        context_time=config.context_steps,
+        forecast_time=config.forecast_steps,
+        space_points=reduced_shape[2],
+        warnings=[],
+    )
+
+
+def _inspection_result(
+    *,
+    source_mode: str,
+    source_path: str | None,
+    dataset_key: str | None,
+    available_keys: list[str] | tuple[str, ...],
+    raw_shape: tuple[int, ...] | None,
+    raw_dtype: str | None,
+    reduced_shape: tuple[int, ...] | None,
+    contract_shape: dict[str, tuple[int | None, ...]],
+    sample_count: int | None,
+    context_time: int,
+    forecast_time: int,
+    space_points: int | None,
+    warnings: list[str],
+) -> dict[str, object]:
+    return {
+        "source_mode": source_mode,
+        "source_path": source_path,
+        "dataset_key": dataset_key,
+        "available_keys": available_keys,
+        "raw_shape": raw_shape,
+        "raw_dtype": raw_dtype,
+        "reduced_shape": reduced_shape,
+        "contract_shape": contract_shape,
+        "sample_count": sample_count,
+        "context_time": context_time,
+        "forecast_time": forecast_time,
+        "space_points": space_points,
+        "is_compatible": True,
+        "warnings": warnings,
     }
 
 
