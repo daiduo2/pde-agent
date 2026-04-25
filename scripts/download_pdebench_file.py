@@ -101,7 +101,7 @@ def preflight_file(
 
 
 def _size_gb_to_bytes(size_gb: float) -> int:
-    return int(size_gb * 1024 * 1024 * 1024)
+    return int(size_gb * 1000**3)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -126,7 +126,11 @@ def main(argv: list[str] | None = None) -> int:
 
     min_size_bytes = _size_gb_to_bytes(args.expected_size_gb)
     if not args.preflight_only:
-        download_file(args.url, output, force=args.force)
+        try:
+            download_file(args.url, output, force=args.force)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     result = preflight_file(
         output,

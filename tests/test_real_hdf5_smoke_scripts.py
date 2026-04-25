@@ -114,6 +114,24 @@ def test_preflight_detects_md5_mismatch(tmp_path: Path) -> None:
     assert result["size_ok"] is True
 
 
+def test_expected_size_gb_uses_decimal_bytes() -> None:
+    module = _download_module()
+
+    assert module._size_gb_to_bytes(7.7) == 7_700_000_000
+
+
+def test_main_returns_nonzero_for_missing_download_url(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _download_module()
+
+    status = module.main([])
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "No download URL configured" in captured.err
+
+
 def test_main_returns_nonzero_for_md5_mismatch(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -337,12 +355,47 @@ def test_real_hdf5_inspect_runtime_command_chain(tmp_path: Path) -> None:
         "resolve_config",
         "inspect_data",
     ]
-    assert len(commands) == 3
+    fixture_root = tmp_repo / "integration_tests" / "real_hdf5_smoke"
+    run_root = fixture_root / "runs" / "real_hdf5_smoke_001"
+    command_prefix = tmp_repo / ".venv" / "bin" / "pde-agent"
+    expected_argvs = [
+        [
+            str(command_prefix),
+            "init-run",
+            "--run-id",
+            "real_hdf5_smoke_001",
+            "--runs-root",
+            str(fixture_root / "runs"),
+        ],
+        [
+            str(command_prefix),
+            "resolve-config",
+            "--run-id",
+            "real_hdf5_smoke_001",
+            "--base-config-file",
+            str(outputs["base_config_runtime"]),
+            "--override-file",
+            str(fixture_root / "override.json"),
+            "--task-spec-file",
+            str(fixture_root / "task_spec.json"),
+            "--run-root",
+            str(run_root),
+        ],
+        [
+            str(command_prefix),
+            "inspect-data",
+            "--run-id",
+            "real_hdf5_smoke_001",
+            "--run-root",
+            str(run_root),
+        ],
+    ]
+    assert [shlex.split(command) for _name, command in commands] == expected_argvs
 
     last = ""
-    for _name, command in commands:
+    for argv in expected_argvs:
         result = subprocess.run(
-            shlex.split(command),
+            argv,
             shell=False,
             text=True,
             capture_output=True,
