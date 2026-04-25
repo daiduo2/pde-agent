@@ -135,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         inspect_hdf5=args.inspect_hdf5,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
+    if result.get("size_ok") is False or result.get("md5_ok") is False:
+        print("Preflight failed: file did not meet size or MD5 requirements.", file=sys.stderr)
+        return 1
     return 0
 
 

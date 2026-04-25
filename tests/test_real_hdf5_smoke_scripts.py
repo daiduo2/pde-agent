@@ -61,6 +61,54 @@ def test_preflight_detects_md5_mismatch(tmp_path: Path) -> None:
     assert result["size_ok"] is True
 
 
+def test_main_returns_nonzero_for_md5_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _download_module()
+    output = tmp_path / "file.hdf5"
+    output.write_bytes(b"wrong")
+
+    status = module.main(
+        [
+            "--preflight-only",
+            "--output",
+            str(output),
+            "--md5",
+            "not-the-real-md5",
+            "--expected-size-gb",
+            "0",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "Preflight failed" in captured.err
+
+
+def test_main_returns_nonzero_for_size_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _download_module()
+    output = tmp_path / "file.hdf5"
+    output.write_bytes(b"tiny")
+
+    status = module.main(
+        [
+            "--preflight-only",
+            "--output",
+            str(output),
+            "--md5",
+            "",
+            "--expected-size-gb",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "Preflight failed" in captured.err
+
+
 def test_preflight_reports_tiny_hdf5_keys(tmp_path: Path) -> None:
     h5py = pytest.importorskip("h5py")
     module = _download_module()
