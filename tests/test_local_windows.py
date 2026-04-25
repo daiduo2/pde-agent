@@ -34,11 +34,18 @@ def test_build_local_windows_slices_reduced_hdf5(tmp_path: Path) -> None:
 
     reduced = raw[1:3, ::2, ::2]
     with np.load(output, allow_pickle=False) as archive:
+        assert {
+            "context",
+            "target",
+            "full_reference",
+            "metadata_json",
+        }.issubset(archive.files)
         assert np.array_equal(archive["context"], reduced[:, :2, :].astype(np.float32))
         assert np.array_equal(archive["target"], reduced[:, 2:5, :].astype(np.float32))
         assert np.array_equal(
             archive["full_reference"], reduced[:, :5, :].astype(np.float32)
         )
+        assert archive["metadata_json"].shape == ()
         metadata = json.loads(str(archive["metadata_json"]))
     assert metadata["source_path"] == str(source)
     assert metadata["dataset_key"] == "tensor"
