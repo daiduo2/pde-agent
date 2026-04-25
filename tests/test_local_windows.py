@@ -81,6 +81,25 @@ def test_build_local_windows_refuses_overwrite_without_force(tmp_path: Path) -> 
         )
 
 
+def test_build_local_windows_rejects_sample_limit_overrun(tmp_path: Path) -> None:
+    source = tmp_path / "burgers.hdf5"
+    _write_hdf5(source, np.ones((2, 8, 4), dtype=np.float32))
+
+    with pytest.raises(LocalWindowError, match="exceeds sample count"):
+        build_local_windows(
+            source_path=source,
+            output_path=tmp_path / "windows.npz",
+            dataset_key="tensor",
+            start_index=1,
+            sample_limit=2,
+            context_steps=2,
+            forecast_steps=2,
+            time_reduction=1,
+            space_reduction=1,
+            force=False,
+        )
+
+
 def test_build_local_windows_rejects_short_reduced_time(tmp_path: Path) -> None:
     source = tmp_path / "burgers.hdf5"
     _write_hdf5(source, np.ones((1, 9, 4), dtype=np.float32))

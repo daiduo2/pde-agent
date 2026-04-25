@@ -183,7 +183,11 @@ def _sample_stop_index(
     if start_index >= sample_count:
         raise LocalWindowError("start_index is outside sample count")
     stop_index = sample_count if sample_limit is None else start_index + sample_limit
-    stop_index = min(stop_index, sample_count)
+    if stop_index > sample_count:
+        raise LocalWindowError(
+            f"requested sample range [{start_index}, {stop_index}) "
+            f"exceeds sample count {sample_count}"
+        )
     if stop_index <= start_index:
         raise LocalWindowError("sample slice is empty")
     return stop_index
