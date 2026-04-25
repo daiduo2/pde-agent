@@ -1,0 +1,10 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "run read-only real HDF5 smoke diagnostics",
+  "forbidden": [
+    "training",
+    "code_patch",
+    "submission_build",
+    "implicit_download"
+  ]
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,14 @@ def _download_module():
     return _load_module(
         "download_pdebench_file",
         repo_root / "scripts" / "download_pdebench_file.py",
+    )
+
+
+def _prepare_module():
+    repo_root = Path(__file__).resolve().parents[1]
+    return _load_module(
+        "prepare_real_hdf5_smoke",
+        repo_root / "scripts" / "prepare_real_hdf5_smoke.py",
     )
 
 
@@ -150,3 +159,112 @@ def test_preflight_reports_tiny_hdf5_keys(tmp_path: Path) -> None:
     assert result["size_ok"] is True
     assert result["hdf5"]["datasets"][0]["path"] == "tensor"
     assert result["hdf5"]["datasets"][0]["shape"] == [1, 4, 8]
+
+
+def test_prepare_real_hdf5_smoke_generates_inspect_runtime_files(
+    tmp_path: Path,
+) -> None:
+    h5py = pytest.importorskip("h5py")
+    module = _prepare_module()
+    repo_root = tmp_path / "repo"
+    fixture_root = repo_root / "integration_tests" / "real_hdf5_smoke"
+    fixture_root.mkdir(parents=True)
+    (fixture_root / "run_state.inspect.template.yaml").write_text(
+        "\n".join(
+            [
+                "run_id: {{RUN_ID}}",
+                "repo_root: {{REPO_ROOT}}",
+                "fixture_root: {{FIXTURE_ROOT}}",
+                "run_root: {{RUN_ROOT}}",
+                "config_hash: {{CONFIG_HASH}}",
+                "config: {{BASE_CONFIG_RUNTIME}}",
+                "commands:",
+                "  - {{COMMAND_PREFIX}} init-run",
+                "  - {{COMMAND_PREFIX}} resolve-config",
+                "  - {{COMMAND_PREFIX}} inspect-data",
+                "success_transition: DATA_INSPECTED",
+            ]
+        )
+    )
+    hdf5_path = repo_root / "tiny.hdf5"
+    with h5py.File(hdf5_path, "w") as handle:
+        handle.create_dataset("tensor", data=np.zeros((1, 4, 8), dtype=np.float32))
+
+    outputs = module.prepare_runtime(
+        repo_root=repo_root,
+        hdf5_path=hdf5_path,
+        dataset_key="tensor",
+        sample_limit=1,
+        mode="inspect",
+    )
+
+    config = json.loads(outputs["base_config_runtime"].read_text())
+    run_state = outputs["run_state"].read_text()
+    assert config["data"]["mode"] == "pdebench_hdf5"
+    assert config["data"]["source"] == str(hdf5_path)
+    assert config["data"]["source_path"] == str(hdf5_path)
+    assert config["data"]["dataset_key"] == "tensor"
+    assert "init-run" in run_state
+    assert "resolve-config" in run_state
+    assert "inspect-data" in run_state
+    assert ".venv/bin/pde-agent" in run_state
+    assert "{{" not in run_state
+
+
+def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
+    tmp_path: Path,
+) -> None:
+    h5py = pytest.importorskip("h5py")
+    module = _prepare_module()
+    repo_root = tmp_path / "repo"
+    fixture_root = repo_root / "integration_tests" / "real_hdf5_smoke"
+    fixture_root.mkdir(parents=True)
+    command_names = [
+        "init-run",
+        "resolve-config",
+        "inspect-data",
+        "eval-rollout",
+        "analyze-spectrum",
+        "check-physics",
+        "interpret-error",
+        "select-hypothesis",
+        "record-timing",
+        "collect-artifacts",
+    ]
+    (fixture_root / "run_state.full.template.yaml").write_text(
+        "\n".join(
+            [
+                "run_id: {{RUN_ID}}",
+                "repo_root: {{REPO_ROOT}}",
+                "fixture_root: {{FIXTURE_ROOT}}",
+                "run_root: {{RUN_ROOT}}",
+                "config_hash: {{CONFIG_HASH}}",
+                "config: {{BASE_CONFIG_RUNTIME}}",
+                "commands:",
+                *[f"  - {{{{COMMAND_PREFIX}}}} {name}" for name in command_names],
+                "success_transition: HYPOTHESIS_SELECTED",
+            ]
+        )
+    )
+    hdf5_path = repo_root / "tiny.hdf5"
+    with h5py.File(hdf5_path, "w") as handle:
+        handle.create_dataset("tensor", data=np.zeros((1, 4, 8), dtype=np.float32))
+
+    outputs = module.prepare_runtime(
+        repo_root=repo_root,
+        hdf5_path=hdf5_path,
+        dataset_key="tensor",
+        sample_limit=1,
+        mode="full",
+    )
+
+    config = json.loads(outputs["base_config_runtime"].read_text())
+    run_state = outputs["run_state"].read_text()
+    assert config["data"]["mode"] == "pdebench_hdf5"
+    assert config["data"]["source"] == str(hdf5_path)
+    assert config["data"]["source_path"] == str(hdf5_path)
+    assert config["data"]["dataset_key"] == "tensor"
+    for command_name in command_names:
+        assert command_name in run_state
+    assert ".venv/bin/pde-agent" in run_state
+    assert "{{" not in run_state

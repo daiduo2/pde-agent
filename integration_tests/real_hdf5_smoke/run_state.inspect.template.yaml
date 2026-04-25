@@ -1,0 +1,48 @@
+run_id: {{RUN_ID}}
+run_root: {{RUN_ROOT}}
+working_directory: {{FIXTURE_ROOT}}
+command_prefix: {{COMMAND_PREFIX}}
+
+current_state: TASK_PARSED
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - read_base_config_runtime
+  - read_override
+  - call_init_run
+  - call_resolve_config
+  - call_inspect_data
+
+forbidden_actions:
+  - patch_code
+  - run_training
+  - call_build_submission
+  - implicit_download
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+
+required_reads:
+  - {{FIXTURE_ROOT}}/run_state.yaml
+  - {{FIXTURE_ROOT}}/bootstrap_prompt.md
+  - {{FIXTURE_ROOT}}/task_spec.json
+  - {{BASE_CONFIG_RUNTIME}}
+  - {{FIXTURE_ROOT}}/override.json
+
+required_artifacts:
+  - {{RUN_ROOT}}/metrics/data_inspection.json
+
+allowed_commands:
+  - name: init_run
+    command: {{COMMAND_PREFIX}} init-run --run-id {{RUN_ID}} --runs-root {{FIXTURE_ROOT}}/runs
+  - name: resolve_config
+    command: {{COMMAND_PREFIX}} resolve-config --run-id {{RUN_ID}} --base-config-file {{BASE_CONFIG_RUNTIME}} --override-file {{FIXTURE_ROOT}}/override.json --task-spec-file {{FIXTURE_ROOT}}/task_spec.json --run-root {{RUN_ROOT}}
+  - name: inspect_data
+    command: {{COMMAND_PREFIX}} inspect-data --run-id {{RUN_ID}} --run-root {{RUN_ROOT}}
+
+success_transition:
+  on_complete: DATA_INSPECTED

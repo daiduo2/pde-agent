@@ -1,0 +1,5 @@
+{
+  "run": {
+    "phase": "real_hdf5_smoke"
+  }
+}
