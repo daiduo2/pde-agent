@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -264,6 +265,40 @@ def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
         assert command_name in run_state
     assert ".venv/bin/pde-agent" in run_state
     assert "{{" not in run_state
+
+
+def test_real_hdf5_inspect_runtime_command_chain(tmp_path: Path) -> None:
+    h5py = pytest.importorskip("h5py")
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _prepare_module()
+    hdf5_path = tmp_path / "tiny_real.hdf5"
+    with h5py.File(hdf5_path, "w") as handle:
+        handle.create_dataset(
+            "tensor",
+            data=np.zeros((1, 1000, 1024), dtype=np.float32),
+        )
+
+    outputs = module.prepare_runtime(
+        repo_root=repo_root,
+        hdf5_path=hdf5_path,
+        dataset_key="tensor",
+        sample_limit=1,
+        mode="inspect",
+    )
+
+    commands = []
+    for line in outputs["run_state"].read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("command: "):
+            commands.append(stripped.removeprefix("command: "))
+
+    last = ""
+    for command in commands:
+        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+        assert result.returncode == 0, result.stderr
+        last = result.stdout
+
+    assert '"state_hint": "DATA_INSPECTED"' in last
 
 
 def test_prepare_real_hdf5_smoke_rejects_bad_mode(tmp_path: Path) -> None:
