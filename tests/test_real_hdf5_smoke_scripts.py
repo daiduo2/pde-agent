@@ -109,6 +109,29 @@ def test_main_returns_nonzero_for_size_failure(
     assert "Preflight failed" in captured.err
 
 
+def test_main_returns_nonzero_for_missing_preflight_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _download_module()
+    output = tmp_path / "missing.hdf5"
+
+    status = module.main(
+        [
+            "--preflight-only",
+            "--output",
+            str(output),
+            "--md5",
+            "abc",
+            "--expected-size-gb",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "Preflight failed" in captured.err
+
+
 def test_preflight_reports_tiny_hdf5_keys(tmp_path: Path) -> None:
     h5py = pytest.importorskip("h5py")
     module = _download_module()
