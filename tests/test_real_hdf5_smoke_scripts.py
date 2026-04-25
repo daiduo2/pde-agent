@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
 import shlex
@@ -118,6 +119,112 @@ def test_expected_size_gb_uses_decimal_bytes() -> None:
     module = _download_module()
 
     assert module._size_gb_to_bytes(7.7) == 7_700_000_000
+
+
+def test_download_file_resumes_existing_part(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _download_module()
+    output = tmp_path / "file.hdf5"
+    part = output.with_suffix(output.suffix + ".part")
+    part.write_bytes(b"head")
+    seen_headers: dict[str, str] = {}
+
+    class FakeResponse(io.BytesIO):
+        headers = {"Content-Length": "4"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request):
+        seen_headers.update(dict(request.header_items()))
+        return FakeResponse(b"rest")
+
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+
+    module.download_file("https://example.test/file", output, force=False, resume=True)
+
+    assert seen_headers["Range"] == "bytes=4-"
+    assert output.read_bytes() == b"headrest"
+    assert not part.exists()
+
+
+def test_download_file_without_resume_restarts_part(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _download_module()
+    output = tmp_path / "file.hdf5"
+    part = output.with_suffix(output.suffix + ".part")
+    part.write_bytes(b"stale")
+    seen_headers: dict[str, str] = {}
+
+    class FakeResponse(io.BytesIO):
+        headers = {"Content-Length": "3"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request):
+        seen_headers.update(dict(request.header_items()))
+        return FakeResponse(b"new")
+
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+
+    module.download_file("https://example.test/file", output, force=False, resume=False)
+
+    assert "Range" not in seen_headers
+    assert output.read_bytes() == b"new"
+    assert not part.exists()
+
+
+def test_download_file_progress_reports_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _download_module()
+    output = tmp_path / "file.hdf5"
+
+    class FakeResponse(io.BytesIO):
+        headers = {"Content-Length": "4"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(module, "urlopen", lambda request: FakeResponse(b"data"))
+
+    module.download_file(
+        "https://example.test/file",
+        output,
+        force=False,
+        resume=False,
+        progress=True,
+    )
+
+    captured = capsys.readouterr()
+    assert output.read_bytes() == b"data"
+    assert "Downloaded" in captured.err
+    assert "100.0%" in captured.err
+
+
+def test_parse_args_accepts_resume_and_progress_flags() -> None:
+    module = _download_module()
+
+    args = module._parse_args(["--resume", "--progress"])
+
+    assert args.resume is True
+    assert args.progress is True
 
 
 def test_main_returns_nonzero_for_missing_download_url(

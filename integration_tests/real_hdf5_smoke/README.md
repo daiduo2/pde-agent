@@ -17,7 +17,7 @@ uv run --frozen python scripts/download_pdebench_file.py --preflight-only --insp
 To download with a verified stable direct URL:
 
 ```bash
-uv run --frozen python scripts/download_pdebench_file.py --url '<verified-direct-url>'
+uv run --frozen python scripts/download_pdebench_file.py --url '<verified-direct-url>' --resume --progress
 ```
 
 If no stable direct URL is configured, download the single Burgers file manually from DaRUS, place it at the default target path, then run the preflight command above.

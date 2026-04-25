@@ -4,10 +4,9 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 DEFAULT_URL = ""
 DEFAULT_OUTPUT = Path("data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5")
@@ -33,23 +32,73 @@ def ensure_can_write(output: Path, force: bool) -> None:
         raise FileExistsError(f"{output} already exists; pass --force to overwrite")
 
 
-def download_file(url: str, output: Path, force: bool) -> None:
+def _content_length(headers: object) -> int | None:
+    get = getattr(headers, "get", None)
+    if get is None:
+        return None
+    value = get("Content-Length")
+    if value is None:
+        return None
+    return int(value)
+
+
+def _report_progress(downloaded_bytes: int, total_bytes: int | None) -> None:
+    downloaded_mb = downloaded_bytes / 1_000_000
+    if total_bytes:
+        percent = downloaded_bytes / total_bytes * 100
+        total_mb = total_bytes / 1_000_000
+        print(
+            f"Downloaded {downloaded_mb:.1f} MB / {total_mb:.1f} MB ({percent:.1f}%)",
+            file=sys.stderr,
+        )
+    else:
+        print(f"Downloaded {downloaded_mb:.1f} MB", file=sys.stderr)
+
+
+def download_file(
+    url: str,
+    output: Path,
+    force: bool,
+    *,
+    resume: bool = False,
+    progress: bool = False,
+) -> None:
     if not url:
         raise ValueError("No download URL configured; pass --url explicitly")
 
     ensure_can_write(output, force=force)
     output.parent.mkdir(parents=True, exist_ok=True)
     part_path = output.with_suffix(output.suffix + ".part")
-    if part_path.exists():
+    resume_from = part_path.stat().st_size if resume and part_path.exists() else 0
+    if part_path.exists() and not resume:
         part_path.unlink()
 
-    try:
-        with urlopen(url) as response, part_path.open("wb") as handle:
-            shutil.copyfileobj(response, handle, length=CHUNK_SIZE)
-        os.replace(part_path, output)
-    finally:
-        if part_path.exists():
-            part_path.unlink()
+    request = Request(url)
+    if resume_from:
+        request.add_header("Range", f"bytes={resume_from}-")
+
+    with urlopen(request) as response:
+        status = getattr(response, "status", 206 if resume_from else 200)
+        append_to_part = bool(resume_from and status == 206)
+        mode = "ab" if append_to_part else "wb"
+        downloaded = resume_from if append_to_part else 0
+        content_length = _content_length(response.headers)
+        total = (
+            downloaded + content_length
+            if content_length is not None and append_to_part
+            else content_length
+        )
+        with part_path.open(mode) as handle:
+            while True:
+                chunk = response.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if progress:
+                    _report_progress(downloaded, total)
+
+    os.replace(part_path, output)
 
 
 def inspect_hdf5_metadata(path: Path) -> dict[str, object]:
@@ -113,6 +162,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--md5", default=DEFAULT_MD5)
     parser.add_argument("--expected-size-gb", type=float, default=DEFAULT_EXPECTED_SIZE_GB)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--progress", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--inspect-hdf5", action="store_true")
     return parser.parse_args(argv)
@@ -127,7 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     min_size_bytes = _size_gb_to_bytes(args.expected_size_gb)
     if not args.preflight_only:
         try:
-            download_file(args.url, output, force=args.force)
+            download_file(
+                args.url,
+                output,
+                force=args.force,
+                resume=args.resume,
+                progress=args.progress,
+            )
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 1
