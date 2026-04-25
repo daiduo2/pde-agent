@@ -4,9 +4,9 @@ Date: 2026-04-25
 
 ## Purpose
 
-Add a local-only smoke harness for real PDEBench/Burgers HDF5 files.
+Add a controlled local smoke harness for real PDEBench/Burgers HDF5 files, including an explicit single-file download/preflight path.
 
-This phase is the bridge between the Phase 4 array adapter and later real PDEBench experiments. It should prove that the harness can inspect a real HDF5 file from disk, identify the correct dataset, validate the reduced Burgers shape, and produce a machine-readable inspection artifact without training, downloading data, or committing large files.
+This phase is the bridge between the Phase 4 array adapter and later real PDEBench experiments. It should prove that the harness can download or accept one configured Burgers HDF5 file, verify its integrity, inspect it from disk, identify the correct dataset, validate the reduced Burgers shape, and produce a machine-readable inspection artifact without training or committing large files.
 
 The first success target is intentionally narrow:
 
@@ -30,7 +30,8 @@ collect-artifacts
 
 ## Non-Goals
 
-- Do not download PDEBench in this phase.
+- Do not download the whole PDEBench dataset.
+- Do not download data implicitly during tests, imports, or normal CLI command execution.
 - Do not commit `.hdf5`, `.h5`, `.npz`, checkpoint, or generated run artifacts.
 - Do not train, fine-tune, or load model checkpoints.
 - Do not build a final competition submission file.
@@ -48,16 +49,51 @@ Phase 4 added:
 - real-array diagnostic metrics,
 - portable generated smoke state for NPZ fixtures.
 
-The real HDF5 smoke should reuse those pieces rather than adding new metric logic. The main missing piece is a deterministic runtime-preparation script for a local real file.
+The real HDF5 smoke should reuse those pieces rather than adding new metric logic. The missing pieces are:
 
-The script should generate concrete runtime files for the user's checkout, while committed files stay portable.
+- a deterministic runtime-preparation script for a local real file,
+- a controlled single-file download/preflight script for the official Burgers file,
+- documentation that separates data acquisition from schema inspection.
+
+The scripts should generate concrete runtime files for the user's checkout, while committed files stay portable.
+
+## Official File Target
+
+Primary official file:
+
+```text
+1D_Burgers_Sols_Nu0.001.hdf5
+```
+
+Official dataset:
+
+```text
+PDEBench Datasets, DaRUS, doi:10.18419/DARUS-2986
+```
+
+Observed current metadata from DaRUS V8:
+
+```text
+path: 1D/Burgers/Train/1D_Burgers_Sols_Nu0.001.hdf5
+size: 7.7 GB
+md5: 44cb784d5a07aa2b1c864cabdcf625f9
+published: 2023-11-30
+```
+
+The DaRUS page also states the general HDF5 convention:
+
+```text
+[b,t,x1,...,xd,v]
+```
+
+For 1D Burgers this may expose a channel dimension, for example `[sample,time,space,variable]`. If the real file is rank 4 with a singleton variable/channel dimension, the adapter should not silently fail. It should either support an explicit safe squeeze or report a clear shape-contract failure that drives the next adapter update.
 
 ## Local Data Contract
 
 Default expected real file:
 
 ```text
-data/pdebench/burgers/1D_Burgers_Sols_Nu0.001_val.hdf5
+data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5
 ```
 
 The script should allow overriding the path:
@@ -66,7 +102,62 @@ The script should allow overriding the path:
 --hdf5-path <path>
 ```
 
-The script should not create or download this file. If it is absent, it should fail with a concise message explaining where to place the file or how to pass `--hdf5-path`.
+If this file is absent, the smoke preparation script should fail with a concise message explaining where to place the file, how to pass `--hdf5-path`, or how to run the controlled downloader.
+
+## Controlled Download And Preflight
+
+Add a separate opt-in script:
+
+```text
+scripts/download_pdebench_file.py
+```
+
+Responsibilities:
+
+- Download exactly one configured file, not the entire dataset.
+- Default target is the official Burgers file above.
+- Write to:
+
+```text
+data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5
+```
+
+- Refuse to overwrite an existing file unless `--force` is provided.
+- Support `--url`, `--output`, `--expected-md5`, and `--expected-size-gb` overrides.
+- Stream to a temporary `.part` file and atomically rename on success.
+- Compute MD5 after download.
+- Fail if the MD5 does not match the configured expected MD5.
+- Print a concise preflight report:
+  - output path,
+  - byte size,
+  - expected MD5,
+  - actual MD5,
+  - elapsed time.
+
+The downloader should be explicit and user-invoked. Tests must not hit the network.
+
+The implementation plan should verify the current DaRUS direct download API before hard-coding a URL. If DaRUS requires a file ID or API endpoint, the script should use that endpoint and document the source URL in the README. If the API cannot be made stable without manual browser interaction, the script should fall back to generating a clear manual-download instruction rather than pretending download automation is reliable.
+
+## Preflight Script
+
+Add or reuse a local preflight path after the file exists:
+
+```text
+scripts/preflight_pdebench_file.py
+```
+
+This can be a separate script or a subcommand path inside `download_pdebench_file.py`, but it must be invokable without downloading.
+
+Responsibilities:
+
+- Check file existence.
+- Compute size and MD5.
+- Compare against expected MD5 when provided.
+- Optionally run lightweight HDF5 metadata inspection if `h5py` is installed:
+  - list dataset keys,
+  - report raw shapes and dtypes without loading full arrays.
+
+The preflight should not run the PDE Agent command chain. It validates the file artifact; `inspect-data` validates the harness contract.
 
 ## Runtime Fixture Directory
 
@@ -231,10 +322,18 @@ Unit tests should cover the preparation script without requiring a real PDEBench
 - generated full `run_state.yaml` contains the full chain,
 - generated `base_config.runtime.json` points to the provided HDF5 path and uses `pdebench_hdf5`.
 
+Unit tests for download/preflight should not hit the network:
+
+- existing output file is not overwritten unless `--force` is set,
+- MD5 computation passes for a tiny local file,
+- MD5 mismatch fails with a clear message,
+- URL/download logic is isolated behind a function that can be tested with local `file://` or a fake stream,
+- preflight reports HDF5 dataset keys for a tiny generated HDF5 file when `h5py` is available.
+
 Integration-level manual validation should be local-only:
 
 ```text
-uv run --frozen python scripts/prepare_real_hdf5_smoke.py --hdf5-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001_val.hdf5 --sample-limit 1
+uv run --frozen python scripts/prepare_real_hdf5_smoke.py --hdf5-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 --sample-limit 1
 ```
 
 Then execute the commands listed in:
@@ -253,6 +352,7 @@ Add ignore rules for:
 integration_tests/real_hdf5_smoke/base_config.runtime.json
 integration_tests/real_hdf5_smoke/run_state.yaml
 integration_tests/real_hdf5_smoke/runs/
+data/pdebench/burgers/*.part
 ```
 
 The existing data ignore rules already cover real `.hdf5` files under `data/`.
@@ -262,6 +362,9 @@ The existing data ignore rules already cover real `.hdf5` files under `data/`.
 This phase is complete when:
 
 - the real HDF5 smoke fixture directory exists with portable templates,
+- the controlled downloader or manual-download helper exists and is documented,
+- downloaded files are written only under ignored `data/pdebench/burgers/`,
+- MD5 preflight exists and is test-covered without network access,
 - `scripts/prepare_real_hdf5_smoke.py` generates inspect and full runtime state,
 - tests validate the generated runtime files using tiny HDF5 fixtures,
 - no real data or generated runtime state is committed,
@@ -270,6 +373,8 @@ This phase is complete when:
 
 ## Residual Risks
 
-- Until the actual PDEBench file is placed locally, tests only prove behavior on tiny HDF5 fixtures.
+- DaRUS direct download behavior may change; the downloader should fail with clear manual instructions if automation is blocked.
+- The 7.7 GB file may take significant time and disk space; the script should make this explicit before download.
+- Until the actual PDEBench file is downloaded locally, tests only prove behavior on tiny HDF5 fixtures.
 - If the real PDEBench dataset uses a rank or axis order different from the current `[sample, time, space]` expectation, `inspect-data` should fail and the adapter contract must be updated deliberately.
 - Full mode remains plumbing validation until real prediction ingestion or baseline model inference is added.
