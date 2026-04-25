@@ -8,6 +8,7 @@ from pathlib import Path
 RUN_ID = "real_hdf5_smoke_001"
 CONFIG_HASH = "real-hdf5-smoke-001"
 DEFAULT_HDF5_PATH = Path("data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5")
+DEFAULT_FORECAST_STEPS = 190
 
 
 def fixture_root(repo_root: Path) -> Path:
@@ -19,6 +20,7 @@ def build_base_config(
     *,
     dataset_key: str | None,
     sample_limit: int,
+    forecast_steps: int = DEFAULT_FORECAST_STEPS,
 ) -> dict[str, object]:
     source = str(hdf5_path)
     return {
@@ -33,7 +35,7 @@ def build_base_config(
             "source_path": source,
             "dataset_key": dataset_key,
             "context_steps": 10,
-            "forecast_steps": 190,
+            "forecast_steps": forecast_steps,
             "time_reduction": 5,
             "space_reduction": 4,
             "sample_limit": sample_limit,
@@ -66,6 +68,7 @@ def prepare_runtime(
     hdf5_path: Path,
     dataset_key: str | None,
     sample_limit: int,
+    forecast_steps: int = DEFAULT_FORECAST_STEPS,
     mode: str,
 ) -> dict[str, Path]:
     if mode not in {"inspect", "full"}:
@@ -87,6 +90,7 @@ def prepare_runtime(
                 hdf5_path.resolve(),
                 dataset_key=dataset_key,
                 sample_limit=sample_limit,
+                forecast_steps=forecast_steps,
             ),
             indent=2,
         )
@@ -102,6 +106,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--hdf5-path", type=Path, default=DEFAULT_HDF5_PATH)
     parser.add_argument("--dataset-key")
     parser.add_argument("--sample-limit", type=int, default=1)
+    parser.add_argument("--forecast-steps", type=int, default=DEFAULT_FORECAST_STEPS)
     parser.add_argument("--mode", choices=["inspect", "full"], default="inspect")
     return parser.parse_args(argv)
 
@@ -119,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         hdf5_path=hdf5_path,
         dataset_key=args.dataset_key,
         sample_limit=args.sample_limit,
+        forecast_steps=args.forecast_steps,
         mode=args.mode,
     )
     print(f"generated {outputs['base_config_runtime']}")

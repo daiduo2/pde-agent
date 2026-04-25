@@ -371,11 +371,39 @@ def test_prepare_real_hdf5_smoke_generates_inspect_runtime_files(
     assert config["data"]["source"] == str(hdf5_path)
     assert config["data"]["source_path"] == str(hdf5_path)
     assert config["data"]["dataset_key"] == "tensor"
+    assert config["data"]["forecast_steps"] == 190
     assert "init-run" in run_state
     assert "resolve-config" in run_state
     assert "inspect-data" in run_state
     assert ".venv/bin/pde-agent" in run_state
     assert "{{" not in run_state
+
+
+def test_prepare_real_hdf5_smoke_accepts_custom_forecast_steps(
+    tmp_path: Path,
+) -> None:
+    module = _prepare_module()
+    repo_root = tmp_path / "repo"
+    fixture_root = repo_root / "integration_tests" / "real_hdf5_smoke"
+    fixture_root.mkdir(parents=True)
+    (fixture_root / "run_state.inspect.template.yaml").write_text(
+        "cmd: {{COMMAND_PREFIX}} inspect-data --run-root {{RUN_ROOT}}\n",
+        encoding="utf-8",
+    )
+    hdf5_path = repo_root / "tiny.hdf5"
+    hdf5_path.write_bytes(b"placeholder hdf5")
+
+    outputs = module.prepare_runtime(
+        repo_root=repo_root,
+        hdf5_path=hdf5_path,
+        dataset_key="tensor",
+        sample_limit=1,
+        forecast_steps=31,
+        mode="inspect",
+    )
+
+    config = json.loads(outputs["base_config_runtime"].read_text())
+    assert config["data"]["forecast_steps"] == 31
 
 
 def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(

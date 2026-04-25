@@ -28,6 +28,17 @@ Prepare inspect-mode runtime files:
 uv run --frozen python scripts/prepare_real_hdf5_smoke.py --sample-limit 1
 ```
 
+The official PDEBench training file has raw shape `[10000, 201, 1024]`.
+With `time_reduction=5`, it only supports 41 reduced time points. For that
+short-file smoke, use:
+
+```bash
+uv run --frozen python scripts/prepare_real_hdf5_smoke.py --dataset-key tensor --sample-limit 1 --forecast-steps 31
+```
+
+The default `--forecast-steps 190` is reserved for the competition long-time
+file with enough reduced time points.
+
 If the file is elsewhere:
 
 ```bash
