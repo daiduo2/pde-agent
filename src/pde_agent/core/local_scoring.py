@@ -35,7 +35,7 @@ def score_prediction_npz(
         result["score_path"] = str(score_file)
         score_file.parent.mkdir(parents=True, exist_ok=True)
         score_file.write_text(
-            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            json.dumps(result, allow_nan=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
 
@@ -50,25 +50,45 @@ def score_prediction_arrays(prediction: Any, target: Any) -> dict[str, Any]:
     _validate_arrays(pred, truth)
 
     error = pred - truth
-    squared_error = error**2
-    rmse = float(np.sqrt(np.mean(squared_error)))
-    target_rms = float(np.sqrt(np.mean(truth**2)))
-    nrmse = float(rmse / (target_rms + 1e-12))
+    _raise_if_non_finite(error, "derived error")
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        squared_error = error**2
+        _raise_if_non_finite(squared_error, "derived squared_error")
+        truth_squared = truth**2
+        _raise_if_non_finite(truth_squared, "derived target squared")
+        rmse = float(np.sqrt(np.mean(squared_error)))
+        target_rms = float(np.sqrt(np.mean(truth_squared)))
+        nrmse = float(rmse / (target_rms + 1e-12))
+        _raise_if_non_finite([rmse, target_rms, nrmse], "derived global metrics")
 
-    rel_by_time = np.sum(squared_error, axis=2) / (np.sum(truth**2, axis=2) + 1e-12)
-    rel_capped = np.minimum(rel_by_time, 5.0)
-    rel_mse = float(np.mean(rel_by_time))
-    rel_mse_capped = float(np.mean(rel_capped))
+        rel_by_time = np.sum(squared_error, axis=2) / (
+            np.sum(truth_squared, axis=2) + 1e-12
+        )
+        _raise_if_non_finite(rel_by_time, "derived relative MSE by time")
+        rel_capped = np.minimum(rel_by_time, 5.0)
+        rel_mse = float(np.mean(rel_by_time))
+        rel_mse_capped = float(np.mean(rel_capped))
+        _raise_if_non_finite([rel_mse, rel_mse_capped], "derived relative metrics")
 
-    early_slice, middle_slice, late_slice = _segment_slices(pred.shape[1])
-    early_rel = float(np.mean(rel_capped[:, early_slice]))
-    middle_rel = float(np.mean(rel_capped[:, middle_slice]))
-    late_rmse = float(np.sqrt(np.mean(squared_error[:, late_slice, :])))
+        early_slice, middle_slice, late_slice = _segment_slices(pred.shape[1])
+        early_rel = float(np.mean(rel_capped[:, early_slice]))
+        middle_rel = float(np.mean(rel_capped[:, middle_slice]))
+        late_rmse = float(np.sqrt(np.mean(squared_error[:, late_slice, :])))
+        _raise_if_non_finite(
+            [early_rel, middle_rel, late_rmse],
+            "derived segment metrics",
+        )
 
-    early_score = float(100.0 * np.exp(-20.0 * early_rel))
-    middle_score = float(100.0 * np.exp(-10.0 * middle_rel))
-    late_score = float(100.0 / (1.0 + 10.0 * late_rmse))
-    total_score = float(0.25 * early_score + 0.25 * middle_score + 0.5 * late_score)
+        early_score = float(100.0 * np.exp(-20.0 * early_rel))
+        middle_score = float(100.0 * np.exp(-10.0 * middle_rel))
+        late_score = float(100.0 / (1.0 + 10.0 * late_rmse))
+        total_score = float(
+            0.25 * early_score + 0.25 * middle_score + 0.5 * late_score
+        )
+        _raise_if_non_finite(
+            [early_score, middle_score, late_score, total_score],
+            "derived scores",
+        )
 
     return {
         "sample_count": int(pred.shape[0]),
@@ -142,6 +162,11 @@ def _validate_arrays(prediction: np.ndarray, target: np.ndarray) -> None:
         raise LocalScoreError("prediction contains non-finite values")
     if not np.all(np.isfinite(target)):
         raise LocalScoreError("target contains non-finite values")
+
+
+def _raise_if_non_finite(value: Any, label: str) -> None:
+    if not np.all(np.isfinite(value)):
+        raise LocalScoreError(f"{label} contains non-finite values")
 
 
 def _segment_slices(time_steps: int) -> tuple[slice, slice, slice]:

@@ -37,6 +37,35 @@ def test_score_prediction_arrays_noisy_prediction_lowers_score() -> None:
     assert result["competition_like_score_short"] < 100.0
 
 
+def test_score_prediction_arrays_31_step_input_returns_finite_json_metrics() -> None:
+    target = np.linspace(0.25, 2.0, num=2 * 31 * 5, dtype=np.float64).reshape(
+        2, 31, 5
+    )
+    prediction = target + 0.01
+
+    result = score_prediction_arrays(prediction, target)
+
+    assert _numeric_values_are_finite(result)
+    json.dumps(result, allow_nan=False)
+
+
+def test_score_prediction_arrays_rejects_non_finite_prediction() -> None:
+    target = np.ones((1, 8, 4), dtype=np.float32)
+    prediction = target.copy()
+    prediction[0, 0, 0] = np.nan
+
+    with pytest.raises(LocalScoreError, match="non-finite"):
+        score_prediction_arrays(prediction, target)
+
+
+def test_score_prediction_arrays_rejects_non_finite_derived_metrics() -> None:
+    target = np.ones((1, 8, 4), dtype=np.float64)
+    prediction = np.full((1, 8, 4), 1.0e200, dtype=np.float64)
+
+    with pytest.raises(LocalScoreError, match="non-finite"):
+        score_prediction_arrays(prediction, target)
+
+
 def test_score_prediction_arrays_rejects_shape_mismatch() -> None:
     with pytest.raises(LocalScoreError, match="shape mismatch"):
         score_prediction_arrays(
@@ -91,3 +120,13 @@ def test_score_prediction_npz_rejects_missing_prediction_key(tmp_path: Path) -> 
             target_path=target_path,
             output_path=None,
         )
+
+
+def _numeric_values_are_finite(value: object) -> bool:
+    if isinstance(value, dict):
+        return all(_numeric_values_are_finite(child) for child in value.values())
+    if isinstance(value, list | tuple):
+        return all(_numeric_values_are_finite(child) for child in value)
+    if isinstance(value, int | float):
+        return bool(np.isfinite(value))
+    return True
