@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -33,6 +35,47 @@ def _prepare_module():
         "prepare_real_hdf5_smoke",
         repo_root / "scripts" / "prepare_real_hdf5_smoke.py",
     )
+
+
+def _copy_real_hdf5_fixture(real_repo_root: Path, tmp_repo: Path) -> None:
+    real_fixture_root = real_repo_root / "integration_tests" / "real_hdf5_smoke"
+    tmp_fixture_root = tmp_repo / "integration_tests" / "real_hdf5_smoke"
+    tmp_fixture_root.mkdir(parents=True)
+    for name in [
+        "run_state.inspect.template.yaml",
+        "override.json",
+        "task_spec.json",
+        "bootstrap_prompt.md",
+    ]:
+        shutil.copy2(real_fixture_root / name, tmp_fixture_root / name)
+
+    real_venv = real_repo_root / ".venv"
+    if real_venv.exists():
+        (tmp_repo / ".venv").symlink_to(real_venv, target_is_directory=True)
+
+
+def _allowed_command_pairs(run_state: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    current_name: str | None = None
+    in_allowed_commands = False
+
+    for line in run_state.splitlines():
+        stripped = line.strip()
+        if stripped == "allowed_commands:":
+            in_allowed_commands = True
+            continue
+        if not in_allowed_commands:
+            continue
+        if line and not line.startswith("  "):
+            break
+        if stripped.startswith("- name: "):
+            current_name = stripped.removeprefix("- name: ")
+        elif stripped.startswith("command: "):
+            assert current_name is not None
+            pairs.append((current_name, stripped.removeprefix("command: ")))
+            current_name = None
+
+    return pairs
 
 
 def test_compute_md5_for_local_file(tmp_path: Path) -> None:
@@ -269,7 +312,9 @@ def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
 
 def test_real_hdf5_inspect_runtime_command_chain(tmp_path: Path) -> None:
     h5py = pytest.importorskip("h5py")
-    repo_root = Path(__file__).resolve().parents[1]
+    real_repo_root = Path(__file__).resolve().parents[1]
+    tmp_repo = tmp_path / "repo"
+    _copy_real_hdf5_fixture(real_repo_root, tmp_repo)
     module = _prepare_module()
     hdf5_path = tmp_path / "tiny_real.hdf5"
     with h5py.File(hdf5_path, "w") as handle:
@@ -279,22 +324,29 @@ def test_real_hdf5_inspect_runtime_command_chain(tmp_path: Path) -> None:
         )
 
     outputs = module.prepare_runtime(
-        repo_root=repo_root,
+        repo_root=tmp_repo,
         hdf5_path=hdf5_path,
         dataset_key="tensor",
         sample_limit=1,
         mode="inspect",
     )
 
-    commands = []
-    for line in outputs["run_state"].read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("command: "):
-            commands.append(stripped.removeprefix("command: "))
+    commands = _allowed_command_pairs(outputs["run_state"].read_text(encoding="utf-8"))
+    assert [name for name, _command in commands] == [
+        "init_run",
+        "resolve_config",
+        "inspect_data",
+    ]
+    assert len(commands) == 3
 
     last = ""
-    for command in commands:
-        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+    for _name, command in commands:
+        result = subprocess.run(
+            shlex.split(command),
+            shell=False,
+            text=True,
+            capture_output=True,
+        )
         assert result.returncode == 0, result.stderr
         last = result.stdout
 
