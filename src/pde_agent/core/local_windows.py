@@ -123,6 +123,8 @@ def _import_h5py() -> Any:
 def _validate_dataset_key(dataset_key: str) -> str:
     if not dataset_key:
         raise LocalWindowError("dataset_key must be non-empty")
+    if "/" in dataset_key:
+        raise LocalWindowError("dataset_key must name a root dataset")
     return dataset_key
 
 
@@ -135,18 +137,32 @@ def _validate_window_args(
     time_reduction: int,
     space_reduction: int,
 ) -> None:
-    if start_index < 0:
-        raise LocalWindowError("start_index must be >= 0")
-    if sample_limit is not None and sample_limit <= 0:
-        raise LocalWindowError("sample_limit must be > 0")
+    _validate_positive_int("start_index", start_index, allow_zero=True)
+    if sample_limit is not None:
+        _validate_positive_int("sample_limit", sample_limit)
     for name, value in (
         ("context_steps", context_steps),
         ("forecast_steps", forecast_steps),
         ("time_reduction", time_reduction),
         ("space_reduction", space_reduction),
     ):
-        if value <= 0:
-            raise LocalWindowError(f"{name} must be > 0")
+        _validate_positive_int(name, value)
+
+
+def _validate_positive_int(
+    name: str,
+    value: int,
+    *,
+    allow_zero: bool = False,
+) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise LocalWindowError(f"{name} must be an integer")
+    if allow_zero:
+        if value < 0:
+            raise LocalWindowError(f"{name} must be >= 0")
+        return
+    if value <= 0:
+        raise LocalWindowError(f"{name} must be > 0")
 
 
 def _validate_dataset(dataset_key: str, dtype: np.dtype[Any], shape: list[int]) -> None:

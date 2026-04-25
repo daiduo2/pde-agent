@@ -118,3 +118,46 @@ def test_build_local_windows_rejects_missing_dataset_key(tmp_path: Path) -> None
             space_reduction=1,
             force=False,
         )
+
+
+def test_build_local_windows_rejects_non_integer_window_args(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "burgers.hdf5"
+    _write_hdf5(source, np.ones((1, 8, 4), dtype=np.float32))
+
+    with pytest.raises(LocalWindowError, match="must be an integer"):
+        build_local_windows(
+            source_path=source,
+            output_path=tmp_path / "windows.npz",
+            dataset_key="tensor",
+            start_index=0.5,  # type: ignore[arg-type]
+            sample_limit=1,
+            context_steps=2,
+            forecast_steps=2,
+            time_reduction=1,
+            space_reduction=1,
+            force=False,
+        )
+
+
+def test_build_local_windows_rejects_nested_dataset_key(tmp_path: Path) -> None:
+    h5py = pytest.importorskip("h5py")
+    source = tmp_path / "burgers.hdf5"
+    with h5py.File(source, "w") as handle:
+        group = handle.create_group("group")
+        group.create_dataset("tensor", data=np.ones((1, 8, 4), dtype=np.float32))
+
+    with pytest.raises(LocalWindowError, match="root dataset"):
+        build_local_windows(
+            source_path=source,
+            output_path=tmp_path / "windows.npz",
+            dataset_key="group/tensor",
+            start_index=0,
+            sample_limit=1,
+            context_steps=2,
+            forecast_steps=2,
+            time_reduction=1,
+            space_reduction=1,
+            force=False,
+        )
