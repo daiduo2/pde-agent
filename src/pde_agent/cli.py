@@ -13,6 +13,7 @@ from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
+from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.train_baseline import train_baseline
 
@@ -81,6 +82,25 @@ def build_local_windows_cmd(
                 time_reduction=time_reduction,
                 space_reduction=space_reduction,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("score-local-rollout")
+def score_local_rollout_cmd(
+    prediction_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            score_local_rollout(
+                prediction_path=prediction_path,
+                target_path=target_path,
+                output_path=output_path,
             )
         )
     )

@@ -3,7 +3,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from typer.testing import CliRunner
 
+from pde_agent.cli import app
 from pde_agent.core.local_scoring import (
     LocalScoreError,
     score_prediction_arrays,
@@ -120,6 +122,39 @@ def test_score_prediction_npz_rejects_missing_prediction_key(tmp_path: Path) -> 
             target_path=target_path,
             output_path=None,
         )
+
+
+def test_score_local_rollout_cli_writes_json_payload(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    output_path = tmp_path / "metrics" / "score.json"
+    target = np.ones((2, 8, 4), dtype=np.float32)
+    np.savez(prediction_path, prediction=target.copy())
+    np.savez(target_path, target=target)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "score-local-rollout",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(target_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "score-local-rollout"
+    assert payload["state_hint"] == "LOCAL_ROLLOUT_SCORED"
+    assert payload["artifacts"]["score_json_path"] == str(output_path)
+    assert payload["metrics"]["competition_like_score_short"] == pytest.approx(100.0)
+    assert payload["metrics"]["rel_mse"] == pytest.approx(0.0)
+    assert payload["metrics"]["rmse"] == pytest.approx(0.0)
+    assert output_path.exists()
 
 
 def _numeric_values_are_finite(value: object) -> bool:
