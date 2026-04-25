@@ -8,6 +8,20 @@ Default target:
 data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5
 ```
 
+Preflight an existing file at the default target:
+
+```bash
+uv run --frozen python scripts/download_pdebench_file.py --preflight-only --inspect-hdf5
+```
+
+To download with a verified stable direct URL:
+
+```bash
+uv run --frozen python scripts/download_pdebench_file.py --url '<verified-direct-url>'
+```
+
+If no stable direct URL is configured, download the single Burgers file manually from DaRUS, place it at the default target path, then run the preflight command above.
+
 Prepare inspect-mode runtime files:
 
 ```bash
