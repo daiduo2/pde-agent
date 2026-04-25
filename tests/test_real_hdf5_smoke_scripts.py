@@ -164,7 +164,6 @@ def test_preflight_reports_tiny_hdf5_keys(tmp_path: Path) -> None:
 def test_prepare_real_hdf5_smoke_generates_inspect_runtime_files(
     tmp_path: Path,
 ) -> None:
-    h5py = pytest.importorskip("h5py")
     module = _prepare_module()
     repo_root = tmp_path / "repo"
     fixture_root = repo_root / "integration_tests" / "real_hdf5_smoke"
@@ -187,8 +186,7 @@ def test_prepare_real_hdf5_smoke_generates_inspect_runtime_files(
         )
     )
     hdf5_path = repo_root / "tiny.hdf5"
-    with h5py.File(hdf5_path, "w") as handle:
-        handle.create_dataset("tensor", data=np.zeros((1, 4, 8), dtype=np.float32))
+    hdf5_path.write_bytes(b"placeholder hdf5")
 
     outputs = module.prepare_runtime(
         repo_root=repo_root,
@@ -214,7 +212,6 @@ def test_prepare_real_hdf5_smoke_generates_inspect_runtime_files(
 def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
     tmp_path: Path,
 ) -> None:
-    h5py = pytest.importorskip("h5py")
     module = _prepare_module()
     repo_root = tmp_path / "repo"
     fixture_root = repo_root / "integration_tests" / "real_hdf5_smoke"
@@ -247,8 +244,7 @@ def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
         )
     )
     hdf5_path = repo_root / "tiny.hdf5"
-    with h5py.File(hdf5_path, "w") as handle:
-        handle.create_dataset("tensor", data=np.zeros((1, 4, 8), dtype=np.float32))
+    hdf5_path.write_bytes(b"placeholder hdf5")
 
     outputs = module.prepare_runtime(
         repo_root=repo_root,
@@ -268,3 +264,31 @@ def test_prepare_real_hdf5_smoke_full_mode_contains_full_chain(
         assert command_name in run_state
     assert ".venv/bin/pde-agent" in run_state
     assert "{{" not in run_state
+
+
+def test_prepare_real_hdf5_smoke_rejects_bad_mode(tmp_path: Path) -> None:
+    module = _prepare_module()
+    hdf5_path = tmp_path / "tiny.hdf5"
+    hdf5_path.write_bytes(b"placeholder hdf5")
+
+    with pytest.raises(SystemExit, match="mode must be"):
+        module.prepare_runtime(
+            repo_root=tmp_path,
+            hdf5_path=hdf5_path,
+            dataset_key="tensor",
+            sample_limit=1,
+            mode="bad",
+        )
+
+
+def test_prepare_real_hdf5_smoke_rejects_missing_hdf5(tmp_path: Path) -> None:
+    module = _prepare_module()
+
+    with pytest.raises(SystemExit, match="HDF5 file does not exist"):
+        module.prepare_runtime(
+            repo_root=tmp_path,
+            hdf5_path=tmp_path / "missing.hdf5",
+            dataset_key="tensor",
+            sample_limit=1,
+            mode="inspect",
+        )
