@@ -3,7 +3,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from typer.testing import CliRunner
 
+from pde_agent.cli import app
 from pde_agent.core.local_windows import LocalWindowError, build_local_windows
 
 
@@ -180,3 +182,46 @@ def test_build_local_windows_rejects_nested_dataset_key(tmp_path: Path) -> None:
             space_reduction=1,
             force=False,
         )
+
+
+def test_build_local_windows_cli_writes_json_payload(tmp_path: Path) -> None:
+    source = tmp_path / "burgers.hdf5"
+    _write_hdf5(source, np.ones((2, 10, 8), dtype=np.float32))
+    output = tmp_path / "derived" / "windows.npz"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-local-windows",
+            "--source-path",
+            str(source),
+            "--output-path",
+            str(output),
+            "--dataset-key",
+            "tensor",
+            "--start-index",
+            "0",
+            "--sample-limit",
+            "2",
+            "--context-steps",
+            "2",
+            "--forecast-steps",
+            "3",
+            "--time-reduction",
+            "2",
+            "--space-reduction",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "build-local-windows"
+    assert payload["state_hint"] == "LOCAL_WINDOWS_BUILT"
+    assert payload["artifacts"]["windows_npz_path"] == str(output)
+    assert payload["metrics"]["sample_count"] == 2
+    assert payload["metrics"]["context_steps"] == 2
+    assert payload["metrics"]["forecast_steps"] == 3
+    assert payload["metrics"]["space_points"] == 4
+    assert output.exists()
