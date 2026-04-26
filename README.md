@@ -222,3 +222,15 @@ The dry-run wrapper writes the FNO diagnosis artifacts, selected hypothesis,
 next experiment plan, experiment config, and `iteration_manifest.json`. It does
 not execute candidate experiments; its purpose is to stabilize the agent-facing
 scientific loop before adding finetuning.
+
+Before any future executor consumes the generated config, audit it:
+
+```bash
+uv run --frozen pde-agent audit-experiment-config \
+  --config-path runs/fno_iteration_001/experiment_config.json \
+  --output-path runs/fno_iteration_001/experiment_config_audit.json
+```
+
+The audit writes `EXPERIMENT_CONFIG_AUDITED`. Semantic problems produce a
+`rejected` audit report with issue codes instead of silently continuing to
+candidate execution.
