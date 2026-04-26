@@ -81,7 +81,7 @@ Output payload:
   - `selected_intervention`
   - `change_scope`
   - `max_experiment_count`
-  - `stop_condition`
+  - `next_command`
 - `next_hint`: `generate-experiment-config`
 
 ## Core Artifact Schema
