@@ -10,17 +10,18 @@ from pde_agent.core.spectral_residual_baseline import (
 
 def train_spectral_residual_baseline(
     *,
-    windows_npz: str,
+    windows_path: str,
     checkpoint_path: str,
     modes: int,
     ridge: float,
+    force: bool,
 ) -> dict[str, object]:
     summary = train_model(
-        windows_path=Path(windows_npz),
+        windows_path=Path(windows_path),
         checkpoint_path=Path(checkpoint_path),
         modes=modes,
         ridge=ridge,
-        force=False,
+        force=force,
     )
     return success_payload(
         run_id="local",

@@ -137,20 +137,22 @@ def generate_baseline_prediction_cmd(
 
 @app.command("train-spectral-residual-baseline")
 def train_spectral_residual_baseline_cmd(
-    windows_npz: str = typer.Option(...),
+    windows_path: str = typer.Option(...),
     checkpoint_path: str = typer.Option(...),
     modes: int = typer.Option(16),
     ridge: float = typer.Option(1e-3),
+    force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
     _ = json_flag
     typer.echo(
         json.dumps(
             train_spectral_residual_baseline(
-                windows_npz=windows_npz,
+                windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 modes=modes,
                 ridge=ridge,
+                force=force,
             )
         )
     )
@@ -158,18 +160,20 @@ def train_spectral_residual_baseline_cmd(
 
 @app.command("predict-local-model")
 def predict_local_model_cmd(
-    windows_npz: str = typer.Option(...),
+    windows_path: str = typer.Option(...),
     checkpoint_path: str = typer.Option(...),
-    prediction_npz: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
     _ = json_flag
     typer.echo(
         json.dumps(
             predict_local_model(
-                windows_npz=windows_npz,
+                windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
-                prediction_npz=prediction_npz,
+                output_path=output_path,
+                force=force,
             )
         )
     )

@@ -10,15 +10,16 @@ from pde_agent.core.spectral_residual_baseline import (
 
 def predict_local_model(
     *,
-    windows_npz: str,
+    windows_path: str,
     checkpoint_path: str,
-    prediction_npz: str,
+    output_path: str,
+    force: bool,
 ) -> dict[str, object]:
     summary = predict_spectral_residual_baseline(
-        windows_path=Path(windows_npz),
+        windows_path=Path(windows_path),
         checkpoint_path=Path(checkpoint_path),
-        output_path=Path(prediction_npz),
-        force=False,
+        output_path=Path(output_path),
+        force=force,
     )
     return success_payload(
         run_id="local",

@@ -354,7 +354,7 @@ def test_train_spectral_residual_baseline_cli_writes_payload(
         app,
         [
             "train-spectral-residual-baseline",
-            "--windows-npz",
+            "--windows-path",
             str(windows_path),
             "--checkpoint-path",
             str(checkpoint_path),
@@ -402,11 +402,11 @@ def test_predict_local_model_cli_writes_payload(tmp_path: Path) -> None:
         app,
         [
             "predict-local-model",
-            "--windows-npz",
+            "--windows-path",
             str(windows_path),
             "--checkpoint-path",
             str(checkpoint_path),
-            "--prediction-npz",
+            "--output-path",
             str(prediction_path),
         ],
     )
@@ -449,7 +449,7 @@ def test_spectral_baseline_cli_chain_reaches_pde_hypothesis(
     commands = [
         [
             "train-spectral-residual-baseline",
-            "--windows-npz",
+            "--windows-path",
             str(windows_path),
             "--checkpoint-path",
             str(checkpoint_path),
@@ -460,11 +460,11 @@ def test_spectral_baseline_cli_chain_reaches_pde_hypothesis(
         ],
         [
             "predict-local-model",
-            "--windows-npz",
+            "--windows-path",
             str(windows_path),
             "--checkpoint-path",
             str(checkpoint_path),
-            "--prediction-npz",
+            "--output-path",
             str(prediction_path),
         ],
         [
@@ -533,3 +533,85 @@ def test_spectral_baseline_cli_chain_reaches_pde_hypothesis(
 
     hypothesis = json.loads(hypothesis_path.read_text(encoding="utf-8"))
     assert hypothesis["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
+
+
+def test_spectral_baseline_cli_rejects_old_option_names(tmp_path: Path) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    prediction_path = tmp_path / "prediction.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+
+    train_result = CliRunner().invoke(
+        app,
+        [
+            "train-spectral-residual-baseline",
+            "--windows-npz",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+        ],
+    )
+    assert train_result.exit_code != 0
+
+    train_spectral_residual_baseline(
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        modes=6,
+        ridge=1e-6,
+        force=False,
+    )
+    predict_result = CliRunner().invoke(
+        app,
+        [
+            "predict-local-model",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--prediction-npz",
+            str(prediction_path),
+        ],
+    )
+    assert predict_result.exit_code != 0
+
+
+def test_spectral_baseline_cli_force_overwrites_outputs(tmp_path: Path) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    prediction_path = tmp_path / "prediction.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+
+    runner = CliRunner()
+    train_command = [
+        "train-spectral-residual-baseline",
+        "--windows-path",
+        str(windows_path),
+        "--checkpoint-path",
+        str(checkpoint_path),
+        "--modes",
+        "6",
+        "--force",
+    ]
+    first_train = runner.invoke(app, train_command)
+    second_train = runner.invoke(app, train_command)
+    assert first_train.exit_code == 0
+    assert second_train.exit_code == 0
+
+    predict_command = [
+        "predict-local-model",
+        "--windows-path",
+        str(windows_path),
+        "--checkpoint-path",
+        str(checkpoint_path),
+        "--output-path",
+        str(prediction_path),
+        "--force",
+    ]
+    first_predict = runner.invoke(app, predict_command)
+    second_predict = runner.invoke(app, predict_command)
+    assert first_predict.exit_code == 0
+    assert second_predict.exit_code == 0
+    assert checkpoint_path.exists()
+    assert prediction_path.exists()

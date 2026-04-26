@@ -80,15 +80,15 @@ The lightweight spectral residual baseline is a NumPy-only local smoke model for
 
 ```bash
 uv run --frozen pde-agent train-spectral-residual-baseline \
-  --windows-npz data/derived/local_windows_task1_val.npz \
+  --windows-path data/derived/local_windows_task1_val.npz \
   --checkpoint-path runs/spectral_residual_checkpoint.npz \
   --modes 16 \
   --ridge 1e-3
 
 uv run --frozen pde-agent predict-local-model \
-  --windows-npz data/derived/local_windows_task1_val.npz \
+  --windows-path data/derived/local_windows_task1_val.npz \
   --checkpoint-path runs/spectral_residual_checkpoint.npz \
-  --prediction-npz data/derived/local_spectral_prediction_task1_val.npz
+  --output-path data/derived/local_spectral_prediction_task1_val.npz
 
 uv run --frozen pde-agent score-local-rollout \
   --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
