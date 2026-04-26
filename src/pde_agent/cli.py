@@ -15,6 +15,9 @@ from pde_agent.commands.compare_fno_candidates import compare_fno_candidates_com
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
+from pde_agent.commands.evaluate_strategy_promotion import (
+    evaluate_strategy_promotion_command,
+)
 from pde_agent.commands.evaluate_fno_candidate import evaluate_fno_candidate_command
 from pde_agent.commands.execute_fno_finetune_candidate import (
     execute_fno_finetune_candidate_command,
@@ -533,6 +536,27 @@ def build_strategy_rubric_cmd(
                 output_path=output_path,
                 min_evaluation_windows=min_evaluation_windows,
                 max_inference_time_regression=max_inference_time_regression,
+            )
+        )
+    )
+
+
+@app.command("evaluate-strategy-promotion")
+def evaluate_strategy_promotion_cmd(
+    proposal_path: str = typer.Option(...),
+    rubric_path: str = typer.Option(...),
+    evidence_summary_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            evaluate_strategy_promotion_command(
+                proposal_path=proposal_path,
+                rubric_path=rubric_path,
+                evidence_summary_path=evidence_summary_path,
+                output_path=output_path,
             )
         )
     )

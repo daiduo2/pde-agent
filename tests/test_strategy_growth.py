@@ -35,6 +35,24 @@ def _proposal_kwargs(output_path: Path) -> dict[str, object]:
     }
 
 
+def _write_proposal_and_rubric(tmp_path: Path) -> tuple[Path, Path]:
+    from pde_agent.core.strategy_growth import (
+        build_strategy_rubric,
+        record_strategy_proposal,
+    )
+
+    proposal_path = tmp_path / "strategy_proposal.json"
+    rubric_path = tmp_path / "experiment_rubric.json"
+    record_strategy_proposal(**_proposal_kwargs(proposal_path))
+    build_strategy_rubric(
+        proposal_path=proposal_path,
+        output_path=rubric_path,
+        min_evaluation_windows=3,
+        max_inference_time_regression=0.10,
+    )
+    return proposal_path, rubric_path
+
+
 def test_record_strategy_proposal_writes_valid_artifact(tmp_path: Path) -> None:
     from pde_agent.core.strategy_growth import record_strategy_proposal
 
@@ -184,3 +202,129 @@ def test_build_strategy_rubric_cli_returns_protocol_payload(
     assert payload["metrics"]["min_evaluation_windows"] == 4
     assert payload["metrics"]["required_metric_count"] >= 7
     assert payload["next_hint"] == "evaluate-strategy-promotion"
+
+
+def test_evaluate_strategy_promotion_promotes_strong_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.strategy_growth import evaluate_strategy_promotion
+
+    proposal_path, rubric_path = _write_proposal_and_rubric(tmp_path)
+    evidence_path = tmp_path / "evidence_summary.json"
+    promotion_path = tmp_path / "promotion_report.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "evaluation_window_count": 4,
+                "mean_score_delta": 2.5,
+                "score_delta_std": 0.8,
+                "long_window_score_delta": 1.1,
+                "physics_residual_delta": -0.05,
+                "inference_time_regression": 0.02,
+                "failure_rate": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_strategy_promotion(
+        proposal_path=proposal_path,
+        rubric_path=rubric_path,
+        evidence_summary_path=evidence_path,
+        output_path=promotion_path,
+    )
+
+    assert promotion_path.exists()
+    assert report == json.loads(promotion_path.read_text(encoding="utf-8"))
+    assert report["state_hint"] == "STRATEGY_PROMOTION_EVALUATED"
+    assert report["strategy_id"] == "fno_spectral_filter_v0"
+    assert report["decision"] == "promote"
+    assert report["promote_to_skill_candidate"] is True
+    assert report["reason_codes"] == ["all_thresholds_passed"]
+    assert report["next_command"] == "append-strategy-ledger"
+
+
+def test_evaluate_strategy_promotion_rejects_single_window_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.strategy_growth import evaluate_strategy_promotion
+
+    proposal_path, rubric_path = _write_proposal_and_rubric(tmp_path)
+    evidence_path = tmp_path / "evidence_summary.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "evaluation_window_count": 1,
+                "mean_score_delta": 5.0,
+                "score_delta_std": 0.0,
+                "long_window_score_delta": 0.0,
+                "physics_residual_delta": 0.0,
+                "inference_time_regression": 0.0,
+                "failure_rate": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_strategy_promotion(
+        proposal_path=proposal_path,
+        rubric_path=rubric_path,
+        evidence_summary_path=evidence_path,
+        output_path=tmp_path / "promotion_report.json",
+    )
+
+    assert report["decision"] == "reject"
+    assert report["promote_to_skill_candidate"] is False
+    assert "insufficient_evaluation_windows" in report["reason_codes"]
+
+
+def test_evaluate_strategy_promotion_cli_returns_protocol_payload(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    proposal_path, rubric_path = _write_proposal_and_rubric(tmp_path)
+    evidence_path = tmp_path / "evidence_summary.json"
+    promotion_path = tmp_path / "promotion_report.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "evaluation_window_count": 4,
+                "mean_score_delta": 2.5,
+                "score_delta_std": 0.8,
+                "long_window_score_delta": 1.1,
+                "physics_residual_delta": -0.05,
+                "inference_time_regression": 0.02,
+                "failure_rate": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluate-strategy-promotion",
+            "--proposal-path",
+            str(proposal_path),
+            "--rubric-path",
+            str(rubric_path),
+            "--evidence-summary-path",
+            str(evidence_path),
+            "--output-path",
+            str(promotion_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "evaluate-strategy-promotion"
+    assert payload["state_hint"] == "STRATEGY_PROMOTION_EVALUATED"
+    assert payload["artifacts"]["promotion_report_path"] == str(promotion_path)
+    assert payload["metrics"]["strategy_id"] == "fno_spectral_filter_v0"
+    assert payload["metrics"]["decision"] == "promote"
+    assert payload["metrics"]["promote_to_skill_candidate"] is True
+    assert payload["metrics"]["reason_count"] == 1
+    assert payload["next_hint"] == "append-strategy-ledger"
