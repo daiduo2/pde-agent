@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,52 @@ def test_inspect_fno_checkpoint_fixture(tmp_path: Path) -> None:
     assert "model_state_dict" in metadata["top_level_keys"]
     assert json.loads(output_path.read_text(encoding="utf-8")) == metadata
     assert issubclass(FNOBackendError, RuntimeError)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_inspect_fno_checkpoint_tar_selects_first_pt_member(tmp_path: Path) -> None:
+    first_checkpoint = tmp_path / "a_first.pt"
+    second_checkpoint = tmp_path / "z_second.pt"
+    archive_path = tmp_path / "checkpoints.tar"
+    output_path = tmp_path / "metadata.json"
+    _write_fixture_checkpoint(first_checkpoint)
+    _write_fixture_checkpoint(second_checkpoint)
+
+    with tarfile.open(archive_path, "w") as archive:
+        archive.add(second_checkpoint, arcname="z_second.pt")
+        archive.add(first_checkpoint, arcname="a_first.pt")
+
+    metadata = inspect_fno_checkpoint(
+        checkpoint_path=archive_path,
+        output_path=output_path,
+    )
+
+    assert output_path.exists()
+    assert metadata["archive_member"] == "a_first.pt"
+    assert metadata["tensor_summary"]["tensor_key_count"] == 2
+    assert metadata["tensor_summary"]["parameter_count"] == 9
+    assert json.loads(output_path.read_text(encoding="utf-8")) == metadata
+    assert any("multiple" in warning for warning in metadata["load_warnings"])
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_inspect_fno_checkpoint_tar_rejects_archive_without_pt(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "checkpoints.tar"
+    note_path = tmp_path / "README.txt"
+    note_path.write_text("not a checkpoint", encoding="utf-8")
+    with tarfile.open(archive_path, "w") as archive:
+        archive.add(note_path, arcname="README.txt")
+
+    with pytest.raises(
+        FNOBackendError,
+        match="unsupported|no torch checkpoint member",
+    ):
+        inspect_fno_checkpoint(
+            checkpoint_path=archive_path,
+            output_path=tmp_path / "metadata.json",
+        )
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")

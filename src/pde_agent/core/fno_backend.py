@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -21,22 +22,16 @@ def inspect_fno_checkpoint(
     torch = _require_torch()
     checkpoint_file = _require_file(Path(checkpoint_path), "checkpoint")
 
-    try:
-        checkpoint = torch.load(
-            checkpoint_file,
-            map_location="cpu",
-            weights_only=False,
-        )
-    except Exception as exc:
-        raise FNOBackendError(
-            f"failed to load FNO checkpoint {checkpoint_file}: {exc}"
-        ) from exc
+    loaded = _load_checkpoint_with_metadata(checkpoint_file, torch=torch)
 
     metadata = _inspect_loaded_checkpoint(
-        checkpoint=checkpoint,
+        checkpoint=loaded["checkpoint"],
         checkpoint_path=checkpoint_file,
         torch=torch,
     )
+    if loaded["archive_member"] is not None:
+        metadata["archive_member"] = loaded["archive_member"]
+    metadata["load_warnings"].extend(loaded["load_warnings"])
     if output_path is not None:
         output_file = Path(output_path)
         metadata["metadata_path"] = str(output_file)
@@ -141,10 +136,73 @@ def _inspect_loaded_checkpoint(
 
 
 def _load_checkpoint(path: Path, *, torch: Any) -> Any:
+    return _load_checkpoint_with_metadata(path, torch=torch)["checkpoint"]
+
+
+def _load_checkpoint_with_metadata(path: Path, *, torch: Any) -> dict[str, Any]:
+    if tarfile.is_tarfile(path):
+        return _load_checkpoint_from_tar(path, torch=torch)
     try:
-        return torch.load(path, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     except Exception as exc:
         raise FNOBackendError(f"failed to load FNO checkpoint {path}: {exc}") from exc
+    return {
+        "checkpoint": checkpoint,
+        "archive_member": None,
+        "load_warnings": [],
+    }
+
+
+def _load_checkpoint_from_tar(path: Path, *, torch: Any) -> dict[str, Any]:
+    selected_member_name = "<none>"
+    try:
+        with tarfile.open(path) as archive:
+            checkpoint_members = sorted(
+                (
+                    member
+                    for member in archive.getmembers()
+                    if member.isfile() and member.name.endswith(".pt")
+                ),
+                key=lambda member: member.name,
+            )
+            if not checkpoint_members:
+                raise FNOBackendError(
+                    f"unsupported FNO checkpoint archive {path}: "
+                    "no torch checkpoint member"
+                )
+            selected_member = checkpoint_members[0]
+            selected_member_name = selected_member.name
+            extracted = archive.extractfile(selected_member)
+            if extracted is None:
+                raise FNOBackendError(
+                    f"unsupported FNO checkpoint archive {path}: "
+                    f"cannot read member {selected_member.name}"
+                )
+            checkpoint = torch.load(
+                extracted,
+                map_location="cpu",
+                weights_only=False,
+            )
+    except FNOBackendError:
+        raise
+    except (OSError, tarfile.TarError) as exc:
+        raise FNOBackendError(f"failed to load FNO checkpoint {path}: {exc}") from exc
+    except Exception as exc:
+        raise FNOBackendError(
+            f"failed to load FNO checkpoint {path} member {selected_member_name}: {exc}"
+        ) from exc
+
+    load_warnings: list[str] = []
+    if len(checkpoint_members) > 1:
+        load_warnings.append(
+            "multiple torch checkpoint members found in archive; "
+            f"selected {selected_member.name}"
+        )
+    return {
+        "checkpoint": checkpoint,
+        "archive_member": selected_member.name,
+        "load_warnings": load_warnings,
+    }
 
 
 def _load_windows(path: Path) -> tuple[np.ndarray, np.ndarray]:
