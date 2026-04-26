@@ -2,6 +2,10 @@
 
 The real state machine is maintained outside Hermes.
 
+See [Hermes Integration Discipline](hermes_integration_discipline.md) for the
+required development and audit gate before treating Hermes-facing protocols as
+stable.
+
 Minimum shape:
 
 ```yaml
