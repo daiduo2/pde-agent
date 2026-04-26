@@ -112,8 +112,16 @@ def _looks_like_pdebench_fno1d(checkpoint: Any, *, torch: Any) -> bool:
     state = _extract_state_dict(checkpoint)
     if not isinstance(state, dict):
         return False
-    required_keys = _pdebench_fno1d_required_keys()
-    return all(key in state and torch.is_tensor(state[key]) for key in required_keys)
+    if not all(
+        key in state and torch.is_tensor(state[key])
+        for key in _pdebench_fno1d_required_keys()
+    ):
+        return False
+    try:
+        _infer_pdebench_fno1d_config(state)
+    except FNOBackendError:
+        return False
+    return True
 
 
 def _pdebench_fno1d_required_keys() -> tuple[str, ...]:
@@ -144,6 +152,16 @@ def _infer_pdebench_fno1d_config(state: Any) -> PDEBenchFNO1dConfig:
         raise FNOBackendError(
             "unsupported PDEBench FNO1d state dict: missing keys "
             + ", ".join(missing)
+        )
+    non_tensors = [
+        key
+        for key in _pdebench_fno1d_required_keys()
+        if not hasattr(state[key], "shape") or not hasattr(state[key], "ndim")
+    ]
+    if non_tensors:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: non-tensor values "
+            + ", ".join(non_tensors)
         )
 
     fc0_weight = state["fc0.weight"]

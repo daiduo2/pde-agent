@@ -92,6 +92,50 @@ def test_infer_pdebench_fno1d_config_from_state_dict() -> None:
     assert config.layers == 4
 
 
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_looks_like_pdebench_fno1d_rejects_bad_shape() -> None:
+    import torch
+
+    from pde_agent.core.fno_backend import _looks_like_pdebench_fno1d
+
+    state = _official_fno_state_dict(torch=torch)
+    state["conv2.weights1"] = torch.randn(4, 5, 2, dtype=torch.complex64)
+
+    assert _looks_like_pdebench_fno1d(state, torch=torch) is False
+
+
+def test_infer_pdebench_fno1d_config_rejects_non_tensor_values() -> None:
+    from pde_agent.core.fno_backend import (
+        _infer_pdebench_fno1d_config,
+        _pdebench_fno1d_required_keys,
+    )
+
+    state = {key: object() for key in _pdebench_fno1d_required_keys()}
+
+    with pytest.raises(FNOBackendError, match="tensor"):
+        _infer_pdebench_fno1d_config(state)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_pdebench_fno1d_model_loads_official_state_dict_strictly() -> None:
+    import torch
+
+    from pde_agent.core.fno_backend import (
+        _infer_pdebench_fno1d_config,
+        _make_pdebench_fno1d_class,
+    )
+
+    state = _official_fno_state_dict(torch=torch)
+    config = _infer_pdebench_fno1d_config(state)
+    model_class = _make_pdebench_fno1d_class(torch)
+    model = model_class(config)
+
+    missing, unexpected = model.load_state_dict(state, strict=True)
+
+    assert missing == []
+    assert unexpected == []
+
+
 def _write_windows(path: Path) -> tuple[object, object]:
     np = pytest.importorskip("numpy")
     x = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False, dtype=np.float32)
