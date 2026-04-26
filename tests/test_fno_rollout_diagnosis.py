@@ -172,3 +172,46 @@ def test_diagnose_fno_rollout_force_failure_preserves_existing_artifacts(
 
     assert score_path.read_text(encoding="utf-8") == "old score"
     assert summary_path.read_text(encoding="utf-8") == "old summary"
+
+
+def test_diagnose_fno_rollout_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_dir = tmp_path / "diagnosis"
+    _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diagnose-fno-rollout",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-dir",
+            str(output_dir),
+            "--nu",
+            "0.001",
+            "--dt",
+            "1.0",
+            "--dx",
+            "1.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "diagnose-fno-rollout"
+    assert payload["state_hint"] == "FNO_ROLLOUT_DIAGNOSED"
+    assert payload["artifacts"]["fno_rollout_summary_json_path"] == str(
+        output_dir / "fno_rollout_summary.json"
+    )
+    assert payload["metrics"]["adapter_type"] == "fixture_delta_extrapolation"
+    assert payload["metrics"]["competition_like_score_short"] == pytest.approx(100.0)
+    assert payload["metrics"]["physics_issue"]
+    assert payload["next_hint"] == "select-pde-hypothesis"

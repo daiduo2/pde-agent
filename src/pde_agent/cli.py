@@ -8,6 +8,7 @@ from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
+from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
@@ -217,6 +218,33 @@ def predict_fno_local_cmd(
                 checkpoint_path=checkpoint_path,
                 output_path=output_path,
                 metadata_path=metadata_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-fno-rollout")
+def diagnose_fno_rollout_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_fno_rollout(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                nu=nu,
+                dt=dt,
+                dx=dx,
                 force=force,
             )
         )
