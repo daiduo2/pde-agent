@@ -226,7 +226,12 @@ def _validate_modes(modes: int, space_points: int) -> int:
 
 
 def _validate_ridge(ridge: float) -> float:
-    value = float(ridge)
+    try:
+        value = float(ridge)
+    except (TypeError, ValueError) as exc:
+        raise SpectralResidualBaselineError(
+            f"ridge must be finite and non-negative, got {ridge!r}"
+        ) from exc
     if not np.isfinite(value) or value < 0.0:
         raise SpectralResidualBaselineError("ridge must be finite and non-negative")
     return value

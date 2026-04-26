@@ -126,6 +126,23 @@ def test_train_spectral_residual_baseline_rejects_invalid_modes(
         )
 
 
+def test_train_spectral_residual_baseline_rejects_invalid_ridge(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+
+    with pytest.raises(SpectralResidualBaselineError, match="ridge"):
+        train_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=tmp_path / "checkpoint.npz",
+            modes=4,
+            ridge="bad",  # type: ignore[arg-type]
+            force=False,
+        )
+
+
 def test_predict_spectral_residual_baseline_rejects_incompatible_windows(
     tmp_path: Path,
 ) -> None:
