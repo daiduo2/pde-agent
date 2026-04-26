@@ -717,6 +717,10 @@ def test_plan_next_experiment_long_horizon_drift_requests_rollout_finetune(
         20,
         31,
     ]
+    assert plan["intervention_plan"]["candidate_parameters"]["training_strategy"] == [
+        "scheduled_sampling",
+        "late_weighted_scheduled_sampling",
+    ]
 
 
 def test_plan_next_experiment_rejects_missing_required_fields(

@@ -359,6 +359,10 @@ _INTERVENTION_POLICIES: dict[str, dict[str, Any]] = {
         "candidate_parameters": {
             "teacher_forcing_decay": [0.95, 0.9, 0.85],
             "rollout_steps": [10, 20, 31],
+            "training_strategy": [
+                "scheduled_sampling",
+                "late_weighted_scheduled_sampling",
+            ],
         },
         "budget": _TRAINING_BUDGET,
         "acceptance_criteria": [
