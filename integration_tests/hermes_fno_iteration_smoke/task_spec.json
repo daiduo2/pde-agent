@@ -1,0 +1,11 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Run one bounded FNO V1 iteration on a prepared local window file.",
+  "model_family": "FNO",
+  "agent_scope": "single_command_iteration",
+  "required_output": [
+    "fno_iteration_report.json",
+    "candidate_comparison.json"
+  ],
+  "success_state_hint": "FNO_ITERATION_COMPLETED"
+}
