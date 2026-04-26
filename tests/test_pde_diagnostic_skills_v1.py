@@ -655,6 +655,50 @@ def test_plan_next_experiment_long_horizon_drift_requests_rollout_finetune(
     ]
 
 
+def test_plan_next_experiment_cli_writes_payload(tmp_path: Path) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    output_path = tmp_path / "diagnostics" / "next_experiment_plan.json"
+    _write_score(score_path, score=77.18, rmse=0.0506)
+    _write_error_diagnosis(error_path, "shock_region_error")
+    _write_physics_check(physics_path, "nonphysical_oscillation")
+    _write_hypothesis(hypothesis_path, "apply_low_pass_stabilization")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan-next-experiment",
+            "--score-path",
+            str(score_path),
+            "--error-diagnosis-path",
+            str(error_path),
+            "--physics-check-path",
+            str(physics_path),
+            "--hypothesis-path",
+            str(hypothesis_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "plan-next-experiment"
+    assert payload["state_hint"] == "NEXT_EXPERIMENT_PLANNED"
+    assert payload["artifacts"]["next_experiment_plan_path"] == str(output_path)
+    assert payload["metrics"] == {
+        "selected_intervention": "apply_low_pass_stabilization",
+        "change_scope": "postprocess_or_inference_only",
+        "max_experiment_count": 3,
+        "stop_condition": "generate-experiment-config",
+    }
+    assert payload["next_hint"] == "generate-experiment-config"
+    assert output_path.exists()
+
+
 def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:
     windows_path = tmp_path / "windows.npz"
     prediction_path = tmp_path / "prediction.npz"

@@ -15,6 +15,7 @@ from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.predict_local_model import predict_local_model
+from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.score_local_rollout import score_local_rollout
@@ -300,6 +301,29 @@ def select_pde_hypothesis_cmd(
                 score_path=score_path,
                 error_diagnosis_path=error_diagnosis_path,
                 physics_check_path=physics_check_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("plan-next-experiment")
+def plan_next_experiment_cmd(
+    score_path: str = typer.Option(...),
+    error_diagnosis_path: str = typer.Option(...),
+    physics_check_path: str = typer.Option(...),
+    hypothesis_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            plan_next_experiment(
+                score_path=score_path,
+                error_diagnosis_path=error_diagnosis_path,
+                physics_check_path=physics_check_path,
+                hypothesis_path=hypothesis_path,
                 output_path=output_path,
             )
         )
