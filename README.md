@@ -283,3 +283,18 @@ The evaluator writes candidate-scoped score, rollout-error, Burgers-physics,
 selected-hypothesis, and `candidate_evaluation_report.json` artifacts. This is
 the comparison boundary for the next multi-candidate step; short-window
 improvement is only a local proxy, not hidden 190-step evidence.
+
+Compare one or more evaluated candidates:
+
+```bash
+uv run --frozen pde-agent compare-fno-candidates \
+  --evaluation-report-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/evaluation/candidate_evaluation_report.json \
+  --output-path runs/fno_iteration_001/fno_candidate_comparison_report.json \
+  --force
+```
+
+For multiple candidates, repeat `--evaluation-report-path`. The comparator sorts
+by local score, then `rel_mse`, then `rmse`, then candidate id for deterministic
+ties. It writes `fno_candidate_comparison_report.json` with the winner,
+rejection reasons, and `next_command = prepare-next-fno-iteration`; it does not
+rerun diagnostics or mutate candidate artifacts.
