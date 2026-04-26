@@ -34,6 +34,64 @@ def _write_fixture_checkpoint(path: Path) -> None:
     )
 
 
+def _official_fno_state_dict(
+    *,
+    torch: object,
+    history_steps: int = 3,
+    width: int = 4,
+    modes: int = 2,
+    fc_hidden: int = 5,
+) -> dict[str, object]:
+    generator = torch.Generator().manual_seed(7)
+    state: dict[str, object] = {
+        "fc0.weight": torch.randn(width, history_steps + 1, generator=generator),
+        "fc0.bias": torch.randn(width, generator=generator),
+        "fc1.weight": torch.randn(fc_hidden, width, generator=generator),
+        "fc1.bias": torch.randn(fc_hidden, generator=generator),
+        "fc2.weight": torch.randn(1, fc_hidden, generator=generator),
+        "fc2.bias": torch.randn(1, generator=generator),
+    }
+    for index in range(4):
+        state[f"conv{index}.weights1"] = torch.randn(
+            width,
+            width,
+            modes,
+            dtype=torch.complex64,
+            generator=generator,
+        )
+        state[f"w{index}.weight"] = torch.randn(
+            width,
+            width,
+            1,
+            generator=generator,
+        )
+        state[f"w{index}.bias"] = torch.randn(width, generator=generator)
+    return state
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_infer_pdebench_fno1d_config_from_state_dict() -> None:
+    import torch
+
+    from pde_agent.core.fno_backend import _infer_pdebench_fno1d_config
+
+    state = _official_fno_state_dict(
+        torch=torch,
+        history_steps=3,
+        width=4,
+        modes=2,
+        fc_hidden=5,
+    )
+
+    config = _infer_pdebench_fno1d_config(state)
+
+    assert config.history_steps == 3
+    assert config.width == 4
+    assert config.modes == 2
+    assert config.fc_hidden == 5
+    assert config.layers == 4
+
+
 def _write_windows(path: Path) -> tuple[object, object]:
     np = pytest.importorskip("numpy")
     x = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False, dtype=np.float32)

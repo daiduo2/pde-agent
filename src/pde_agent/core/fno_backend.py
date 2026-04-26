@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tarfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,231 @@ def predict_fno_local(
         "prediction_shape": [int(axis) for axis in prediction.shape],
         **metadata,
     }
+
+
+@dataclass(frozen=True)
+class PDEBenchFNO1dConfig:
+    history_steps: int
+    width: int
+    modes: int
+    fc_hidden: int
+    layers: int = 4
+
+
+def _extract_state_dict(checkpoint: Any) -> Any:
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        return checkpoint["model_state_dict"]
+    return checkpoint
+
+
+def _looks_like_pdebench_fno1d(checkpoint: Any, *, torch: Any) -> bool:
+    state = _extract_state_dict(checkpoint)
+    if not isinstance(state, dict):
+        return False
+    required_keys = _pdebench_fno1d_required_keys()
+    return all(key in state and torch.is_tensor(state[key]) for key in required_keys)
+
+
+def _pdebench_fno1d_required_keys() -> tuple[str, ...]:
+    keys: list[str] = [
+        "fc0.weight",
+        "fc0.bias",
+        "fc1.weight",
+        "fc1.bias",
+        "fc2.weight",
+        "fc2.bias",
+    ]
+    for index in range(4):
+        keys.extend(
+            [
+                f"conv{index}.weights1",
+                f"w{index}.weight",
+                f"w{index}.bias",
+            ]
+        )
+    return tuple(keys)
+
+
+def _infer_pdebench_fno1d_config(state: Any) -> PDEBenchFNO1dConfig:
+    if not isinstance(state, dict):
+        raise FNOBackendError("unsupported PDEBench FNO1d state dict: not a dict")
+    missing = [key for key in _pdebench_fno1d_required_keys() if key not in state]
+    if missing:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: missing keys "
+            + ", ".join(missing)
+        )
+
+    fc0_weight = state["fc0.weight"]
+    fc1_weight = state["fc1.weight"]
+    fc2_weight = state["fc2.weight"]
+    conv0_weight = state["conv0.weights1"]
+    if fc0_weight.ndim != 2:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: fc0.weight must be rank 2"
+        )
+    if conv0_weight.ndim != 3:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: conv0.weights1 must be rank 3"
+        )
+    width = int(fc0_weight.shape[0])
+    history_steps = int(fc0_weight.shape[1]) - 1
+    modes = int(conv0_weight.shape[-1])
+    if fc1_weight.ndim != 2 or fc2_weight.ndim != 2:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: fc weights must be rank 2"
+        )
+    fc_hidden = int(fc1_weight.shape[0])
+    config = PDEBenchFNO1dConfig(
+        history_steps=history_steps,
+        width=width,
+        modes=modes,
+        fc_hidden=fc_hidden,
+    )
+    _validate_pdebench_fno1d_shapes(state=state, config=config)
+    return config
+
+
+def _validate_pdebench_fno1d_shapes(
+    *,
+    state: dict[str, Any],
+    config: PDEBenchFNO1dConfig,
+) -> None:
+    if config.history_steps < 1:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: history_steps must be >= 1"
+        )
+    if config.width < 1:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: width must be >= 1"
+        )
+    if config.modes < 1:
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: modes must be >= 1"
+        )
+    if tuple(state["fc0.weight"].shape) != (config.width, config.history_steps + 1):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc0.weight shape"
+        )
+    if tuple(state["fc0.bias"].shape) != (config.width,):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc0.bias shape"
+        )
+    for index in range(config.layers):
+        if tuple(state[f"conv{index}.weights1"].shape) != (
+            config.width,
+            config.width,
+            config.modes,
+        ):
+            raise FNOBackendError(
+                f"unsupported PDEBench FNO1d state dict: invalid conv{index}.weights1 shape"
+            )
+        if tuple(state[f"w{index}.weight"].shape) != (config.width, config.width, 1):
+            raise FNOBackendError(
+                f"unsupported PDEBench FNO1d state dict: invalid w{index}.weight shape"
+            )
+        if tuple(state[f"w{index}.bias"].shape) != (config.width,):
+            raise FNOBackendError(
+                f"unsupported PDEBench FNO1d state dict: invalid w{index}.bias shape"
+            )
+    if tuple(state["fc1.weight"].shape) != (config.fc_hidden, config.width):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc1.weight shape"
+        )
+    if tuple(state["fc1.bias"].shape) != (config.fc_hidden,):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc1.bias shape"
+        )
+    if tuple(state["fc2.weight"].shape) != (1, config.fc_hidden):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc2.weight shape"
+        )
+    if tuple(state["fc2.bias"].shape) != (1,):
+        raise FNOBackendError(
+            "unsupported PDEBench FNO1d state dict: invalid fc2.bias shape"
+        )
+
+
+def _make_spectral_conv1d(torch: Any) -> type:
+    class SpectralConv1d(torch.nn.Module):
+        def __init__(self, in_channels: int, out_channels: int, modes: int) -> None:
+            super().__init__()
+            self.in_channels = in_channels
+            self.out_channels = out_channels
+            self.modes = modes
+            scale = 1.0 / (in_channels * out_channels)
+            self.weights1 = torch.nn.Parameter(
+                scale
+                * torch.randn(
+                    in_channels,
+                    out_channels,
+                    modes,
+                    dtype=torch.cfloat,
+                )
+            )
+
+        def forward(self, x: Any) -> Any:
+            batch_size = x.shape[0]
+            space_points = x.shape[-1]
+            x_ft = torch.fft.rfft(x)
+            if self.modes > x_ft.shape[-1]:
+                raise FNOBackendError(
+                    "PDEBench FNO1d modes exceed available Fourier modes for input grid"
+                )
+            out_ft = torch.zeros(
+                batch_size,
+                self.out_channels,
+                x_ft.shape[-1],
+                device=x.device,
+                dtype=torch.cfloat,
+            )
+            out_ft[:, :, : self.modes] = torch.einsum(
+                "bix,iox->box",
+                x_ft[:, :, : self.modes],
+                self.weights1,
+            )
+            return torch.fft.irfft(out_ft, n=space_points)
+
+    return SpectralConv1d
+
+
+def _make_pdebench_fno1d_class(torch: Any) -> type:
+    SpectralConv1d = _make_spectral_conv1d(torch)
+
+    class PDEBenchFNO1d(torch.nn.Module):
+        def __init__(self, config: PDEBenchFNO1dConfig) -> None:
+            super().__init__()
+            self.config = config
+            self.fc0 = torch.nn.Linear(config.history_steps + 1, config.width)
+            for index in range(config.layers):
+                setattr(
+                    self,
+                    f"conv{index}",
+                    SpectralConv1d(config.width, config.width, config.modes),
+                )
+                setattr(
+                    self,
+                    f"w{index}",
+                    torch.nn.Conv1d(config.width, config.width, 1),
+                )
+            self.fc1 = torch.nn.Linear(config.width, config.fc_hidden)
+            self.fc2 = torch.nn.Linear(config.fc_hidden, 1)
+
+        def forward(self, x: Any) -> Any:
+            x = self.fc0(x)
+            x = x.permute(0, 2, 1)
+            for index in range(self.config.layers):
+                x1 = getattr(self, f"conv{index}")(x)
+                x2 = getattr(self, f"w{index}")(x)
+                x = x1 + x2
+                if index != self.config.layers - 1:
+                    x = torch.nn.functional.gelu(x)
+            x = x.permute(0, 2, 1)
+            x = torch.nn.functional.gelu(self.fc1(x))
+            x = self.fc2(x)
+            return x.squeeze(-1)
+
+    return PDEBenchFNO1d
 
 
 def _inspect_loaded_checkpoint(
