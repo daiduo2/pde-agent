@@ -157,3 +157,25 @@ uv run --frozen --extra torch pde-agent predict-fno-local \
 The prediction command writes the same `prediction` NPZ contract consumed by
 `score-local-rollout`. It never falls back to persistence or the spectral
 baseline while claiming to be FNO.
+
+## FNO Rollout Diagnosis
+
+Run the official FNO adapter through the local diagnostic chain and collect one
+agent-readable summary:
+
+```bash
+uv run --frozen --extra torch pde-agent diagnose-fno-rollout \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-dir runs/fno_rollout_diagnosis \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+The command writes `fno_prediction.npz`, `fno_score.json`,
+`fno_rollout_error.json`, `fno_burgers_physics.json`, and
+`fno_rollout_summary.json`. It does not train or finetune FNO; it only packages
+the existing local prediction, scoring, error diagnosis, and physics checks into
+one reproducible artifact bundle.
