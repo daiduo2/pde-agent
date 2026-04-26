@@ -58,6 +58,51 @@ def plan_next_experiment_from_files(
     return plan
 
 
+def plan_next_experiment_from_fno_summary(
+    *,
+    summary_path: str | Path,
+    hypothesis_path: str | Path,
+    output_path: str | Path | None,
+) -> dict[str, Any]:
+    summary_file = Path(summary_path)
+    summary = _load_json_object(summary_file, "FNO rollout summary")
+    state_hint = summary.get("state_hint")
+    if state_hint != "FNO_ROLLOUT_DIAGNOSED":
+        raise NextExperimentPlanError(
+            "FNO rollout summary must include state_hint "
+            f"'FNO_ROLLOUT_DIAGNOSED', got {state_hint!r}"
+        )
+
+    artifacts = summary.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise NextExperimentPlanError(
+            "FNO rollout summary must include object 'artifacts'"
+        )
+
+    plan = plan_next_experiment_from_files(
+        score_path=_require_artifact_path(
+            artifacts, "score_json_path", "FNO rollout summary"
+        ),
+        error_diagnosis_path=_require_artifact_path(
+            artifacts, "rollout_error_json_path", "FNO rollout summary"
+        ),
+        physics_check_path=_require_artifact_path(
+            artifacts, "burgers_physics_json_path", "FNO rollout summary"
+        ),
+        hypothesis_path=hypothesis_path,
+        output_path=output_path,
+    )
+    plan["summary_path"] = str(summary_file)
+    if output_path is not None:
+        plan_file = Path(output_path)
+        plan["next_experiment_plan_path"] = str(plan_file)
+        plan_file.write_text(
+            json.dumps(plan, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return plan
+
+
 def plan_next_experiment(
     *,
     score: dict[str, Any],
@@ -195,6 +240,15 @@ def _require_string(data: dict[str, Any], field: str, label: str) -> str:
     value = data.get(field)
     if not isinstance(value, str):
         raise NextExperimentPlanError(f"{label} must include string field '{field}'")
+    return value
+
+
+def _require_artifact_path(artifacts: dict[Any, Any], field: str, label: str) -> str:
+    value = artifacts.get(field)
+    if not isinstance(value, str):
+        raise NextExperimentPlanError(
+            f"{label} artifacts must include string '{field}'"
+        )
     return value
 
 
