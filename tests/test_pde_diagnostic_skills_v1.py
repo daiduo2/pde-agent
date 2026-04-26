@@ -16,6 +16,7 @@ from pde_agent.core.burgers_physics_local import (
 )
 from pde_agent.core.experiment_config import (
     ExperimentConfigError,
+    generate_experiment_config,
     generate_experiment_config_from_file,
 )
 from pde_agent.core.next_experiment_plan import (
@@ -853,6 +854,94 @@ def test_generate_experiment_config_respects_budget_limit(tmp_path: Path) -> Non
         "alpha": 1,
         "beta": "b",
     }
+
+
+def test_generate_experiment_config_does_not_share_mutable_plan_values(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(
+        plan_path,
+        max_experiment_count=2,
+        candidate_parameters={"alpha": [1, 2]},
+    )
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    config = generate_experiment_config(plan=plan, source_plan_path=str(plan_path))
+
+    assert config["budget"] is not plan["budget"]
+    assert config["controls"] is not plan["controls"]
+    assert (
+        config["candidate_experiments"][0]["expected_artifacts"]
+        is not plan["required_next_artifacts"]
+    )
+    assert (
+        config["candidate_experiments"][0]["expected_artifacts"]
+        is not config["candidate_experiments"][1]["expected_artifacts"]
+    )
+    assert (
+        config["candidate_experiments"][0]["forbidden_actions"]
+        is not config["candidate_experiments"][1]["forbidden_actions"]
+    )
+
+    config["budget"]["max_experiment_count"] = 99
+    config["controls"]["baseline_artifacts"].append("mutated")
+    config["candidate_experiments"][0]["expected_artifacts"].append("mutated")
+    config["candidate_experiments"][0]["forbidden_actions"].append("mutated")
+
+    assert plan["budget"]["max_experiment_count"] == 2
+    assert plan["controls"]["baseline_artifacts"] == [
+        "previous prediction NPZ",
+        "previous score JSON",
+    ]
+    assert plan["required_next_artifacts"] == [
+        "candidate prediction NPZ",
+        "candidate score JSON",
+    ]
+    assert plan["intervention_plan"]["forbidden_actions"] == [
+        "overwrite previous artifacts"
+    ]
+    assert config["candidate_experiments"][1]["expected_artifacts"] == [
+        "candidate prediction NPZ",
+        "candidate score JSON",
+    ]
+    assert config["candidate_experiments"][1]["forbidden_actions"] == [
+        "overwrite previous artifacts"
+    ]
+
+
+def test_generate_experiment_config_rejects_non_finite_output_values(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    output_path = tmp_path / "experiment_config.json"
+    _write_next_experiment_plan(plan_path)
+    plan_text = plan_path.read_text(encoding="utf-8")
+    plan_text = plan_text.replace('"rationale": "Fixture plan."', '"rationale": NaN')
+    plan_path.write_text(plan_text, encoding="utf-8")
+
+    with pytest.raises(ExperimentConfigError, match="non-finite"):
+        generate_experiment_config_from_file(
+            plan_path=plan_path,
+            output_path=output_path,
+        )
+
+    assert not output_path.exists()
+
+
+def test_generate_experiment_config_rejects_non_string_parameter_keys(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(plan_path)
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["intervention_plan"]["candidate_parameters"] = {
+        1: ["integer key"],
+        "alpha": [1],
+    }
+
+    with pytest.raises(ExperimentConfigError, match="keys must be strings"):
+        generate_experiment_config(plan=plan, source_plan_path=str(plan_path))
 
 
 def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:

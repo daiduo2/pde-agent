@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +26,17 @@ def generate_experiment_config_from_file(
     if output_path is not None:
         config_file = Path(output_path)
         config["experiment_config_path"] = str(config_file)
+        _validate_json_value(config, "experiment config")
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            json.dumps(config, allow_nan=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        try:
+            serialized_config = (
+                json.dumps(config, allow_nan=False, indent=2, sort_keys=True) + "\n"
+            )
+        except ValueError as exc:
+            raise ExperimentConfigError(
+                f"experiment config contains invalid JSON value: {exc}"
+            ) from exc
+        config_file.write_text(serialized_config, encoding="utf-8")
 
     return config
 
@@ -86,17 +93,18 @@ def generate_experiment_config(
         "selected_intervention": selected_intervention,
         "change_scope": change_scope,
         "requires_training": requires_training,
-        "budget": budget,
+        "budget": deepcopy(budget),
         "candidate_experiments": candidates,
-        "controls": controls,
-        "acceptance_criteria": acceptance_criteria,
-        "rejection_criteria": rejection_criteria,
-        "required_artifacts": required_next_artifacts,
+        "controls": deepcopy(controls),
+        "acceptance_criteria": deepcopy(acceptance_criteria),
+        "rejection_criteria": deepcopy(rejection_criteria),
+        "required_artifacts": deepcopy(required_next_artifacts),
         "next_command": "execute-candidate-experiment",
     }
     for optional_field in ("source_hypothesis", "failure_mode", "rationale"):
         if optional_field in plan:
-            config[optional_field] = plan[optional_field]
+            config[optional_field] = deepcopy(plan[optional_field])
+    _validate_json_value(config, "experiment config")
     return config
 
 
@@ -125,8 +133,8 @@ def _expand_candidates(
                 "change_scope": change_scope,
                 "requires_training": requires_training,
                 "parameters": parameters,
-                "expected_artifacts": required_next_artifacts,
-                "forbidden_actions": forbidden_actions,
+                "expected_artifacts": deepcopy(required_next_artifacts),
+                "forbidden_actions": deepcopy(forbidden_actions),
             }
         )
     return candidates
@@ -135,10 +143,11 @@ def _expand_candidates(
 def _validate_parameter_grid(data: dict[str, Any]) -> dict[str, list[Any]]:
     if not data:
         raise ExperimentConfigError("candidate_parameters must not be empty")
-    grid: dict[str, list[Any]] = {}
-    for key in sorted(data):
+    for key in data:
         if not isinstance(key, str):
             raise ExperimentConfigError("candidate parameter keys must be strings")
+    grid: dict[str, list[Any]] = {}
+    for key in sorted(data):
         values = data[key]
         if not isinstance(values, list):
             raise ExperimentConfigError(f"candidate parameter '{key}' must be a list")
@@ -214,3 +223,29 @@ def _is_json_primitive(value: Any) -> bool:
     if isinstance(value, float):
         return math.isfinite(value)
     return False
+
+
+def _validate_json_value(value: Any, path: str) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise ExperimentConfigError(
+                    f"{path} contains non-string object key {key!r}"
+                )
+            _validate_json_value(child, f"{path}.{key}")
+        return
+
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _validate_json_value(child, f"{path}[{index}]")
+        return
+
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ExperimentConfigError(f"{path} contains non-finite numeric value")
+
+    if value is None or isinstance(value, str | bool | int | float):
+        return
+
+    raise ExperimentConfigError(
+        f"{path} contains non-JSON primitive value of type {type(value).__name__}"
+    )
