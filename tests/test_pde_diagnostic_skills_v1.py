@@ -52,6 +52,29 @@ def test_generate_baseline_prediction_repeats_last_context_frame(
     assert summary["method"] == "persistence"
 
 
+def test_generate_baseline_prediction_writes_exact_suffixless_path(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    output_path = tmp_path / "prediction_without_suffix"
+    _write_windows(
+        windows_path,
+        np.ones((1, 2, 3), dtype=np.float32),
+        np.zeros((1, 4, 3), dtype=np.float32),
+    )
+
+    summary = generate_baseline_prediction(
+        windows_path=windows_path,
+        output_path=output_path,
+        method="persistence",
+        force=False,
+    )
+
+    assert output_path.exists()
+    assert not output_path.with_suffix(".npz").exists()
+    assert summary["prediction_path"] == str(output_path)
+
+
 def test_generate_baseline_prediction_refuses_overwrite_without_force(
     tmp_path: Path,
 ) -> None:

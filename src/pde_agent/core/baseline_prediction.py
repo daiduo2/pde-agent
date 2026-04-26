@@ -39,11 +39,12 @@ def generate_baseline_prediction(
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        output,
-        prediction=prediction,
-        metadata_json=json.dumps(metadata, sort_keys=True),
-    )
+    with output.open("wb") as handle:
+        np.savez(
+            handle,
+            prediction=prediction,
+            metadata_json=json.dumps(metadata, sort_keys=True),
+        )
     return {
         "prediction_path": str(output),
         "prediction_shape": [int(axis) for axis in prediction.shape],
