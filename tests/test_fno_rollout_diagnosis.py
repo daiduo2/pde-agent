@@ -97,3 +97,38 @@ def test_diagnose_fno_rollout_rejects_existing_artifact_without_force(
         )
 
     assert (output_dir / "fno_score.json").read_text(encoding="utf-8") == "previous"
+
+
+def test_diagnose_fno_rollout_cleans_partial_artifacts_on_failure(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_dir = tmp_path / "diagnosis"
+    _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+    output_dir.mkdir()
+    marker_path = output_dir / "keep.txt"
+    marker_path.write_text("not a diagnosis artifact", encoding="utf-8")
+
+    with pytest.raises(Exception, match="dt must be > 0"):
+        diagnose_fno_rollout(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_dir=output_dir,
+            nu=0.001,
+            dt=0.0,
+            dx=1.0,
+            force=False,
+        )
+
+    artifact_names = {
+        "fno_prediction.npz",
+        "fno_score.json",
+        "fno_rollout_error.json",
+        "fno_burgers_physics.json",
+        "fno_rollout_summary.json",
+    }
+    for artifact_name in artifact_names:
+        assert not (output_dir / artifact_name).exists()
+    assert marker_path.read_text(encoding="utf-8") == "not a diagnosis artifact"

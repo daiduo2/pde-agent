@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -32,45 +33,49 @@ def diagnose_fno_rollout(
     paths = _artifact_paths(output_root)
     _prepare_output_paths(paths=paths, force=force)
 
-    prediction_summary = predict_fno_local(
-        windows_path=windows_file,
-        checkpoint_path=checkpoint_file,
-        output_path=paths["prediction_npz_path"],
-        metadata_path=None,
-        force=force,
-    )
-    score = score_prediction_npz(
-        prediction_path=paths["prediction_npz_path"],
-        target_path=windows_file,
-        output_path=paths["score_json_path"],
-    )
-    error = diagnose_rollout_error_npz(
-        prediction_path=paths["prediction_npz_path"],
-        target_path=windows_file,
-        score_path=paths["score_json_path"],
-        output_path=paths["rollout_error_json_path"],
-    )
-    physics = check_burgers_physics_npz(
-        prediction_path=paths["prediction_npz_path"],
-        target_path=windows_file,
-        output_path=paths["burgers_physics_json_path"],
-        nu=nu,
-        dt=dt,
-        dx=dx,
-    )
-    summary = _build_summary(
-        prediction_summary=prediction_summary,
-        score=score,
-        error=error,
-        physics=physics,
-        paths=paths,
-    )
-    summary["summary_path"] = str(paths["summary_json_path"])
-    paths["summary_json_path"].write_text(
-        json.dumps(summary, allow_nan=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return summary
+    try:
+        prediction_summary = predict_fno_local(
+            windows_path=windows_file,
+            checkpoint_path=checkpoint_file,
+            output_path=paths["prediction_npz_path"],
+            metadata_path=None,
+            force=force,
+        )
+        score = score_prediction_npz(
+            prediction_path=paths["prediction_npz_path"],
+            target_path=windows_file,
+            output_path=paths["score_json_path"],
+        )
+        error = diagnose_rollout_error_npz(
+            prediction_path=paths["prediction_npz_path"],
+            target_path=windows_file,
+            score_path=paths["score_json_path"],
+            output_path=paths["rollout_error_json_path"],
+        )
+        physics = check_burgers_physics_npz(
+            prediction_path=paths["prediction_npz_path"],
+            target_path=windows_file,
+            output_path=paths["burgers_physics_json_path"],
+            nu=nu,
+            dt=dt,
+            dx=dx,
+        )
+        summary = _build_summary(
+            prediction_summary=prediction_summary,
+            score=score,
+            error=error,
+            physics=physics,
+            paths=paths,
+        )
+        summary["summary_path"] = str(paths["summary_json_path"])
+        paths["summary_json_path"].write_text(
+            json.dumps(summary, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return summary
+    except Exception:
+        _cleanup_artifacts(paths)
+        raise
 
 
 def _artifact_paths(output_dir: Path) -> dict[str, Path]:
@@ -90,6 +95,13 @@ def _prepare_output_paths(*, paths: dict[str, Path], force: bool) -> None:
         raise FNORolloutDiagnosisError(f"diagnosis artifact already exists: {names}")
     for path in paths.values():
         path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _cleanup_artifacts(paths: dict[str, Path]) -> None:
+    for path in paths.values():
+        with suppress(OSError):
+            if path.exists():
+                path.unlink()
 
 
 def _build_summary(
