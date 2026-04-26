@@ -89,16 +89,32 @@ def _inspect_loaded_checkpoint(
     }
 
 
-def _collect_tensors(value: Any, *, torch: Any) -> list[Any]:
+def _collect_tensors(
+    value: Any,
+    *,
+    torch: Any,
+    _visited: set[int] | None = None,
+) -> list[Any]:
+    if _visited is None:
+        _visited = set()
+
     tensors: list[Any] = []
     if torch.is_tensor(value):
         return [value]
     if isinstance(value, dict):
+        value_id = id(value)
+        if value_id in _visited:
+            return tensors
+        _visited.add(value_id)
         for child in value.values():
-            tensors.extend(_collect_tensors(child, torch=torch))
+            tensors.extend(_collect_tensors(child, torch=torch, _visited=_visited))
     elif isinstance(value, (list, tuple)):
+        value_id = id(value)
+        if value_id in _visited:
+            return tensors
+        _visited.add(value_id)
         for child in value:
-            tensors.extend(_collect_tensors(child, torch=torch))
+            tensors.extend(_collect_tensors(child, torch=torch, _visited=_visited))
     return tensors
 
 

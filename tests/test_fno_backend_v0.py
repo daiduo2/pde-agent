@@ -6,13 +6,11 @@ import pytest
 
 from pde_agent.core.fno_backend import (
     FNOBackendError,
+    _collect_tensors,
     inspect_fno_checkpoint,
 )
 
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None,
-    reason="FNO backend tests require torch extra",
-)
+TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
 def _write_fixture_checkpoint(path: Path) -> None:
@@ -35,6 +33,20 @@ def _write_fixture_checkpoint(path: Path) -> None:
     )
 
 
+class FakeTorch:
+    @staticmethod
+    def is_tensor(value: object) -> bool:
+        return False
+
+
+def test_collect_tensors_ignores_cyclic_dict() -> None:
+    cycle: dict[str, object] = {}
+    cycle["self"] = cycle
+
+    assert _collect_tensors(cycle, torch=FakeTorch()) == []
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
 def test_inspect_fno_checkpoint_fixture(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "fixture_fno.pt"
     output_path = tmp_path / "metadata.json"
