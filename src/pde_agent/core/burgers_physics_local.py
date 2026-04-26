@@ -74,12 +74,10 @@ def check_burgers_physics_arrays(
     target_residual_rmse = _rmse(target_residual)
     residual_ratio = prediction_residual_rmse / (target_residual_rmse + 1e-12)
     mass_drift = _mass_drift(pred)
-    energy_decay_ratio = float(
-        np.mean(pred[:, -1, :] ** 2) / (np.mean(truth[:, -1, :] ** 2) + 1e-12)
-    )
-    total_variation_ratio = float(
-        _total_variation(pred) / (_total_variation(truth) + 1e-12)
-    )
+    pred_final_energy = float(np.mean(pred[:, -1, :] ** 2))
+    target_final_energy = float(np.mean(truth[:, -1, :] ** 2))
+    energy_decay_ratio = _safe_ratio(pred_final_energy, target_final_energy)
+    total_variation_ratio = _safe_ratio(_total_variation(pred), _total_variation(truth))
     gradient_error_ratio = _gradient_error_ratio(pred, truth)
     shock_region_error_ratio = _shock_region_error_ratio(error, truth)
 

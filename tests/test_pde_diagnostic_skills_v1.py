@@ -394,6 +394,39 @@ def test_check_burgers_physics_residual_ratio_and_notes_match_contract() -> None
     )
 
 
+def test_check_burgers_physics_zero_fields_do_not_overdissipate() -> None:
+    prediction = np.zeros((1, 3, 4), dtype=np.float32)
+    target = prediction.copy()
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert np.isfinite(result["energy_decay_ratio"])
+    assert np.isfinite(result["total_variation_ratio"])
+    assert result["physics_issue"] != "overdissipation"
+
+
+def test_check_burgers_physics_constant_fields_have_neutral_tv_ratio() -> None:
+    prediction = np.ones((1, 3, 4), dtype=np.float32) * 3.0
+    target = prediction.copy()
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["total_variation_ratio"] == pytest.approx(1.0)
+    assert result["physics_issue"] != "overdissipation"
+
+
 def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:
     prediction_path = tmp_path / "prediction.npz"
     target_path = tmp_path / "windows.npz"
