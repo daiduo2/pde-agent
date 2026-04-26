@@ -38,6 +38,9 @@ from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
     run_fno_iteration_dryrun_command,
 )
+from pde_agent.commands.run_fno_evidence_sweep import (
+    run_fno_evidence_sweep_command,
+)
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
@@ -321,6 +324,51 @@ def run_fno_iteration_dryrun_cmd(
                 windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-fno-evidence-sweep")
+def run_fno_evidence_sweep_cmd(
+    source_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    start_indices: list[int] = typer.Option(..., "--start-index"),
+    sample_limit: int = typer.Option(...),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(...),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    train_steps: list[int] = typer.Option(..., "--train-steps"),
+    learning_rate: float = typer.Option(1e-4),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_fno_evidence_sweep_command(
+                source_path=source_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                start_indices=start_indices,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                train_steps=train_steps,
+                learning_rate=learning_rate,
                 nu=nu,
                 dt=dt,
                 dx=dx,

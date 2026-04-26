@@ -199,3 +199,90 @@ def test_run_fno_evidence_sweep_writes_summary_and_recommendation(
         (output_dir / "evidence_summary.json").read_text(encoding="utf-8")
     )
     assert written == summary
+
+
+def test_run_fno_evidence_sweep_cli_writes_payload(tmp_path: Path, monkeypatch) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    import pde_agent.commands.run_fno_evidence_sweep as command_module
+
+    source_path = tmp_path / "burgers.hdf5"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    output_dir = tmp_path / "evidence"
+    source_path.write_bytes(b"hdf5-placeholder")
+    checkpoint_path.write_bytes(b"checkpoint-placeholder")
+
+    def fake_run_fno_evidence_sweep(**kwargs):
+        output = Path(kwargs["output_dir"])
+        output.mkdir(parents=True, exist_ok=True)
+        summary_path = output / "evidence_summary.json"
+        csv_path = output / "evidence_summary.csv"
+        summary_path.write_text("{}", encoding="utf-8")
+        csv_path.write_text("header\n", encoding="utf-8")
+        return {
+            "state_hint": "FNO_EVIDENCE_SWEEP_COMPLETED",
+            "artifacts": {
+                "summary_json_path": str(summary_path),
+                "summary_csv_path": str(csv_path),
+            },
+            "record_count": 2,
+            "comparison_count": 1,
+            "strategy_statistics": {
+                "scheduled_sampling": {"best_score": 42.0},
+            },
+            "recommendation": {
+                "add_more_training_strategies": False,
+                "recommended_training_strategy": "scheduled_sampling",
+                "next_command": "run-fno-iteration-dryrun",
+            },
+        }
+
+    monkeypatch.setattr(
+        command_module, "run_fno_evidence_sweep", fake_run_fno_evidence_sweep
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-fno-evidence-sweep",
+            "--source-path",
+            str(source_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-dir",
+            str(output_dir),
+            "--dataset-key",
+            "tensor",
+            "--start-index",
+            "0",
+            "--sample-limit",
+            "2",
+            "--context-steps",
+            "4",
+            "--forecast-steps",
+            "3",
+            "--time-reduction",
+            "1",
+            "--space-reduction",
+            "1",
+            "--train-steps",
+            "1",
+            "--learning-rate",
+            "0.0001",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "run-fno-evidence-sweep"
+    assert payload["state_hint"] == "FNO_EVIDENCE_SWEEP_COMPLETED"
+    assert payload["artifacts"]["summary_json_path"] == str(
+        output_dir / "evidence_summary.json"
+    )
+    assert payload["metrics"]["record_count"] == 2
+    assert payload["metrics"]["comparison_count"] == 1
+    assert payload["metrics"]["best_score"] == 42.0
+    assert payload["metrics"]["add_more_training_strategies"] is False
+    assert payload["next_hint"] == "run-fno-iteration-dryrun"
