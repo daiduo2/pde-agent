@@ -33,6 +33,9 @@ from pde_agent.commands.plan_next_experiment_from_fno_summary import (
 from pde_agent.commands.prepare_candidate_execution import (
     prepare_candidate_execution,
 )
+from pde_agent.commands.record_autonomy_decision import (
+    record_autonomy_decision_command,
+)
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -451,6 +454,27 @@ def check_burgers_physics_local_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+            )
+        )
+    )
+
+
+@app.command("record-autonomy-decision")
+def record_autonomy_decision_cmd(
+    decision: str = typer.Option(...),
+    reason_code: str = typer.Option(...),
+    evidence_source_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_autonomy_decision_command(
+                decision=decision,
+                reason_code=reason_code,
+                evidence_source_path=evidence_source_path,
+                output_path=output_path,
             )
         )
     )
