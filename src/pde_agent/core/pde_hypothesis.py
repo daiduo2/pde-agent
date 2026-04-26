@@ -47,6 +47,47 @@ def select_pde_hypothesis_from_files(
     return result
 
 
+def select_pde_hypothesis_from_fno_summary(
+    *,
+    summary_path: str | Path,
+    output_path: str | Path | None,
+) -> dict[str, Any]:
+    summary_file = Path(summary_path)
+    summary = _load_json_object(summary_file, "FNO rollout summary")
+    state_hint = summary.get("state_hint")
+    if state_hint != "FNO_ROLLOUT_DIAGNOSED":
+        raise PDEHypothesisError(
+            "FNO rollout summary must include state_hint "
+            f"'FNO_ROLLOUT_DIAGNOSED', got {state_hint!r}"
+        )
+
+    artifacts = summary.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise PDEHypothesisError("FNO rollout summary must include object 'artifacts'")
+
+    result = select_pde_hypothesis_from_files(
+        score_path=_require_artifact_path(
+            artifacts, "score_json_path", "FNO rollout summary"
+        ),
+        error_diagnosis_path=_require_artifact_path(
+            artifacts, "rollout_error_json_path", "FNO rollout summary"
+        ),
+        physics_check_path=_require_artifact_path(
+            artifacts, "burgers_physics_json_path", "FNO rollout summary"
+        ),
+        output_path=output_path,
+    )
+    result["summary_path"] = str(summary_file)
+    if output_path is not None:
+        hypothesis_file = Path(output_path)
+        result["hypothesis_path"] = str(hypothesis_file)
+        hypothesis_file.write_text(
+            json.dumps(result, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return result
+
+
 def select_pde_hypothesis(
     *,
     score: dict[str, Any],
@@ -112,6 +153,15 @@ def _require_string(data: dict[str, Any], field: str, label: str) -> str:
     value = data.get(field)
     if not isinstance(value, str):
         raise PDEHypothesisError(f"{label} must include string field '{field}'")
+    return value
+
+
+def _require_artifact_path(
+    artifacts: dict[Any, Any], field: str, label: str
+) -> str:
+    value = artifacts.get(field)
+    if not isinstance(value, str):
+        raise PDEHypothesisError(f"{label} artifacts must include string '{field}'")
     return value
 
 
