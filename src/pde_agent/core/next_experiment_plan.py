@@ -357,12 +357,9 @@ _INTERVENTION_POLICIES: dict[str, dict[str, Any]] = {
         ],
         "forbidden_actions": _COMMON_FORBIDDEN_ACTIONS,
         "candidate_parameters": {
-            "teacher_forcing_decay": [0.95, 0.9, 0.85],
-            "rollout_steps": [10, 20, 31],
-            "training_strategy": [
-                "scheduled_sampling",
-                "late_weighted_scheduled_sampling",
-            ],
+            "teacher_forcing_decay": [0.85, 0.9],
+            "rollout_steps": [10],
+            "training_strategy": ["scheduled_sampling"],
         },
         "budget": _TRAINING_BUDGET,
         "acceptance_criteria": [

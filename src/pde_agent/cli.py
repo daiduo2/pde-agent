@@ -626,7 +626,7 @@ def execute_fno_finetune_candidate_cmd(
     candidate_plan_path: str = typer.Option(...),
     windows_path: str = typer.Option(...),
     checkpoint_path: str = typer.Option(...),
-    max_train_steps: int = typer.Option(1),
+    max_train_steps: int = typer.Option(16),
     learning_rate: float = typer.Option(1e-4),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),

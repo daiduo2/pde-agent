@@ -272,23 +272,30 @@ This writes `candidate_execution_plan.json` plus `artifacts/` and `logs/`
 directories under the selected candidate workspace. It still does not run
 training; it only prepares the boundary that a future executor will consume.
 
-Execute the minimal FNO scheduled-sampling finetune candidate:
+Execute the V1 FNO scheduled-sampling finetune candidate:
 
 ```bash
 uv run --frozen --extra torch pde-agent execute-fno-finetune-candidate \
   --candidate-plan-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/candidate_execution_plan.json \
   --windows-path data/derived/local_windows_task1_smoke.npz \
   --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --max-train-steps 1 \
+  --max-train-steps 16 \
   --learning-rate 1e-4 \
   --force
 ```
 
-This executor supports `use_scheduled_sampling_rollout_finetune`. Existing
-candidate plans default to `training_strategy = scheduled_sampling`. Candidate
-plans may also set `training_strategy = late_weighted_scheduled_sampling`, which
-uses the same rollout finetune loop but linearly increases loss weight for later
-rollout steps. It writes `finetuned_fno_checkpoint.pt`,
+The evidence-backed V1 defaults are `training_strategy = scheduled_sampling`,
+`rollout_steps = 10`, `teacher_forcing_decay = 0.85`,
+`max_train_steps = 16`, and `learning_rate = 1e-4`. The planner keeps
+`teacher_forcing_decay = 0.9` as the nearby fallback candidate. The
+`--max-train-steps` flag is optional; omitting it uses the V1 default. Existing
+candidate plans that omit `training_strategy` still default to
+`scheduled_sampling`.
+
+This executor supports `use_scheduled_sampling_rollout_finetune`. Candidate
+plans may also set `training_strategy = late_weighted_scheduled_sampling` for
+older experiments, which uses the same rollout finetune loop but linearly
+increases loss weight for later rollout steps. It writes `finetuned_fno_checkpoint.pt`,
 `candidate_prediction.npz`, and `candidate_execution_report.json`; it does not
 claim score improvement.
 

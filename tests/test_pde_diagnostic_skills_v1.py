@@ -712,14 +712,57 @@ def test_plan_next_experiment_long_horizon_drift_requests_rollout_finetune(
     assert plan["budget"]["requires_training"] is True
     assert plan["budget"]["max_experiment_count"] == 2
     assert plan["failure_mode"]["score_band"] == "low"
-    assert plan["intervention_plan"]["candidate_parameters"]["rollout_steps"] == [
-        10,
-        20,
-        31,
+    assert plan["intervention_plan"]["candidate_parameters"] == {
+        "teacher_forcing_decay": [0.85, 0.9],
+        "rollout_steps": [10],
+        "training_strategy": ["scheduled_sampling"],
+    }
+
+
+def test_generate_experiment_config_expands_fno_v1_default_candidates(
+    tmp_path: Path,
+) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_score(score_path, score=45.0, rmse=0.5)
+    _write_error_diagnosis(error_path, "long_horizon_drift")
+    _write_physics_check(physics_path, "inconclusive")
+    _write_hypothesis(hypothesis_path, "use_scheduled_sampling_rollout_finetune")
+
+    plan = plan_next_experiment_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        hypothesis_path=hypothesis_path,
+        output_path=plan_path,
+    )
+    config = generate_experiment_config(
+        plan=plan,
+        source_plan_path=str(plan_path),
+    )
+
+    assert [
+        candidate["experiment_id"] for candidate in config["candidate_experiments"]
+    ] == [
+        "use_scheduled_sampling_rollout_finetune_001",
+        "use_scheduled_sampling_rollout_finetune_002",
     ]
-    assert plan["intervention_plan"]["candidate_parameters"]["training_strategy"] == [
-        "scheduled_sampling",
-        "late_weighted_scheduled_sampling",
+    assert [
+        candidate["parameters"] for candidate in config["candidate_experiments"]
+    ] == [
+        {
+            "rollout_steps": 10,
+            "teacher_forcing_decay": 0.85,
+            "training_strategy": "scheduled_sampling",
+        },
+        {
+            "rollout_steps": 10,
+            "teacher_forcing_decay": 0.9,
+            "training_strategy": "scheduled_sampling",
+        },
     ]
 
 

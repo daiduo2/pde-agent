@@ -268,3 +268,43 @@ def test_execute_fno_finetune_candidate_cli_writes_payload(tmp_path: Path) -> No
     )
     assert payload["artifacts"]["candidate_prediction_path"]
     assert payload["next_hint"] == "score-local-rollout"
+
+
+def test_execute_fno_finetune_candidate_cli_defaults_to_v1_train_steps(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    candidate_plan_path = tmp_path / "candidate" / "candidate_execution_plan.json"
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    _write_candidate_plan(
+        candidate_plan_path,
+        parameters={
+            "teacher_forcing_decay": 0.85,
+            "rollout_steps": 3,
+            "training_strategy": "scheduled_sampling",
+        },
+    )
+    _write_windows(windows_path)
+    _write_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "execute-fno-finetune-candidate",
+            "--candidate-plan-path",
+            str(candidate_plan_path),
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["metrics"]["train_steps"] == 16
+    assert payload["metrics"]["training_strategy"] == "scheduled_sampling"
