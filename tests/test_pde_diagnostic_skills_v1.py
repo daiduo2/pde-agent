@@ -10,7 +10,10 @@ from pde_agent.core.baseline_prediction import (
     BaselinePredictionError,
     generate_baseline_prediction,
 )
-from pde_agent.core.burgers_physics_local import check_burgers_physics_npz
+from pde_agent.core.burgers_physics_local import (
+    check_burgers_physics_arrays,
+    check_burgers_physics_npz,
+)
 from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
 
 
@@ -301,6 +304,39 @@ def test_check_burgers_physics_flags_overdissipation(tmp_path: Path) -> None:
 
     assert result["physics_issue"] == "overdissipation"
     assert result["total_variation_ratio"] < 0.5
+
+
+def test_check_burgers_physics_mass_drift_uses_prediction_temporal_change() -> None:
+    prediction = np.zeros((1, 3, 4), dtype=np.float32)
+    prediction[:, -1, :] = 2.0
+    target = prediction.copy()
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["mass_drift"] == pytest.approx(2.0)
+
+
+def test_check_burgers_physics_energy_ratio_uses_final_step() -> None:
+    prediction = np.ones((1, 3, 4), dtype=np.float32) * 10.0
+    target = np.ones((1, 3, 4), dtype=np.float32)
+    prediction[:, -1, :] = 1.0
+    target[:, -1, :] = 2.0
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["energy_decay_ratio"] == pytest.approx(0.25)
 
 
 def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:

@@ -73,9 +73,13 @@ def check_burgers_physics_arrays(
     prediction_residual_rmse = _rmse(pred_residual)
     target_residual_rmse = _rmse(target_residual)
     residual_ratio = _safe_ratio(prediction_residual_rmse, target_residual_rmse)
-    mass_drift = _mass_drift(pred, truth)
-    energy_decay_ratio = _safe_ratio(float(np.mean(pred**2)), float(np.mean(truth**2)))
-    total_variation_ratio = _safe_ratio(_total_variation(pred), _total_variation(truth))
+    mass_drift = _mass_drift(pred)
+    energy_decay_ratio = float(
+        np.mean(pred[:, -1, :] ** 2) / (np.mean(truth[:, -1, :] ** 2) + 1e-12)
+    )
+    total_variation_ratio = float(
+        _total_variation(pred) / (_total_variation(truth) + 1e-12)
+    )
     gradient_error_ratio = _gradient_error_ratio(pred, truth)
     shock_region_error_ratio = _shock_region_error_ratio(error, truth)
 
@@ -196,39 +200,36 @@ def _safe_ratio(numerator: float, denominator: float) -> float:
     return float(numerator / denominator)
 
 
-def _mass_drift(prediction: np.ndarray, target: np.ndarray) -> float:
-    pred_mass_by_time = np.mean(prediction, axis=(0, 2))
-    target_mass_by_time = np.mean(target, axis=(0, 2))
-    drift = float(np.max(np.abs(pred_mass_by_time - target_mass_by_time)))
-    scale = float(np.mean(np.abs(target))) + 1e-12
-    return float(drift / scale)
+def _mass_drift(prediction: np.ndarray) -> float:
+    initial_mass = np.mean(prediction[:, 0, :], axis=1)
+    final_mass = np.mean(prediction[:, -1, :], axis=1)
+    return float(np.mean(np.abs(final_mass - initial_mass)))
 
 
 def _total_variation(array: np.ndarray) -> float:
-    return float(np.mean(np.abs(np.roll(array, -1, axis=2) - array)))
+    return float(np.mean(np.sum(np.abs(np.diff(array, axis=2)), axis=2)))
 
 
 def _gradient_error_ratio(prediction: np.ndarray, target: np.ndarray) -> float:
-    pred_gradient = np.roll(prediction, -1, axis=2) - np.roll(prediction, 1, axis=2)
-    target_gradient = np.roll(target, -1, axis=2) - np.roll(target, 1, axis=2)
+    pred_gradient = np.diff(prediction, axis=2)
+    target_gradient = np.diff(target, axis=2)
     gradient_error = _rmse(pred_gradient - target_gradient)
     target_gradient_rmse = _rmse(target_gradient)
-    return _safe_ratio(gradient_error, target_gradient_rmse)
+    return float(gradient_error / (target_gradient_rmse + 1e-12))
 
 
 def _shock_region_error_ratio(error: np.ndarray, target: np.ndarray) -> float:
     abs_error = np.abs(error)
-    gradient = np.abs(np.roll(target, -1, axis=2) - np.roll(target, 1, axis=2))
+    gradient = np.abs(np.diff(target, axis=2))
     threshold = float(np.quantile(gradient, 0.75))
     shock_mask = gradient > threshold
     if not np.any(shock_mask):
         return 1.0
 
-    shock_error = float(np.mean(abs_error[shock_mask]))
-    non_shock_error = (
-        float(np.mean(abs_error[~shock_mask])) if np.any(~shock_mask) else 0.0
-    )
-    return _safe_ratio(shock_error, non_shock_error)
+    local_abs_error = abs_error[:, :, 1:][shock_mask]
+    shock_error = float(np.mean(local_abs_error))
+    global_error = float(np.mean(abs_error))
+    return float(shock_error / (global_error + 1e-12))
 
 
 def _classify_physics_issue(
