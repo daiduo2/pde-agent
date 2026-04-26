@@ -14,6 +14,10 @@ from pde_agent.core.burgers_physics_local import (
     check_burgers_physics_arrays,
     check_burgers_physics_npz,
 )
+from pde_agent.core.experiment_config import (
+    ExperimentConfigError,
+    generate_experiment_config_from_file,
+)
 from pde_agent.core.next_experiment_plan import (
     NextExperimentPlanError,
     plan_next_experiment_from_files,
@@ -500,6 +504,65 @@ def _write_hypothesis(path: Path, hypothesis: str) -> None:
     )
 
 
+def _write_next_experiment_plan(
+    path: Path,
+    *,
+    max_experiment_count: int = 3,
+    candidate_parameters: dict[str, list[object]] | None = None,
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "NEXT_EXPERIMENT_PLANNED",
+                "selected_intervention": "apply_low_pass_stabilization",
+                "source_hypothesis": "apply_low_pass_stabilization",
+                "failure_mode": {
+                    "dominant_error_pattern": "shock_region_error",
+                    "physics_issue": "nonphysical_oscillation",
+                    "score_band": "medium",
+                },
+                "change_scope": "postprocess_or_inference_only",
+                "intervention_plan": {
+                    "description": "Sweep low-pass thresholds.",
+                    "allowed_actions": ["sweep spectral cutoff"],
+                    "forbidden_actions": ["overwrite previous artifacts"],
+                    "candidate_parameters": (
+                        {
+                            "low_pass_cutoff_ratio": [0.5, 0.625, 0.75],
+                            "preserve_mean": [True],
+                        }
+                        if candidate_parameters is None
+                        else candidate_parameters
+                    ),
+                },
+                "budget": {
+                    "max_experiment_count": max_experiment_count,
+                    "max_train_time_seconds": 0,
+                    "max_inference_time_seconds": 120,
+                    "requires_training": False,
+                },
+                "controls": {
+                    "baseline_required": True,
+                    "baseline_artifacts": [
+                        "previous prediction NPZ",
+                        "previous score JSON",
+                    ],
+                },
+                "acceptance_criteria": ["score improves"],
+                "rejection_criteria": ["score decreases"],
+                "required_next_artifacts": [
+                    "candidate prediction NPZ",
+                    "candidate score JSON",
+                ],
+                "next_command": "generate-experiment-config",
+                "rationale": "Fixture plan.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_select_pde_hypothesis_maps_overdamping(tmp_path: Path) -> None:
     score_path = tmp_path / "score.json"
     error_path = tmp_path / "error.json"
@@ -727,6 +790,69 @@ def test_plan_next_experiment_cli_writes_payload(tmp_path: Path) -> None:
     }
     assert payload["next_hint"] == "generate-experiment-config"
     assert output_path.exists()
+
+
+def test_generate_experiment_config_expands_low_pass_candidates(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    output_path = tmp_path / "experiment_config.json"
+    _write_next_experiment_plan(plan_path)
+
+    config = generate_experiment_config_from_file(
+        plan_path=plan_path,
+        output_path=output_path,
+    )
+
+    assert output_path.exists()
+    assert config["state_hint"] == "EXPERIMENT_CONFIG_GENERATED"
+    assert config["source_plan_path"] == str(plan_path)
+    assert config["selected_intervention"] == "apply_low_pass_stabilization"
+    assert config["change_scope"] == "postprocess_or_inference_only"
+    assert config["requires_training"] is False
+    assert [
+        candidate["experiment_id"] for candidate in config["candidate_experiments"]
+    ] == [
+        "apply_low_pass_stabilization_001",
+        "apply_low_pass_stabilization_002",
+        "apply_low_pass_stabilization_003",
+    ]
+    assert config["candidate_experiments"][0]["parameters"] == {
+        "low_pass_cutoff_ratio": 0.5,
+        "preserve_mean": True,
+    }
+    assert config["candidate_experiments"][2]["parameters"] == {
+        "low_pass_cutoff_ratio": 0.75,
+        "preserve_mean": True,
+    }
+    assert config["next_command"] == "execute-candidate-experiment"
+
+
+def test_generate_experiment_config_respects_budget_limit(tmp_path: Path) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(
+        plan_path,
+        max_experiment_count=2,
+        candidate_parameters={
+            "alpha": [1, 2],
+            "beta": ["a", "b"],
+        },
+    )
+
+    config = generate_experiment_config_from_file(
+        plan_path=plan_path,
+        output_path=None,
+    )
+
+    assert len(config["candidate_experiments"]) == 2
+    assert config["candidate_experiments"][0]["parameters"] == {
+        "alpha": 1,
+        "beta": "a",
+    }
+    assert config["candidate_experiments"][1]["parameters"] == {
+        "alpha": 1,
+        "beta": "b",
+    }
 
 
 def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:
