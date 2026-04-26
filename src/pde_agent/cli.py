@@ -9,6 +9,7 @@ from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
+from pde_agent.commands.compare_fno_candidates import compare_fno_candidates_command
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
@@ -586,6 +587,28 @@ def evaluate_fno_candidate_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("compare-fno-candidates")
+def compare_fno_candidates_cmd(
+    evaluation_report_paths: list[str] = typer.Option(
+        ...,
+        "--evaluation-report-path",
+    ),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            compare_fno_candidates_command(
+                evaluation_report_paths=evaluation_report_paths,
+                output_path=output_path,
                 force=force,
             )
         )

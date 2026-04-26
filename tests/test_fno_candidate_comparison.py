@@ -175,3 +175,51 @@ def test_compare_fno_candidates_rejects_duplicate_experiment_ids(
             output_path=tmp_path / "comparison.json",
             force=False,
         )
+
+
+def test_compare_fno_candidates_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    weak_path = tmp_path / "weak" / "candidate_evaluation_report.json"
+    strong_path = tmp_path / "strong" / "candidate_evaluation_report.json"
+    output_path = tmp_path / "comparison.json"
+    _write_evaluation_report(
+        weak_path,
+        experiment_id="candidate_weak",
+        intervention="use_scheduled_sampling_rollout_finetune",
+        score=48.0,
+        rel_mse=0.3,
+        rmse=0.4,
+    )
+    _write_evaluation_report(
+        strong_path,
+        experiment_id="candidate_strong",
+        intervention="use_scheduled_sampling_rollout_finetune",
+        score=52.0,
+        rel_mse=0.2,
+        rmse=0.3,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "compare-fno-candidates",
+            "--evaluation-report-path",
+            str(weak_path),
+            "--evaluation-report-path",
+            str(strong_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "compare-fno-candidates"
+    assert payload["state_hint"] == "FNO_CANDIDATES_COMPARED"
+    assert payload["metrics"]["candidate_count"] == 2
+    assert payload["metrics"]["winner_experiment_id"] == "candidate_strong"
+    assert payload["artifacts"]["comparison_report_path"] == str(output_path)
+    assert payload["next_hint"] == "prepare-next-fno-iteration"
