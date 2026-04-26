@@ -33,6 +33,28 @@ def _write_fixture_checkpoint(path: Path) -> None:
     )
 
 
+def _write_windows(path: Path) -> tuple[object, object]:
+    np = pytest.importorskip("numpy")
+    x = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False, dtype=np.float32)
+    context = np.zeros((2, 4, 8), dtype=np.float32)
+    target = np.zeros((2, 3, 8), dtype=np.float32)
+    for sample in range(2):
+        base = np.sin(x + sample * 0.1)
+        delta = 0.05 * np.cos(x) + 0.01 * sample
+        for t in range(4):
+            context[sample, t, :] = base + t * delta
+        for t in range(3):
+            target[sample, t, :] = base + (4 + t) * delta
+    with path.open("wb") as handle:
+        np.savez(
+            handle,
+            context=context,
+            target=target,
+            metadata_json=json.dumps({"fixture": True}),
+        )
+    return context, target
+
+
 class FakeTorch:
     @staticmethod
     def is_tensor(value: object) -> bool:
@@ -68,3 +90,57 @@ def test_inspect_fno_checkpoint_fixture(tmp_path: Path) -> None:
     assert "model_state_dict" in metadata["top_level_keys"]
     assert json.loads(output_path.read_text(encoding="utf-8")) == metadata
     assert issubclass(FNOBackendError, RuntimeError)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_fixture_writes_prediction(tmp_path: Path) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_path = tmp_path / "prediction"
+    context, target = _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+
+    from pde_agent.core.fno_backend import predict_fno_local
+
+    summary = predict_fno_local(
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        output_path=output_path,
+        metadata_path=None,
+        force=False,
+    )
+
+    np = pytest.importorskip("numpy")
+    assert output_path.exists()
+    assert not output_path.with_suffix(".npz").exists()
+    with np.load(output_path, allow_pickle=False) as archive:
+        prediction = archive["prediction"]
+        metadata = json.loads(str(archive["metadata_json"]))
+    assert prediction.shape == target.shape
+    assert prediction.dtype == np.float32
+    assert metadata["model_type"] == "fno"
+    assert metadata["prediction_rule"] == "delta_extrapolation"
+    assert summary["prediction_shape"] == list(target.shape)
+    assert summary["model_type"] == "fno"
+    assert context.shape[0] == prediction.shape[0]
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_rejects_unsupported_checkpoint(tmp_path: Path) -> None:
+    import torch
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "unsupported.pt"
+    _write_windows(windows_path)
+    torch.save({"model_type": "unknown"}, checkpoint_path)
+
+    from pde_agent.core.fno_backend import predict_fno_local
+
+    with pytest.raises(FNOBackendError, match="unsupported"):
+        predict_fno_local(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=tmp_path / "prediction.npz",
+            metadata_path=None,
+            force=False,
+        )
