@@ -3,6 +3,7 @@ import json
 import typer
 
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
+from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
@@ -485,6 +486,25 @@ def generate_experiment_config_cmd(
             generate_experiment_config(
                 plan_path=plan_path,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("audit-experiment-config")
+def audit_experiment_config_cmd(
+    config_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    plan_path: str | None = typer.Option(None),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            audit_experiment_config(
+                config_path=config_path,
+                output_path=output_path,
+                plan_path=plan_path,
             )
         )
     )

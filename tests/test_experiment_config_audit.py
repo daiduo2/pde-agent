@@ -92,3 +92,35 @@ def test_audit_experiment_config_rejects_tampered_candidate_parameter(
     assert audit["issue_count"] == 1
     assert audit["issues"][0]["code"] == "candidate_parameter_out_of_grid"
     assert audit["issues"][0]["severity"] == "error"
+
+
+def test_audit_experiment_config_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    plan_path = tmp_path / "next_experiment_plan.json"
+    config_path = tmp_path / "experiment_config.json"
+    audit_path = tmp_path / "experiment_config_audit.json"
+    _write_next_experiment_plan(plan_path)
+    generate_experiment_config_from_file(plan_path=plan_path, output_path=config_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit-experiment-config",
+            "--config-path",
+            str(config_path),
+            "--output-path",
+            str(audit_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "audit-experiment-config"
+    assert payload["state_hint"] == "EXPERIMENT_CONFIG_AUDITED"
+    assert payload["artifacts"]["experiment_config_audit_path"] == str(audit_path)
+    assert payload["metrics"]["decision"] == "approved_for_execution"
+    assert payload["metrics"]["issue_count"] == 0
+    assert payload["next_hint"] == "execute-candidate-experiment"
