@@ -5,6 +5,7 @@ import typer
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
+from pde_agent.commands.build_local_window_suite import build_local_window_suite
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
@@ -105,6 +106,39 @@ def build_local_windows_cmd(
             build_local_windows(
                 source_path=source_path,
                 output_path=output_path,
+                dataset_key=dataset_key,
+                start_index=start_index,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-local-window-suite")
+def build_local_window_suite_cmd(
+    source_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    start_index: int = typer.Option(0),
+    sample_limit: int | None = typer.Option(None),
+    context_steps: int = typer.Option(10),
+    forecast_steps: list[int] = typer.Option(..., "--forecast-steps"),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_local_window_suite(
+                source_path=source_path,
+                output_dir=output_dir,
                 dataset_key=dataset_key,
                 start_index=start_index,
                 sample_limit=sample_limit,

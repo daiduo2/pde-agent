@@ -106,3 +106,52 @@ def test_build_local_window_suite_rejects_duplicate_horizons(tmp_path: Path) -> 
             space_reduction=2,
             force=False,
         )
+
+
+def test_build_local_window_suite_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    source = tmp_path / "burgers.hdf5"
+    _write_hdf5(source, np.ones((3, 21, 8), dtype=np.float32))
+    output_dir = tmp_path / "suite"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-local-window-suite",
+            "--source-path",
+            str(source),
+            "--output-dir",
+            str(output_dir),
+            "--dataset-key",
+            "tensor",
+            "--start-index",
+            "0",
+            "--sample-limit",
+            "2",
+            "--context-steps",
+            "4",
+            "--forecast-steps",
+            "3",
+            "--forecast-steps",
+            "5",
+            "--time-reduction",
+            "2",
+            "--space-reduction",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "build-local-window-suite"
+    assert payload["state_hint"] == "LOCAL_WINDOW_SUITE_BUILT"
+    assert payload["artifacts"]["manifest_path"] == str(
+        output_dir / "local_window_suite_manifest.json"
+    )
+    assert payload["metrics"]["profile_count"] == 2
+    assert payload["metrics"]["max_forecast_steps"] == 7
+    assert payload["metrics"]["requested_forecast_steps"] == [3, 5]
+    assert payload["next_hint"] == "run-fno-iteration-dryrun"
