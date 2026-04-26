@@ -79,7 +79,7 @@ def select_pde_hypothesis(
 
 
 def _select(*, pattern: str, issue: str) -> str:
-    if pattern == "overdamped_rollout" or issue == "overdissipation":
+    if pattern in {"overdamped_rollout", "overdamped"} or issue == "overdissipation":
         return "add_spectral_consistency_loss"
     if pattern == "long_horizon_drift":
         return "use_scheduled_sampling_rollout_finetune"

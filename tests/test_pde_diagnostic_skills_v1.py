@@ -500,12 +500,27 @@ def test_select_pde_hypothesis_maps_overdamping(tmp_path: Path) -> None:
         output_path=output_path,
     )
 
-    assert result["selected_hypothesis"] in {
-        "add_spectral_consistency_loss",
-        "add_gradient_weighted_loss",
-    }
+    assert result["selected_hypothesis"] == "add_spectral_consistency_loss"
     assert result["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
     assert output_path.exists()
+
+
+def test_select_pde_hypothesis_accepts_overdamped_alias(tmp_path: Path) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    _write_score(score_path, score=40.0, rmse=0.5)
+    _write_error_diagnosis(error_path, "overdamped")
+    _write_physics_check(physics_path, "inconclusive")
+
+    result = select_pde_hypothesis_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        output_path=None,
+    )
+
+    assert result["selected_hypothesis"] == "add_spectral_consistency_loss"
 
 
 def test_select_pde_hypothesis_maps_long_horizon_drift(tmp_path: Path) -> None:
