@@ -325,3 +325,32 @@ by local score, then `rel_mse`, then `rmse`, then candidate id for deterministic
 ties. It writes `fno_candidate_comparison_report.json` with the winner,
 rejection reasons, and `next_command = prepare-next-fno-iteration`; it does not
 rerun diagnostics or mutate candidate artifacts.
+
+Run a bounded evidence sweep across windows and train-step budgets:
+
+```bash
+uv run --frozen --extra torch --extra data pde-agent run-fno-evidence-sweep \
+  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-dir runs/fno_evidence_sweep_001 \
+  --dataset-key tensor \
+  --start-index 0 \
+  --start-index 128 \
+  --start-index 512 \
+  --sample-limit 8 \
+  --context-steps 10 \
+  --forecast-steps 31 \
+  --time-reduction 5 \
+  --space-reduction 4 \
+  --train-steps 1 \
+  --train-steps 3 \
+  --train-steps 5 \
+  --train-steps 8 \
+  --learning-rate 1e-4 \
+  --force
+```
+
+The sweep writes `evidence_summary.json` and `evidence_summary.csv`, with
+per-candidate scores, per-cell winners, aggregate strategy statistics, and a
+recommendation on whether to add more training strategies. V0 sweeps one
+forecast horizon at a time.
