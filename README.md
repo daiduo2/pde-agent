@@ -234,3 +234,17 @@ uv run --frozen pde-agent audit-experiment-config \
 The audit writes `EXPERIMENT_CONFIG_AUDITED`. Semantic problems produce a
 `rejected` audit report with issue codes instead of silently continuing to
 candidate execution.
+
+Prepare an isolated workspace for the first approved candidate:
+
+```bash
+uv run --frozen pde-agent prepare-candidate-execution \
+  --audit-path runs/fno_iteration_001/experiment_config_audit.json \
+  --candidate-index 0 \
+  --output-dir runs/fno_iteration_001/candidates \
+  --force
+```
+
+This writes `candidate_execution_plan.json` plus `artifacts/` and `logs/`
+directories under the selected candidate workspace. It still does not run
+training; it only prepares the boundary that a future executor will consume.
