@@ -72,7 +72,7 @@ def check_burgers_physics_arrays(
 
     prediction_residual_rmse = _rmse(pred_residual)
     target_residual_rmse = _rmse(target_residual)
-    residual_ratio = _safe_ratio(prediction_residual_rmse, target_residual_rmse)
+    residual_ratio = prediction_residual_rmse / (target_residual_rmse + 1e-12)
     mass_drift = _mass_drift(pred)
     energy_decay_ratio = float(
         np.mean(pred[:, -1, :] ** 2) / (np.mean(truth[:, -1, :] ** 2) + 1e-12)
@@ -253,7 +253,10 @@ def _classify_physics_issue(
 
 
 def _build_notes(physics_issue: str) -> list[str]:
-    return [f"classified_as={physics_issue}"]
+    return [
+        "Finite-difference diagnostics are relative proxies on downsampled local windows.",
+        f"classified_as={physics_issue}",
+    ]
 
 
 def _raise_if_non_finite(value: Any, label: str) -> None:

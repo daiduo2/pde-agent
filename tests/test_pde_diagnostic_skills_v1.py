@@ -375,6 +375,25 @@ def test_check_burgers_physics_shock_ratio_matches_plan_formula() -> None:
     assert result["shock_region_error_ratio"] == pytest.approx(expected)
 
 
+def test_check_burgers_physics_residual_ratio_and_notes_match_contract() -> None:
+    prediction = np.ones((1, 3, 4), dtype=np.float32)
+    target = prediction.copy()
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["residual_ratio"] == pytest.approx(0.0)
+    assert (
+        "Finite-difference diagnostics are relative proxies on downsampled local windows."
+        in result["notes"]
+    )
+
+
 def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:
     prediction_path = tmp_path / "prediction.npz"
     target_path = tmp_path / "windows.npz"
