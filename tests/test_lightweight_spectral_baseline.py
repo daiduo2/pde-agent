@@ -426,3 +426,110 @@ def test_predict_local_model_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["next_hint"] == "score-local-rollout"
     assert prediction_path.exists()
     assert not prediction_path.with_suffix(".npz").exists()
+
+
+def test_spectral_baseline_cli_chain_reaches_pde_hypothesis(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "spectral_checkpoint"
+    prediction_path = tmp_path / "spectral_prediction"
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    context, target = _linear_trend_windows(
+        sample_count=4,
+        context_steps=4,
+        forecast_steps=5,
+        space_points=16,
+    )
+    _write_windows(windows_path, context, target)
+
+    commands = [
+        [
+            "train-spectral-residual-baseline",
+            "--windows-npz",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--modes",
+            "6",
+            "--ridge",
+            "1e-6",
+        ],
+        [
+            "predict-local-model",
+            "--windows-npz",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--prediction-npz",
+            str(prediction_path),
+        ],
+        [
+            "score-local-rollout",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--output-path",
+            str(score_path),
+        ],
+        [
+            "diagnose-rollout-error",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--score-path",
+            str(score_path),
+            "--output-path",
+            str(error_path),
+        ],
+        [
+            "check-burgers-physics-local",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--output-path",
+            str(physics_path),
+        ],
+        [
+            "select-pde-hypothesis",
+            "--score-path",
+            str(score_path),
+            "--error-diagnosis-path",
+            str(error_path),
+            "--physics-check-path",
+            str(physics_path),
+            "--output-path",
+            str(hypothesis_path),
+        ],
+    ]
+
+    payloads = []
+    for command in commands:
+        result = CliRunner().invoke(app, command)
+        assert result.exit_code == 0, result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "ok"
+        payloads.append(payload)
+
+    assert payloads[-1]["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
+    assert payloads[-1]["artifacts"]["selected_pde_hypothesis_path"] == str(
+        hypothesis_path
+    )
+    for artifact in (
+        checkpoint_path,
+        prediction_path,
+        score_path,
+        error_path,
+        physics_path,
+        hypothesis_path,
+    ):
+        assert artifact.exists()
+
+    hypothesis = json.loads(hypothesis_path.read_text(encoding="utf-8"))
+    assert hypothesis["state_hint"] == "PDE_HYPOTHESIS_SELECTED"

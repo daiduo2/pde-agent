@@ -73,3 +73,43 @@ uv run --frozen pde-agent select-pde-hypothesis \
 ```
 
 This chain is intended to give Hermes a reproducible failed baseline, numerical error diagnosis, physics proxy diagnosis, and bounded next-experiment proposal.
+
+## Lightweight Spectral Baseline
+
+The lightweight spectral residual baseline is a NumPy-only local smoke model for fast diagnostic loops. It trains a small ridge-regression residual model from a local windows NPZ and writes checkpoint/prediction NPZ artifacts that are compatible with the existing scoring and PDE diagnostic commands. It is intended for deterministic local sanity checks, not as the final contest model.
+
+```bash
+uv run --frozen pde-agent train-spectral-residual-baseline \
+  --windows-npz data/derived/local_windows_task1_val.npz \
+  --checkpoint-path runs/spectral_residual_checkpoint.npz \
+  --modes 16 \
+  --ridge 1e-3
+
+uv run --frozen pde-agent predict-local-model \
+  --windows-npz data/derived/local_windows_task1_val.npz \
+  --checkpoint-path runs/spectral_residual_checkpoint.npz \
+  --prediction-npz data/derived/local_spectral_prediction_task1_val.npz
+
+uv run --frozen pde-agent score-local-rollout \
+  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
+  --target-path data/derived/local_windows_task1_val.npz \
+  --output-path runs/local_spectral_score.json
+
+uv run --frozen pde-agent diagnose-rollout-error \
+  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
+  --target-path data/derived/local_windows_task1_val.npz \
+  --score-path runs/local_spectral_score.json \
+  --output-path runs/local_spectral_rollout_error.json
+
+uv run --frozen pde-agent check-burgers-physics-local \
+  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
+  --target-path data/derived/local_windows_task1_val.npz \
+  --output-path runs/local_spectral_burgers_physics.json \
+  --nu 0.001
+
+uv run --frozen pde-agent select-pde-hypothesis \
+  --score-path runs/local_spectral_score.json \
+  --error-diagnosis-path runs/local_spectral_rollout_error.json \
+  --physics-check-path runs/local_spectral_burgers_physics.json \
+  --output-path runs/local_spectral_pde_hypothesis.json
+```
