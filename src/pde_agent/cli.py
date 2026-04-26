@@ -7,6 +7,7 @@ from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
 from pde_agent.commands.build_submission import build_submission
+from pde_agent.commands.build_strategy_rubric import build_strategy_rubric_command
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
@@ -511,6 +512,27 @@ def record_strategy_proposal_cmd(
                 expected_observables=expected_observables,
                 known_risks=known_risks,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("build-strategy-rubric")
+def build_strategy_rubric_cmd(
+    proposal_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    min_evaluation_windows: int = typer.Option(3),
+    max_inference_time_regression: float = typer.Option(0.10),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_strategy_rubric_command(
+                proposal_path=proposal_path,
+                output_path=output_path,
+                min_evaluation_windows=min_evaluation_windows,
+                max_inference_time_regression=max_inference_time_regression,
             )
         )
     )
