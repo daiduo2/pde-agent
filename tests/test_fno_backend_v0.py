@@ -502,5 +502,53 @@ def test_predict_fno_local_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "FNO_PREDICTION_READY"
     assert payload["artifacts"]["prediction_npz_path"] == str(output_path)
     assert payload["metrics"]["model_type"] == "fno"
+    assert payload["metrics"]["adapter_type"] == "fixture_delta_extrapolation"
     assert payload["next_hint"] == "score-local-rollout"
     assert output_path.exists()
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_official_schema_cli_reports_adapter_metrics(
+    tmp_path: Path,
+) -> None:
+    import torch
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    output_path = tmp_path / "official_prediction.npz"
+    _write_windows(windows_path)
+    torch.save(
+        {
+            "model_state_dict": _official_fno_state_dict(
+                torch=torch,
+                history_steps=3,
+                width=4,
+                modes=2,
+                fc_hidden=5,
+            )
+        },
+        checkpoint_path,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "predict-fno-local",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["metrics"]["adapter_type"] == "pdebench_fno1d"
+    assert payload["metrics"]["history_steps"] == 3
+    assert payload["metrics"]["modes"] == 2
+    assert payload["metrics"]["width"] == 4

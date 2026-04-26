@@ -135,8 +135,11 @@ parameters into explicit candidate experiment records. It does not run candidate
 
 FNO support is optional and requires the torch extra. V0 can inspect
 torch-serialized FNO-style checkpoints and can run fixture-compatible local
-prediction. Official checkpoint prediction may still fail with `FNOBackendError`
-if the checkpoint schema is not supported by the V0 adapter.
+prediction. `predict-fno-local` supports the official PDEBench 1D Burgers FNO
+checkpoint schema used by `burgers_FNO.tar`. It reconstructs the FNO1d model
+from checkpoint tensor shapes and performs autoregressive rollout from the local
+windows context. Training and finetuning are intentionally not included in this
+adapter phase.
 
 ```bash
 uv run --frozen --extra torch pde-agent inspect-fno-checkpoint \
