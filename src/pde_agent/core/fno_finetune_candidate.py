@@ -42,6 +42,7 @@ def execute_fno_finetune_candidate(
     candidate_plan = _load_json_object(candidate_plan_file, "candidate execution plan")
     candidate = _validate_candidate_plan(candidate_plan)
     parameters = candidate["parameters"]
+    training_strategy = _training_strategy(parameters)
     train_steps = _positive_int(max_train_steps, "max_train_steps")
     lr = _positive_float(learning_rate, "learning_rate")
 
@@ -74,6 +75,7 @@ def execute_fno_finetune_candidate(
             target=target,
             rollout_steps=int(parameters["rollout_steps"]),
             teacher_forcing_decay=float(parameters["teacher_forcing_decay"]),
+            training_strategy=training_strategy,
             max_train_steps=train_steps,
             learning_rate=lr,
         )
@@ -97,6 +99,8 @@ def execute_fno_finetune_candidate(
                 "max_train_steps": train_steps,
                 "learning_rate": lr,
                 "loss_trace": loss_trace,
+                "training_strategy": training_strategy,
+                "loss_weighting": _loss_weighting_name(training_strategy),
             },
         },
         paths["finetuned_checkpoint_path"],
@@ -128,6 +132,7 @@ def execute_fno_finetune_candidate(
         candidate=candidate,
         train_steps=train_steps,
         learning_rate=lr,
+        training_strategy=training_strategy,
         loss_trace=loss_trace,
         prediction_shape=prediction.shape,
     )
@@ -154,6 +159,7 @@ def _finetune_model(
     target: np.ndarray,
     rollout_steps: int,
     teacher_forcing_decay: float,
+    training_strategy: str,
     max_train_steps: int,
     learning_rate: float,
 ) -> list[float]:
@@ -165,6 +171,11 @@ def _finetune_model(
     if horizon < 1:
         raise FNOFinetuneCandidateError("rollout_steps must include at least one step")
     teacher_forcing_ratio = min(max(float(teacher_forcing_decay), 0.0), 1.0)
+    loss_weights = _rollout_loss_weights(
+        torch=torch,
+        horizon=horizon,
+        training_strategy=training_strategy,
+    )
     device = "cpu"
     model.to(device)
     model.train()
@@ -182,7 +193,8 @@ def _finetune_model(
             model_input = torch.cat([history.permute(0, 2, 1), grid], dim=-1)
             prediction = model(model_input)
             target_step = target_tensor[:, time_index, :]
-            losses.append(torch.nn.functional.mse_loss(prediction, target_step))
+            step_loss = torch.nn.functional.mse_loss(prediction, target_step)
+            losses.append(step_loss * loss_weights[time_index])
             blended_next = (
                 teacher_forcing_ratio * target_step
                 + (1.0 - teacher_forcing_ratio) * prediction.detach()
@@ -195,6 +207,32 @@ def _finetune_model(
         optimizer.step()
         loss_trace.append(float(loss.detach().cpu().item()))
     return loss_trace
+
+
+def _rollout_loss_weights(
+    *,
+    torch: Any,
+    horizon: int,
+    training_strategy: str,
+) -> Any:
+    if training_strategy == "scheduled_sampling":
+        return torch.ones(horizon, dtype=torch.float32)
+    if training_strategy == "late_weighted_scheduled_sampling":
+        weights = torch.linspace(1.0, 2.0, horizon, dtype=torch.float32)
+        return weights / weights.mean()
+    raise FNOFinetuneCandidateError(
+        f"unsupported training_strategy: {training_strategy}"
+    )
+
+
+def _loss_weighting_name(training_strategy: str) -> str:
+    if training_strategy == "scheduled_sampling":
+        return "uniform"
+    if training_strategy == "late_weighted_scheduled_sampling":
+        return "linear_late"
+    raise FNOFinetuneCandidateError(
+        f"unsupported training_strategy: {training_strategy}"
+    )
 
 
 def _rollout_model(
@@ -256,6 +294,7 @@ def _validate_candidate_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "scheduled sampling candidate requires rollout_steps and "
             "teacher_forcing_decay"
         )
+    _training_strategy(parameters)
     workspace = plan.get("workspace")
     if not isinstance(workspace, dict) or not isinstance(
         workspace.get("artifacts_dir"), str
@@ -264,6 +303,16 @@ def _validate_candidate_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "candidate plan must include workspace.artifacts_dir"
         )
     return candidate
+
+
+def _training_strategy(parameters: dict[str, Any]) -> str:
+    value = parameters.get("training_strategy", "scheduled_sampling")
+    if value not in {
+        "scheduled_sampling",
+        "late_weighted_scheduled_sampling",
+    }:
+        raise FNOFinetuneCandidateError(f"unsupported training_strategy: {value}")
+    return str(value)
 
 
 def _prepare_output_paths(*, paths: dict[str, Path], force: bool) -> None:
@@ -284,6 +333,7 @@ def _build_report(
     candidate: dict[str, Any],
     train_steps: int,
     learning_rate: float,
+    training_strategy: str,
     loss_trace: list[float],
     prediction_shape: tuple[int, ...],
 ) -> dict[str, Any]:
@@ -297,6 +347,8 @@ def _build_report(
         "train": {
             "train_steps": train_steps,
             "learning_rate": learning_rate,
+            "training_strategy": training_strategy,
+            "loss_weighting": _loss_weighting_name(training_strategy),
             "loss_trace": loss_trace,
         },
         "prediction_shape": [int(axis) for axis in prediction_shape],

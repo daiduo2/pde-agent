@@ -43,6 +43,8 @@ def execute_fno_finetune_candidate_command(
             "experiment_id": report["candidate"]["experiment_id"],
             "intervention": report["candidate"]["intervention"],
             "train_steps": report["train"]["train_steps"],
+            "training_strategy": report["train"]["training_strategy"],
+            "loss_weighting": report["train"]["loss_weighting"],
             "initial_loss": loss_trace[0] if loss_trace else None,
             "final_loss": loss_trace[-1] if loss_trace else None,
             "prediction_shape": report["prediction_shape"],

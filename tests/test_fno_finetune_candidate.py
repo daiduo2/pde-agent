@@ -68,6 +68,7 @@ def _write_candidate_plan(
     path: Path,
     *,
     intervention: str = "use_scheduled_sampling_rollout_finetune",
+    parameters: dict[str, object] | None = None,
 ) -> None:
     workspace = path.parent
     (workspace / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -83,7 +84,8 @@ def _write_candidate_plan(
                     "intervention": intervention,
                     "change_scope": "training_schedule_only",
                     "requires_training": True,
-                    "parameters": {
+                    "parameters": parameters
+                    or {
                         "teacher_forcing_decay": 0.95,
                         "rollout_steps": 3,
                     },
@@ -125,6 +127,8 @@ def test_execute_fno_finetune_candidate_writes_outputs(tmp_path: Path) -> None:
         "use_scheduled_sampling_rollout_finetune_001"
     )
     assert report["train"]["train_steps"] == 1
+    assert report["train"]["training_strategy"] == "scheduled_sampling"
+    assert report["train"]["loss_weighting"] == "uniform"
     assert len(report["train"]["loss_trace"]) == 1
     assert Path(report["artifacts"]["finetuned_checkpoint_path"]).exists()
     assert Path(report["artifacts"]["candidate_prediction_path"]).exists()
@@ -133,6 +137,74 @@ def test_execute_fno_finetune_candidate_writes_outputs(tmp_path: Path) -> None:
         prediction = data["prediction"]
     assert prediction.shape == (2, 3, 8)
     assert np.all(np.isfinite(prediction))
+
+
+def test_execute_fno_finetune_candidate_supports_late_weighted_strategy(
+    tmp_path: Path,
+) -> None:
+    candidate_plan_path = tmp_path / "candidate" / "candidate_execution_plan.json"
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    _write_candidate_plan(
+        candidate_plan_path,
+        parameters={
+            "teacher_forcing_decay": 0.95,
+            "rollout_steps": 3,
+            "training_strategy": "late_weighted_scheduled_sampling",
+        },
+    )
+    _write_windows(windows_path)
+    _write_checkpoint(checkpoint_path)
+
+    report = execute_fno_finetune_candidate(
+        candidate_plan_path=candidate_plan_path,
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        max_train_steps=1,
+        learning_rate=1e-4,
+        force=False,
+    )
+
+    assert report["train"]["training_strategy"] == (
+        "late_weighted_scheduled_sampling"
+    )
+    assert report["train"]["loss_weighting"] == "linear_late"
+    assert len(report["train"]["loss_trace"]) == 1
+    with np.load(
+        Path(report["artifacts"]["candidate_prediction_path"]),
+        allow_pickle=False,
+    ) as data:
+        prediction = data["prediction"]
+    assert prediction.shape == (2, 3, 8)
+    assert np.all(np.isfinite(prediction))
+
+
+def test_execute_fno_finetune_candidate_rejects_unknown_training_strategy(
+    tmp_path: Path,
+) -> None:
+    candidate_plan_path = tmp_path / "candidate" / "candidate_execution_plan.json"
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    _write_candidate_plan(
+        candidate_plan_path,
+        parameters={
+            "teacher_forcing_decay": 0.95,
+            "rollout_steps": 3,
+            "training_strategy": "unknown_strategy",
+        },
+    )
+    _write_windows(windows_path)
+    _write_checkpoint(checkpoint_path)
+
+    with pytest.raises(FNOFinetuneCandidateError, match="unsupported training_strategy"):
+        execute_fno_finetune_candidate(
+            candidate_plan_path=candidate_plan_path,
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            max_train_steps=1,
+            learning_rate=1e-4,
+            force=False,
+        )
 
 
 def test_execute_fno_finetune_candidate_rejects_unsupported_intervention(
@@ -190,6 +262,7 @@ def test_execute_fno_finetune_candidate_cli_writes_payload(tmp_path: Path) -> No
     assert payload["command"] == "execute-fno-finetune-candidate"
     assert payload["state_hint"] == "FNO_FINETUNE_CANDIDATE_EXECUTED"
     assert payload["metrics"]["train_steps"] == 1
+    assert payload["metrics"]["training_strategy"] == "scheduled_sampling"
     assert payload["metrics"]["experiment_id"] == (
         "use_scheduled_sampling_rollout_finetune_001"
     )
