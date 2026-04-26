@@ -10,6 +10,7 @@ from pde_agent.core.baseline_prediction import (
     BaselinePredictionError,
     generate_baseline_prediction,
 )
+from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
 
 
 def _write_windows(path: Path, context: np.ndarray, target: np.ndarray) -> None:
@@ -131,3 +132,121 @@ def test_generate_baseline_prediction_cli_writes_payload(tmp_path: Path) -> None
         "space_points": 4,
     }
     assert output_path.exists()
+
+
+def _write_score(path: Path, score: float = 80.0, rmse: float = 0.1) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "competition_like_score_short": score,
+                "rmse": rmse,
+                "rel_mse": rmse * rmse,
+                "segments": {
+                    "early": {"rel_mse_capped": rmse * rmse, "score": score},
+                    "middle": {"rel_mse_capped": rmse * rmse, "score": score},
+                    "late": {"rmse": rmse, "score": score},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_diagnose_rollout_error_low_error_for_perfect_prediction(
+    tmp_path: Path,
+) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    score_path = tmp_path / "score.json"
+    output_path = tmp_path / "diagnosis.json"
+    target = np.ones((1, 8, 4), dtype=np.float32)
+    _write_prediction(prediction_path, target)
+    np.savez(target_path, target=target)
+    _write_score(score_path, score=100.0, rmse=0.0)
+
+    diagnosis = diagnose_rollout_error_npz(
+        prediction_path=prediction_path,
+        target_path=target_path,
+        score_path=score_path,
+        output_path=output_path,
+    )
+
+    assert diagnosis["dominant_error_pattern"] == "low_error"
+    assert diagnosis["global_rmse"] == pytest.approx(0.0)
+    assert output_path.exists()
+
+
+def test_diagnose_rollout_error_long_horizon_drift(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    score_path = tmp_path / "score.json"
+    target = np.ones((1, 8, 4), dtype=np.float32)
+    prediction = target.copy()
+    prediction[:, 4:, :] += 1.0
+    _write_prediction(prediction_path, prediction)
+    np.savez(target_path, target=target)
+    _write_score(score_path, score=20.0, rmse=0.5)
+
+    diagnosis = diagnose_rollout_error_npz(
+        prediction_path=prediction_path,
+        target_path=target_path,
+        score_path=score_path,
+        output_path=None,
+    )
+
+    assert diagnosis["dominant_error_pattern"] == "long_horizon_drift"
+    assert diagnosis["late_rmse"] > diagnosis["early_rmse"]
+
+
+def test_diagnose_rollout_error_overdamped_rollout(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    score_path = tmp_path / "score.json"
+    x = np.linspace(0, 4 * np.pi, 16, dtype=np.float32)
+    target = np.sin(x)[None, None, :] * np.ones((1, 8, 1), dtype=np.float32)
+    prediction = np.zeros_like(target)
+    _write_prediction(prediction_path, prediction)
+    np.savez(target_path, target=target)
+    _write_score(score_path, score=30.0, rmse=0.5)
+
+    diagnosis = diagnose_rollout_error_npz(
+        prediction_path=prediction_path,
+        target_path=target_path,
+        score_path=score_path,
+        output_path=None,
+    )
+
+    assert diagnosis["dominant_error_pattern"] == "overdamped_rollout"
+    assert diagnosis["prediction_total_variation"] < diagnosis["target_total_variation"]
+
+
+def test_diagnose_rollout_error_cli_writes_payload(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    score_path = tmp_path / "score.json"
+    output_path = tmp_path / "diagnostics" / "rollout_error.json"
+    target = np.ones((1, 8, 4), dtype=np.float32)
+    _write_prediction(prediction_path, target)
+    np.savez(target_path, target=target)
+    _write_score(score_path, score=100.0, rmse=0.0)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diagnose-rollout-error",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(target_path),
+            "--score-path",
+            str(score_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "ROLLOUT_ERROR_DIAGNOSED"
+    assert payload["artifacts"]["rollout_error_diagnosis_path"] == str(output_path)
+    assert payload["metrics"]["dominant_error_pattern"] == "low_error"

@@ -7,6 +7,7 @@ from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
+from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.init_run import init_run
@@ -123,6 +124,27 @@ def generate_baseline_prediction_cmd(
                 output_path=output_path,
                 method=method,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-rollout-error")
+def diagnose_rollout_error_cmd(
+    prediction_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    score_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_rollout_error(
+                prediction_path=prediction_path,
+                target_path=target_path,
+                score_path=score_path,
+                output_path=output_path,
             )
         )
     )
