@@ -204,3 +204,21 @@ uv run --frozen pde-agent plan-next-experiment-from-fno-summary \
 
 This produces the same `NEXT_EXPERIMENT_PLANNED` artifact as
 `plan-next-experiment`, while keeping the FNO path contract compact for Hermes.
+
+For agent runs, prefer the one-command dry-run wrapper:
+
+```bash
+uv run --frozen --extra torch pde-agent run-fno-iteration-dryrun \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-dir runs/fno_iteration_001 \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+The dry-run wrapper writes the FNO diagnosis artifacts, selected hypothesis,
+next experiment plan, experiment config, and `iteration_manifest.json`. It does
+not execute candidate experiments; its purpose is to stabilize the agent-facing
+scientific loop before adding finetuning.
