@@ -25,6 +25,9 @@ from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
+from pde_agent.commands.select_pde_hypothesis_from_fno_summary import (
+    select_pde_hypothesis_from_fno_summary_command,
+)
 from pde_agent.commands.train_baseline import train_baseline
 from pde_agent.commands.train_spectral_residual_baseline import (
     train_spectral_residual_baseline,
@@ -372,6 +375,23 @@ def select_pde_hypothesis_cmd(
                 score_path=score_path,
                 error_diagnosis_path=error_diagnosis_path,
                 physics_check_path=physics_check_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("select-pde-hypothesis-from-fno-summary")
+def select_pde_hypothesis_from_fno_summary_cmd(
+    summary_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            select_pde_hypothesis_from_fno_summary_command(
+                summary_path=summary_path,
                 output_path=output_path,
             )
         )

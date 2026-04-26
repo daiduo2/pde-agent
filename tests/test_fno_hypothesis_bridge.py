@@ -102,3 +102,36 @@ def test_select_pde_hypothesis_from_fno_summary_rejects_wrong_state_hint(
         )
 
     assert not output_path.exists()
+
+
+def test_select_pde_hypothesis_from_fno_summary_cli_writes_payload(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    summary_path = _write_fno_diagnosis_bundle(tmp_path)
+    output_path = tmp_path / "selected_pde_hypothesis.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "select-pde-hypothesis-from-fno-summary",
+            "--summary-path",
+            str(summary_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "select-pde-hypothesis-from-fno-summary"
+    assert payload["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
+    assert payload["artifacts"]["selected_pde_hypothesis_path"] == str(output_path)
+    assert (
+        payload["metrics"]["selected_hypothesis"]
+        == "use_scheduled_sampling_rollout_finetune"
+    )
+    assert payload["next_hint"] == "plan-next-experiment"
