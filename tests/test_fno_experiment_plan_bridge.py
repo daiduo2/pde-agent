@@ -115,3 +115,40 @@ def test_plan_next_experiment_from_fno_summary_rejects_wrong_state_hint(
         )
 
     assert not output_path.exists()
+
+
+def test_plan_next_experiment_from_fno_summary_cli_writes_payload(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    summary_path, hypothesis_path = _write_fno_planning_bundle(tmp_path)
+    output_path = tmp_path / "next_experiment_plan.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan-next-experiment-from-fno-summary",
+            "--summary-path",
+            str(summary_path),
+            "--hypothesis-path",
+            str(hypothesis_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "plan-next-experiment-from-fno-summary"
+    assert payload["state_hint"] == "NEXT_EXPERIMENT_PLANNED"
+    assert payload["artifacts"]["next_experiment_plan_path"] == str(output_path)
+    assert (
+        payload["metrics"]["selected_intervention"]
+        == "use_scheduled_sampling_rollout_finetune"
+    )
+    assert payload["metrics"]["change_scope"] == "training_schedule_only"
+    assert payload["metrics"]["next_command"] == "generate-experiment-config"
+    assert payload["next_hint"] == "generate-experiment-config"
