@@ -38,6 +38,29 @@ uv run --frozen pde-agent score-local-rollout \
 
 This score is a local proxy for short-horizon model iteration. It is not the hidden 190-step competition evaluator.
 
+Build a suite of real-HDF5 windows for horizon stress tests:
+
+```bash
+uv run --frozen --extra data pde-agent build-local-window-suite \
+  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
+  --output-dir data/derived/window_suites/task1_public \
+  --dataset-key tensor \
+  --start-index 0 \
+  --sample-limit 32 \
+  --context-steps 10 \
+  --forecast-steps 8 \
+  --forecast-steps 16 \
+  --forecast-steps 31 \
+  --time-reduction 5 \
+  --space-reduction 4 \
+  --force
+```
+
+For the public Task-1 file, `time_reduction=5` maps the raw 201 time samples to
+41 reduced steps, so a 10-step context leaves at most 31 local forecast steps.
+The same command can build 47/95/190-step suites once the longer validation or
+test data is available.
+
 ## Local PDE Diagnostic Chain
 
 After building a local windows NPZ, generate a weak persistence baseline and run the first PDE diagnostic loop:
