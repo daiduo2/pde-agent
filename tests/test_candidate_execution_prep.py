@@ -108,3 +108,35 @@ def test_prepare_candidate_execution_rejects_unapproved_audit(
         )
 
     assert not output_dir.exists()
+
+
+def test_prepare_candidate_execution_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    audit_path = _write_config_and_audit(tmp_path)
+    output_dir = tmp_path / "candidate_workspaces"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "prepare-candidate-execution",
+            "--audit-path",
+            str(audit_path),
+            "--candidate-index",
+            "0",
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "prepare-candidate-execution"
+    assert payload["state_hint"] == "CANDIDATE_EXECUTION_PREPARED"
+    assert payload["metrics"]["candidate_index"] == 0
+    assert payload["metrics"]["experiment_id"] == (
+        "use_scheduled_sampling_rollout_finetune_001"
+    )
+    assert payload["next_hint"] == "execute-candidate-experiment"

@@ -24,6 +24,9 @@ from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
     plan_next_experiment_from_fno_summary_command,
 )
+from pde_agent.commands.prepare_candidate_execution import (
+    prepare_candidate_execution,
+)
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -505,6 +508,27 @@ def audit_experiment_config_cmd(
                 config_path=config_path,
                 output_path=output_path,
                 plan_path=plan_path,
+            )
+        )
+    )
+
+
+@app.command("prepare-candidate-execution")
+def prepare_candidate_execution_cmd(
+    audit_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    candidate_index: int = typer.Option(0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            prepare_candidate_execution(
+                audit_path=audit_path,
+                output_dir=output_dir,
+                candidate_index=candidate_index,
+                force=force,
             )
         )
     )
