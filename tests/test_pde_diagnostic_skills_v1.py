@@ -10,6 +10,7 @@ from pde_agent.core.baseline_prediction import (
     BaselinePredictionError,
     generate_baseline_prediction,
 )
+from pde_agent.core.burgers_physics_local import check_burgers_physics_npz
 from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
 
 
@@ -250,3 +251,83 @@ def test_diagnose_rollout_error_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "ROLLOUT_ERROR_DIAGNOSED"
     assert payload["artifacts"]["rollout_error_diagnosis_path"] == str(output_path)
     assert payload["metrics"]["dominant_error_pattern"] == "low_error"
+
+
+def test_check_burgers_physics_returns_finite_metrics(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    output_path = tmp_path / "physics.json"
+    x = np.linspace(0, 2 * np.pi, 16, dtype=np.float32)
+    t = np.linspace(0, 1, 8, dtype=np.float32)
+    target = np.sin(x[None, None, :] + t[None, :, None]).astype(np.float32)
+    _write_prediction(prediction_path, target.copy())
+    np.savez(target_path, target=target)
+
+    result = check_burgers_physics_npz(
+        prediction_path=prediction_path,
+        target_path=target_path,
+        output_path=output_path,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["physics_issue"] in {
+        "stable_low_error",
+        "residual_mismatch",
+        "inconclusive",
+    }
+    assert result["prediction_residual_rmse"] >= 0.0
+    assert output_path.exists()
+
+
+def test_check_burgers_physics_flags_overdissipation(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    x = np.linspace(0, 4 * np.pi, 32, dtype=np.float32)
+    target = np.sin(x)[None, None, :] * np.ones((1, 8, 1), dtype=np.float32)
+    prediction = np.zeros_like(target)
+    _write_prediction(prediction_path, prediction)
+    np.savez(target_path, target=target)
+
+    result = check_burgers_physics_npz(
+        prediction_path=prediction_path,
+        target_path=target_path,
+        output_path=None,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    assert result["physics_issue"] == "overdissipation"
+    assert result["total_variation_ratio"] < 0.5
+
+
+def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:
+    prediction_path = tmp_path / "prediction.npz"
+    target_path = tmp_path / "windows.npz"
+    output_path = tmp_path / "diagnostics" / "physics.json"
+    target = np.ones((1, 8, 4), dtype=np.float32)
+    _write_prediction(prediction_path, target)
+    np.savez(target_path, target=target)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "check-burgers-physics-local",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(target_path),
+            "--output-path",
+            str(output_path),
+            "--nu",
+            "0.001",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "BURGERS_PHYSICS_CHECKED"
+    assert payload["artifacts"]["burgers_physics_check_path"] == str(output_path)
+    assert "physics_issue" in payload["metrics"]

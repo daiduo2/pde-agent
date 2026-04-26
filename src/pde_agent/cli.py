@@ -5,6 +5,7 @@ import typer
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_submission import build_submission
+from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
@@ -145,6 +146,31 @@ def diagnose_rollout_error_cmd(
                 target_path=target_path,
                 score_path=score_path,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("check-burgers-physics-local")
+def check_burgers_physics_local_cmd(
+    prediction_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            check_burgers_physics_local(
+                prediction_path=prediction_path,
+                target_path=target_path,
+                output_path=output_path,
+                nu=nu,
+                dt=dt,
+                dx=dx,
             )
         )
     )
