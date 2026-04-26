@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import pde_agent.core.fno_rollout_diagnosis as fno_rollout_diagnosis
 
 from pde_agent.core.fno_rollout_diagnosis import (
     FNORolloutDiagnosisError,
@@ -132,3 +133,42 @@ def test_diagnose_fno_rollout_cleans_partial_artifacts_on_failure(
     for artifact_name in artifact_names:
         assert not (output_dir / artifact_name).exists()
     assert marker_path.read_text(encoding="utf-8") == "not a diagnosis artifact"
+
+
+def test_diagnose_fno_rollout_force_failure_preserves_existing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_dir = tmp_path / "diagnosis"
+    output_dir.mkdir()
+    _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+    score_path = output_dir / "fno_score.json"
+    summary_path = output_dir / "fno_rollout_summary.json"
+    score_path.write_text("old score", encoding="utf-8")
+    summary_path.write_text("old summary", encoding="utf-8")
+
+    def fail_before_writing(**_: object) -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        fno_rollout_diagnosis,
+        "predict_fno_local",
+        fail_before_writing,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        diagnose_fno_rollout(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_dir=output_dir,
+            nu=0.001,
+            dt=1.0,
+            dx=1.0,
+            force=True,
+        )
+
+    assert score_path.read_text(encoding="utf-8") == "old score"
+    assert summary_path.read_text(encoding="utf-8") == "old summary"

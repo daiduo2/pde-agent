@@ -32,6 +32,7 @@ def diagnose_fno_rollout(
     output_root = Path(output_dir)
     paths = _artifact_paths(output_root)
     _prepare_output_paths(paths=paths, force=force)
+    preexisting_artifacts = {path for path in paths.values() if path.exists()}
 
     try:
         prediction_summary = predict_fno_local(
@@ -74,7 +75,7 @@ def diagnose_fno_rollout(
         )
         return summary
     except Exception:
-        _cleanup_artifacts(paths)
+        _cleanup_artifacts(paths, preexisting_artifacts=preexisting_artifacts)
         raise
 
 
@@ -97,8 +98,14 @@ def _prepare_output_paths(*, paths: dict[str, Path], force: bool) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _cleanup_artifacts(paths: dict[str, Path]) -> None:
+def _cleanup_artifacts(
+    paths: dict[str, Path],
+    *,
+    preexisting_artifacts: set[Path],
+) -> None:
     for path in paths.values():
+        if path in preexisting_artifacts:
+            continue
         with suppress(OSError):
             if path.exists():
                 path.unlink()
