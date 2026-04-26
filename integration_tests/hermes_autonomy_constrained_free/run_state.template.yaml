@@ -1,0 +1,48 @@
+run_id: {{RUN_ID}}
+run_root: {{OUTPUT_DIR}}
+working_directory: {{FIXTURE_ROOT}}
+command_prefix: cd {{REPO_ROOT}} && uv run --frozen pde-agent
+
+current_state: TASK_PARSED
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - call_run_fno_iteration
+  - choose_autonomy_decision
+
+forbidden_actions:
+  - patch_code
+  - implicit_download
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+  - manually_inspect_generated_artifacts
+  - call_execute_fno_finetune_candidate_directly
+  - call_evaluate_fno_candidate_directly
+  - call_compare_fno_candidates_directly
+  - call_build_submission
+
+required_reads:
+  - {{FIXTURE_ROOT}}/run_state.yaml
+  - {{FIXTURE_ROOT}}/bootstrap_prompt.md
+  - {{FIXTURE_ROOT}}/task_spec.json
+
+required_artifacts:
+  - {{OUTPUT_DIR}}/fno_iteration_report.json
+  - {{OUTPUT_DIR}}/candidate_comparison.json
+  - {{OUTPUT_DIR}}/autonomy_decision.json
+
+allowed_commands:
+  - name: run_fno_iteration
+    command: cd {{REPO_ROOT}} && uv run --frozen --extra torch pde-agent run-fno-iteration --windows-path {{WINDOWS_PATH}} --checkpoint-path {{CHECKPOINT_PATH}} --output-dir {{OUTPUT_DIR}} --max-train-steps {{MAX_TRAIN_STEPS}} --learning-rate {{LEARNING_RATE}} --force
+  - name: decision_request_evidence_sweep
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent record-autonomy-decision --decision request_evidence_sweep --reason-code single_window_improvement_needs_validation --evidence-source-path {{OUTPUT_DIR}}/fno_iteration_report.json --output-path {{OUTPUT_DIR}}/autonomy_decision.json
+  - name: decision_accept_current_winner
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent record-autonomy-decision --decision accept_current_winner --reason-code clear_improvement_accept_for_now --evidence-source-path {{OUTPUT_DIR}}/fno_iteration_report.json --output-path {{OUTPUT_DIR}}/autonomy_decision.json
+
+success_transition:
+  on_complete: HERMES_AUTONOMY_DECISION_RECORDED
