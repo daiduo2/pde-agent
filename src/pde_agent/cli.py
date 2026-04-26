@@ -12,6 +12,9 @@ from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
+from pde_agent.commands.execute_fno_finetune_candidate import (
+    execute_fno_finetune_candidate_command,
+)
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
 from pde_agent.commands.init_run import init_run
@@ -528,6 +531,31 @@ def prepare_candidate_execution_cmd(
                 audit_path=audit_path,
                 output_dir=output_dir,
                 candidate_index=candidate_index,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("execute-fno-finetune-candidate")
+def execute_fno_finetune_candidate_cmd(
+    candidate_plan_path: str = typer.Option(...),
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    max_train_steps: int = typer.Option(1),
+    learning_rate: float = typer.Option(1e-4),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            execute_fno_finetune_candidate_command(
+                candidate_plan_path=candidate_plan_path,
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                max_train_steps=max_train_steps,
+                learning_rate=learning_rate,
                 force=force,
             )
         )

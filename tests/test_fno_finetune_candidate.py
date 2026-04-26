@@ -154,3 +154,44 @@ def test_execute_fno_finetune_candidate_rejects_unsupported_intervention(
             learning_rate=1e-4,
             force=False,
         )
+
+
+def test_execute_fno_finetune_candidate_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    candidate_plan_path = tmp_path / "candidate" / "candidate_execution_plan.json"
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    _write_candidate_plan(candidate_plan_path)
+    _write_windows(windows_path)
+    _write_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "execute-fno-finetune-candidate",
+            "--candidate-plan-path",
+            str(candidate_plan_path),
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--max-train-steps",
+            "1",
+            "--learning-rate",
+            "0.0001",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "execute-fno-finetune-candidate"
+    assert payload["state_hint"] == "FNO_FINETUNE_CANDIDATE_EXECUTED"
+    assert payload["metrics"]["train_steps"] == 1
+    assert payload["metrics"]["experiment_id"] == (
+        "use_scheduled_sampling_rollout_finetune_001"
+    )
+    assert payload["artifacts"]["candidate_prediction_path"]
+    assert payload["next_hint"] == "score-local-rollout"
