@@ -304,3 +304,37 @@ def test_predict_spectral_residual_baseline_rejects_wrong_rank_weights(
             force=False,
         )
     assert not prediction_path.exists()
+
+
+def test_train_spectral_residual_baseline_rejects_corrupted_windows_npz(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    windows_path.write_bytes(b"PK\x03\x04")
+
+    with pytest.raises(SpectralResidualBaselineError, match="windows NPZ"):
+        train_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=tmp_path / "checkpoint.npz",
+            modes=4,
+            ridge=1e-3,
+            force=False,
+        )
+
+
+def test_predict_spectral_residual_baseline_rejects_corrupted_checkpoint_npz(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+    checkpoint_path.write_bytes(b"PK\x03\x04")
+
+    with pytest.raises(SpectralResidualBaselineError, match="checkpoint NPZ"):
+        predict_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=tmp_path / "prediction.npz",
+            force=False,
+        )

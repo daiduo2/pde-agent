@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 import numpy as np
 
@@ -189,7 +190,7 @@ def _load_windows(path: Path) -> tuple[np.ndarray, np.ndarray]:
             target = np.asarray(archive["target"], dtype=np.float64)
     except SpectralResidualBaselineError:
         raise
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, EOFError, BadZipFile) as exc:
         raise SpectralResidualBaselineError(
             f"failed to load windows NPZ {path}: {exc}"
         ) from exc
@@ -301,7 +302,7 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
             }
     except SpectralResidualBaselineError:
         raise
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, EOFError, BadZipFile, json.JSONDecodeError) as exc:
         raise SpectralResidualBaselineError(
             f"failed to load checkpoint NPZ {path}: {exc}"
         ) from exc
