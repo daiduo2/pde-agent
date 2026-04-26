@@ -36,6 +36,9 @@ from pde_agent.commands.prepare_candidate_execution import (
 from pde_agent.commands.record_autonomy_decision import (
     record_autonomy_decision_command,
 )
+from pde_agent.commands.record_strategy_proposal import (
+    record_strategy_proposal_command,
+)
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -474,6 +477,39 @@ def record_autonomy_decision_cmd(
                 decision=decision,
                 reason_code=reason_code,
                 evidence_source_path=evidence_source_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("record-strategy-proposal")
+def record_strategy_proposal_cmd(
+    strategy_id: str = typer.Option(...),
+    title: str = typer.Option(...),
+    source_type: str = typer.Option(...),
+    problem_context: str = typer.Option(...),
+    hypothesis: str = typer.Option(...),
+    mechanism: str = typer.Option(...),
+    implementation_plan_json: str = typer.Option(...),
+    expected_observables: list[str] = typer.Option(..., "--expected-observable"),
+    known_risks: list[str] = typer.Option(..., "--known-risk"),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_strategy_proposal_command(
+                strategy_id=strategy_id,
+                title=title,
+                source_type=source_type,
+                problem_context=problem_context,
+                hypothesis=hypothesis,
+                mechanism=mechanism,
+                implementation_plan=json.loads(implementation_plan_json),
+                expected_observables=expected_observables,
+                known_risks=known_risks,
                 output_path=output_path,
             )
         )
