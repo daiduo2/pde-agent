@@ -44,6 +44,54 @@ def _linear_trend_windows(
     return context, target
 
 
+def _write_minimal_checkpoint(
+    path: Path,
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    modes: int,
+    feature_mean: np.ndarray | None = None,
+    feature_scale: np.ndarray | None = None,
+    weights_real: np.ndarray | None = None,
+    weights_imag: np.ndarray | None = None,
+) -> None:
+    feature_dim = 2 + 4 * modes
+    design_dim = feature_dim + 1
+    output_width = target.shape[1] * modes
+    metadata = {
+        "model_type": "spectral_residual_ridge",
+        "modes": modes,
+        "context_steps": context.shape[1],
+        "forecast_steps": target.shape[1],
+        "space_points": context.shape[2],
+    }
+    with path.open("wb") as handle:
+        np.savez(
+            handle,
+            weights_real=(
+                np.zeros((design_dim, output_width), dtype=np.float64)
+                if weights_real is None
+                else weights_real
+            ),
+            weights_imag=(
+                np.zeros((design_dim, output_width), dtype=np.float64)
+                if weights_imag is None
+                else weights_imag
+            ),
+            feature_mean=(
+                np.zeros(feature_dim, dtype=np.float64)
+                if feature_mean is None
+                else feature_mean
+            ),
+            feature_scale=(
+                np.ones(feature_dim, dtype=np.float64)
+                if feature_scale is None
+                else feature_scale
+            ),
+            metadata_json=json.dumps(metadata),
+        )
+
+
 def test_train_spectral_residual_baseline_writes_checkpoint(tmp_path: Path) -> None:
     windows_path = tmp_path / "windows.npz"
     checkpoint_path = tmp_path / "checkpoint"
@@ -204,3 +252,55 @@ def test_predict_spectral_residual_baseline_rejects_malformed_checkpoint_metadat
             output_path=tmp_path / "prediction.npz",
             force=False,
         )
+
+
+def test_predict_spectral_residual_baseline_rejects_zero_feature_scale(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    prediction_path = tmp_path / "prediction.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+    _write_minimal_checkpoint(
+        checkpoint_path,
+        context=context,
+        target=target,
+        modes=4,
+        feature_scale=np.zeros(18, dtype=np.float64),
+    )
+
+    with pytest.raises(SpectralResidualBaselineError, match="feature_scale"):
+        predict_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=prediction_path,
+            force=False,
+        )
+    assert not prediction_path.exists()
+
+
+def test_predict_spectral_residual_baseline_rejects_wrong_rank_weights(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    prediction_path = tmp_path / "prediction.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+    _write_minimal_checkpoint(
+        checkpoint_path,
+        context=context,
+        target=target,
+        modes=4,
+        weights_real=np.zeros(19, dtype=np.float64),
+    )
+
+    with pytest.raises(SpectralResidualBaselineError, match="weights_real"):
+        predict_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=prediction_path,
+            force=False,
+        )
+    assert not prediction_path.exists()

@@ -113,8 +113,15 @@ def predict_spectral_residual_baseline(
     features = _build_features(context, mode_count)
     feature_mean = checkpoint_data["feature_mean"]
     feature_scale = checkpoint_data["feature_scale"]
-    if features.shape[1] != feature_mean.shape[0] or feature_mean.shape != feature_scale.shape:
-        raise SpectralResidualBaselineError("checkpoint is incompatible with features")
+    expected_width = forecast_steps * mode_count
+    _validate_checkpoint_arrays(
+        weights_real=checkpoint_data["weights_real"],
+        weights_imag=checkpoint_data["weights_imag"],
+        feature_mean=feature_mean,
+        feature_scale=feature_scale,
+        feature_dim=int(features.shape[1]),
+        output_width=expected_width,
+    )
 
     normalized = (features - feature_mean) / feature_scale
     design = np.concatenate(
@@ -123,14 +130,9 @@ def predict_spectral_residual_baseline(
     )
     weights_real = checkpoint_data["weights_real"]
     weights_imag = checkpoint_data["weights_imag"]
-    if weights_real.shape != weights_imag.shape or weights_real.shape[0] != design.shape[1]:
-        raise SpectralResidualBaselineError("checkpoint is incompatible with features")
 
     flat_real = design @ weights_real
     flat_imag = design @ weights_imag
-    expected_width = forecast_steps * mode_count
-    if flat_real.shape[1] != expected_width:
-        raise SpectralResidualBaselineError("checkpoint is incompatible with horizon")
 
     low_coeffs = (flat_real + 1j * flat_imag).reshape(
         context.shape[0],
@@ -303,6 +305,82 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
         raise SpectralResidualBaselineError(
             f"failed to load checkpoint NPZ {path}: {exc}"
         ) from exc
+
+
+def _validate_checkpoint_arrays(
+    *,
+    weights_real: np.ndarray,
+    weights_imag: np.ndarray,
+    feature_mean: np.ndarray,
+    feature_scale: np.ndarray,
+    feature_dim: int,
+    output_width: int,
+) -> None:
+    _validate_checkpoint_vector(
+        name="feature_mean",
+        value=feature_mean,
+        length=feature_dim,
+    )
+    _validate_checkpoint_vector(
+        name="feature_scale",
+        value=feature_scale,
+        length=feature_dim,
+    )
+    if np.any(feature_scale <= 1e-12):
+        raise SpectralResidualBaselineError(
+            "checkpoint feature_scale must be greater than 1e-12"
+        )
+    expected_weight_shape = (feature_dim + 1, output_width)
+    _validate_checkpoint_matrix(
+        name="weights_real",
+        value=weights_real,
+        shape=expected_weight_shape,
+    )
+    _validate_checkpoint_matrix(
+        name="weights_imag",
+        value=weights_imag,
+        shape=expected_weight_shape,
+    )
+
+
+def _validate_checkpoint_vector(
+    *,
+    name: str,
+    value: np.ndarray,
+    length: int,
+) -> None:
+    if value.ndim != 1:
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} must be rank 1, got rank {value.ndim}"
+        )
+    if value.shape[0] != length:
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} length {value.shape[0]} != expected {length}"
+        )
+    if not np.all(np.isfinite(value)):
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} contains non-finite values"
+        )
+
+
+def _validate_checkpoint_matrix(
+    *,
+    name: str,
+    value: np.ndarray,
+    shape: tuple[int, int],
+) -> None:
+    if value.ndim != 2:
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} must be rank 2, got rank {value.ndim}"
+        )
+    if value.shape != shape:
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} shape {value.shape} != expected {shape}"
+        )
+    if not np.all(np.isfinite(value)):
+        raise SpectralResidualBaselineError(
+            f"checkpoint {name} contains non-finite values"
+        )
 
 
 def _validate_checkpoint_compatible(
