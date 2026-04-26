@@ -570,3 +570,76 @@ def test_select_pde_hypothesis_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
     assert payload["artifacts"]["selected_pde_hypothesis_path"] == str(output_path)
     assert "selected_hypothesis" in payload["metrics"]
+
+
+def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:
+    windows_path = tmp_path / "windows.npz"
+    prediction_path = tmp_path / "prediction.npz"
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    context = np.ones((1, 3, 8), dtype=np.float32)
+    target = np.zeros((1, 6, 8), dtype=np.float32)
+    _write_windows(windows_path, context, target)
+
+    commands = [
+        [
+            "generate-baseline-prediction",
+            "--windows-path",
+            str(windows_path),
+            "--output-path",
+            str(prediction_path),
+        ],
+        [
+            "score-local-rollout",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--output-path",
+            str(score_path),
+        ],
+        [
+            "diagnose-rollout-error",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--score-path",
+            str(score_path),
+            "--output-path",
+            str(error_path),
+        ],
+        [
+            "check-burgers-physics-local",
+            "--prediction-path",
+            str(prediction_path),
+            "--target-path",
+            str(windows_path),
+            "--output-path",
+            str(physics_path),
+        ],
+        [
+            "select-pde-hypothesis",
+            "--score-path",
+            str(score_path),
+            "--error-diagnosis-path",
+            str(error_path),
+            "--physics-check-path",
+            str(physics_path),
+            "--output-path",
+            str(hypothesis_path),
+        ],
+    ]
+
+    for command in commands:
+        result = CliRunner().invoke(app, command)
+        assert result.exit_code == 0, result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "ok"
+
+    for artifact in (prediction_path, score_path, error_path, physics_path, hypothesis_path):
+        assert artifact.exists()
+    hypothesis = json.loads(hypothesis_path.read_text(encoding="utf-8"))
+    assert hypothesis["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
