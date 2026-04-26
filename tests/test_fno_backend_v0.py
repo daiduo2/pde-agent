@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from pathlib import Path
 
@@ -8,10 +9,15 @@ from pde_agent.core.fno_backend import (
     inspect_fno_checkpoint,
 )
 
-torch = pytest.importorskip("torch", reason="FNO backend tests require torch extra")
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None,
+    reason="FNO backend tests require torch extra",
+)
 
 
 def _write_fixture_checkpoint(path: Path) -> None:
+    import torch
+
     torch.save(
         {
             "model_type": "fno_v0_fixture",
