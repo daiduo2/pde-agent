@@ -14,6 +14,10 @@ from pde_agent.core.burgers_physics_local import (
     check_burgers_physics_arrays,
     check_burgers_physics_npz,
 )
+from pde_agent.core.next_experiment_plan import (
+    NextExperimentPlanError,
+    plan_next_experiment_from_files,
+)
 from pde_agent.core.pde_hypothesis import select_pde_hypothesis_from_files
 from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
 
@@ -463,8 +467,8 @@ def _write_error_diagnosis(path: Path, pattern: str) -> None:
         json.dumps(
             {
                 "dominant_error_pattern": pattern,
-                "evidence": [f"dominant_error_pattern={pattern}"],
-                "global_rmse": 0.5,
+                "global_rmse": 0.05,
+                "time_error_slope": 0.01,
             }
         ),
         encoding="utf-8",
@@ -476,8 +480,20 @@ def _write_physics_check(path: Path, issue: str) -> None:
         json.dumps(
             {
                 "physics_issue": issue,
-                "total_variation_ratio": 0.25,
-                "residual_ratio": 1.0,
+                "residual_ratio": 0.9,
+                "total_variation_ratio": 2.7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_hypothesis(path: Path, hypothesis: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "selected_hypothesis": hypothesis,
+                "next_experiment_scope": "local ablation",
             }
         ),
         encoding="utf-8",
@@ -570,6 +586,73 @@ def test_select_pde_hypothesis_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
     assert payload["artifacts"]["selected_pde_hypothesis_path"] == str(output_path)
     assert "selected_hypothesis" in payload["metrics"]
+
+
+def test_plan_next_experiment_low_pass_for_nonphysical_oscillation(
+    tmp_path: Path,
+) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    output_path = tmp_path / "next_experiment_plan.json"
+    _write_score(score_path, score=77.18, rmse=0.0506)
+    _write_error_diagnosis(error_path, "shock_region_error")
+    _write_physics_check(physics_path, "nonphysical_oscillation")
+    _write_hypothesis(hypothesis_path, "apply_low_pass_stabilization")
+
+    plan = plan_next_experiment_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        hypothesis_path=hypothesis_path,
+        output_path=output_path,
+    )
+
+    assert output_path.exists()
+    assert plan["state_hint"] == "NEXT_EXPERIMENT_PLANNED"
+    assert plan["selected_intervention"] == "apply_low_pass_stabilization"
+    assert plan["source_hypothesis"] == "apply_low_pass_stabilization"
+    assert plan["failure_mode"]["score_band"] == "medium"
+    assert plan["change_scope"] == "postprocess_or_inference_only"
+    assert plan["budget"]["requires_training"] is False
+    assert plan["budget"]["max_experiment_count"] == 3
+    assert plan["intervention_plan"]["candidate_parameters"][
+        "low_pass_cutoff_ratio"
+    ] == [0.5, 0.625, 0.75]
+    assert plan["next_command"] == "generate-experiment-config"
+
+
+def test_plan_next_experiment_long_horizon_drift_requests_rollout_finetune(
+    tmp_path: Path,
+) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    _write_score(score_path, score=45.0, rmse=0.5)
+    _write_error_diagnosis(error_path, "long_horizon_drift")
+    _write_physics_check(physics_path, "inconclusive")
+    _write_hypothesis(hypothesis_path, "use_scheduled_sampling_rollout_finetune")
+
+    plan = plan_next_experiment_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        hypothesis_path=hypothesis_path,
+        output_path=None,
+    )
+
+    assert plan["selected_intervention"] == "use_scheduled_sampling_rollout_finetune"
+    assert plan["change_scope"] == "training_schedule_only"
+    assert plan["budget"]["requires_training"] is True
+    assert plan["budget"]["max_experiment_count"] == 2
+    assert plan["failure_mode"]["score_band"] == "low"
+    assert plan["intervention_plan"]["candidate_parameters"]["rollout_steps"] == [
+        10,
+        20,
+        31,
+    ]
 
 
 def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:
