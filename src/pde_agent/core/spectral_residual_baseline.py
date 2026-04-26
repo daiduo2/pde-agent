@@ -105,11 +105,11 @@ def predict_spectral_residual_baseline(
     context, target = _load_windows(windows)
     checkpoint_data = _load_checkpoint(checkpoint)
     metadata = checkpoint_data["metadata"]
-    _validate_checkpoint_compatible(metadata, context, target)
+    metadata_values = _validate_checkpoint_compatible(metadata, context, target)
 
-    mode_count = int(metadata["modes"])
-    forecast_steps = int(metadata["forecast_steps"])
-    space_points = int(metadata["space_points"])
+    mode_count = metadata_values["modes"]
+    forecast_steps = metadata_values["forecast_steps"]
+    space_points = metadata_values["space_points"]
     features = _build_features(context, mode_count)
     feature_mean = checkpoint_data["feature_mean"]
     feature_scale = checkpoint_data["feature_scale"]
@@ -281,6 +281,10 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
                     f"checkpoint missing keys: {sorted(missing)}"
                 )
             metadata = json.loads(str(archive["metadata_json"]))
+            if not isinstance(metadata, dict):
+                raise SpectralResidualBaselineError(
+                    "checkpoint metadata_json must decode to an object"
+                )
             return {
                 "weights_real": np.asarray(archive["weights_real"], dtype=np.float64),
                 "weights_imag": np.asarray(archive["weights_imag"], dtype=np.float64),
@@ -300,17 +304,54 @@ def _validate_checkpoint_compatible(
     metadata: dict[str, Any],
     context: np.ndarray,
     target: np.ndarray,
-) -> None:
+) -> dict[str, int]:
+    if metadata.get("model_type") != MODEL_TYPE:
+        raise SpectralResidualBaselineError(
+            "incompatible checkpoint/windows for model_type: "
+            f"{metadata.get('model_type')!r} != {MODEL_TYPE!r}"
+        )
+
+    modes = _metadata_int(metadata, "modes")
+    context_steps = _metadata_int(metadata, "context_steps")
+    forecast_steps = _metadata_int(metadata, "forecast_steps")
+    space_points = _metadata_int(metadata, "space_points")
     expected = {
-        "model_type": MODEL_TYPE,
         "context_steps": int(context.shape[1]),
         "forecast_steps": int(target.shape[1]),
         "space_points": int(context.shape[2]),
     }
-    for key, value in expected.items():
-        if metadata.get(key) != value:
+    actual = {
+        "context_steps": context_steps,
+        "forecast_steps": forecast_steps,
+        "space_points": space_points,
+    }
+    for key, value in actual.items():
+        if value != expected[key]:
             raise SpectralResidualBaselineError(
                 f"incompatible checkpoint/windows for {key}: "
-                f"{metadata.get(key)!r} != {value!r}"
+                f"{value!r} != {expected[key]!r}"
             )
-    _validate_modes(int(metadata.get("modes", 0)), int(context.shape[2]))
+    try:
+        _validate_modes(modes, int(context.shape[2]))
+    except SpectralResidualBaselineError as exc:
+        raise SpectralResidualBaselineError(
+            f"checkpoint metadata incompatible for modes: {exc}"
+        ) from exc
+    return {
+        "modes": modes,
+        "forecast_steps": forecast_steps,
+        "space_points": space_points,
+    }
+
+
+def _metadata_int(metadata: dict[str, Any], key: str) -> int:
+    if key not in metadata:
+        raise SpectralResidualBaselineError(
+            f"checkpoint metadata missing required key: {key}"
+        )
+    value = metadata[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise SpectralResidualBaselineError(
+            f"checkpoint metadata invalid for {key}: expected integer, got {value!r}"
+        )
+    return value

@@ -151,3 +151,39 @@ def test_predict_spectral_residual_baseline_rejects_incompatible_windows(
             output_path=tmp_path / "prediction.npz",
             force=False,
         )
+
+
+def test_predict_spectral_residual_baseline_rejects_malformed_checkpoint_metadata(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+    metadata = {
+        "model_type": "spectral_residual_ridge",
+        "modes": "bad",
+        "context_steps": context.shape[1],
+        "forecast_steps": target.shape[1],
+        "space_points": context.shape[2],
+    }
+    with checkpoint_path.open("wb") as handle:
+        np.savez(
+            handle,
+            weights_real=np.zeros((1, 1), dtype=np.float64),
+            weights_imag=np.zeros((1, 1), dtype=np.float64),
+            feature_mean=np.zeros(1, dtype=np.float64),
+            feature_scale=np.ones(1, dtype=np.float64),
+            metadata_json=json.dumps(metadata),
+        )
+
+    with pytest.raises(
+        SpectralResidualBaselineError,
+        match="incompatible|metadata",
+    ):
+        predict_spectral_residual_baseline(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=tmp_path / "prediction.npz",
+            force=False,
+        )
