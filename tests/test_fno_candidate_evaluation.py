@@ -120,3 +120,49 @@ def test_evaluate_fno_candidate_without_baseline_uses_null_comparison(
     )
 
     assert report["baseline_comparison"] is None
+
+
+def test_evaluate_fno_candidate_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    prediction_path, target_path = _write_prediction_and_target(tmp_path)
+    candidate_report_path = _write_candidate_report(tmp_path, prediction_path)
+    baseline_score_path = tmp_path / "baseline_score.json"
+    output_dir = tmp_path / "evaluation"
+    _write_baseline_score(baseline_score_path, score=40.0)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluate-fno-candidate",
+            "--candidate-report-path",
+            str(candidate_report_path),
+            "--target-path",
+            str(target_path),
+            "--output-dir",
+            str(output_dir),
+            "--baseline-score-path",
+            str(baseline_score_path),
+            "--nu",
+            "0.001",
+            "--dt",
+            "1.0",
+            "--dx",
+            "1.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "evaluate-fno-candidate"
+    assert payload["state_hint"] == "FNO_CANDIDATE_EVALUATED"
+    assert payload["metrics"]["experiment_id"] == (
+        "use_scheduled_sampling_rollout_finetune_001"
+    )
+    assert payload["metrics"]["score_delta"] == (
+        payload["metrics"]["competition_like_score_short"] - 40.0
+    )
+    assert payload["artifacts"]["candidate_evaluation_report_path"]
+    assert payload["next_hint"] == "compare-fno-candidates"
