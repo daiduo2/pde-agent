@@ -220,16 +220,15 @@ def _gradient_error_ratio(prediction: np.ndarray, target: np.ndarray) -> float:
 
 def _shock_region_error_ratio(error: np.ndarray, target: np.ndarray) -> float:
     abs_error = np.abs(error)
-    gradient = np.abs(np.diff(target, axis=2))
-    threshold = float(np.quantile(gradient, 0.75))
-    shock_mask = gradient > threshold
+    gradient = np.abs(np.diff(target, axis=2, prepend=target[:, :, :1]))
+    threshold = float(np.quantile(gradient, 0.8))
+    shock_mask = gradient >= threshold
     if not np.any(shock_mask):
         return 1.0
 
-    local_abs_error = abs_error[:, :, 1:][shock_mask]
-    shock_error = float(np.mean(local_abs_error))
-    global_error = float(np.mean(abs_error))
-    return float(shock_error / (global_error + 1e-12))
+    local_error = float(np.mean(abs_error[shock_mask]))
+    global_error = float(np.mean(abs_error) + 1e-12)
+    return local_error / global_error
 
 
 def _classify_physics_issue(

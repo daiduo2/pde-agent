@@ -339,6 +339,42 @@ def test_check_burgers_physics_energy_ratio_uses_final_step() -> None:
     assert result["energy_decay_ratio"] == pytest.approx(0.25)
 
 
+def test_check_burgers_physics_shock_ratio_matches_plan_formula() -> None:
+    target = np.array(
+        [
+            [
+                [0.0, 0.0, 10.0, 10.0, 20.0],
+                [0.0, 0.0, 10.0, 10.0, 20.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    abs_error = np.array(
+        [
+            [
+                [1.0, 1.0, 4.0, 1.0, 4.0],
+                [1.0, 1.0, 4.0, 1.0, 4.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    prediction = target + abs_error
+
+    result = check_burgers_physics_arrays(
+        prediction=prediction,
+        target=target,
+        nu=0.001,
+        dt=1.0,
+        dx=1.0,
+    )
+
+    grad = np.abs(np.diff(target, axis=2, prepend=target[:, :, :1]))
+    threshold = float(np.quantile(grad, 0.8))
+    mask = grad >= threshold
+    expected = float(np.mean(abs_error[mask]) / (np.mean(abs_error) + 1e-12))
+    assert result["shock_region_error_ratio"] == pytest.approx(expected)
+
+
 def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:
     prediction_path = tmp_path / "prediction.npz"
     target_path = tmp_path / "windows.npz"
