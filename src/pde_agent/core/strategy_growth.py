@@ -8,6 +8,7 @@ from typing import Any
 PROPOSAL_STATE_HINT = "STRATEGY_PROPOSAL_RECORDED"
 RUBRIC_STATE_HINT = "STRATEGY_RUBRIC_BUILT"
 PROMOTION_STATE_HINT = "STRATEGY_PROMOTION_EVALUATED"
+LEDGER_STATE_HINT = "STRATEGY_LEDGER_APPENDED"
 VALID_SOURCE_TYPES = {"local_library", "external_retrieval", "agent_hypothesis"}
 REQUIRED_PROMOTION_METRICS = [
     "evaluation_window_count",
@@ -204,6 +205,58 @@ def evaluate_strategy_promotion(
     }
     _write_json(output_file, report)
     return report
+
+
+def append_strategy_ledger(
+    *,
+    proposal_path: Path,
+    rubric_path: Path,
+    evidence_summary_path: Path,
+    promotion_report_path: Path,
+    ledger_path: Path,
+) -> dict[str, Any]:
+    proposal_file = Path(proposal_path)
+    rubric_file = Path(rubric_path)
+    evidence_file = Path(evidence_summary_path)
+    promotion_file = Path(promotion_report_path)
+    ledger_file = Path(ledger_path)
+    proposal = _read_json(proposal_file)
+    rubric = _read_json(rubric_file)
+    evidence = _read_json(evidence_file)
+    promotion = _read_json(promotion_file)
+    if proposal.get("state_hint") != PROPOSAL_STATE_HINT:
+        raise StrategyGrowthError("proposal artifact has invalid state_hint")
+    if rubric.get("state_hint") != RUBRIC_STATE_HINT:
+        raise StrategyGrowthError("rubric artifact has invalid state_hint")
+    if promotion.get("state_hint") != PROMOTION_STATE_HINT:
+        raise StrategyGrowthError("promotion artifact has invalid state_hint")
+    strategy_id = proposal.get("strategy_id")
+    if strategy_id != rubric.get("strategy_id") or strategy_id != promotion.get(
+        "strategy_id"
+    ):
+        raise StrategyGrowthError("strategy_id mismatch across growth artifacts")
+    promote = bool(promotion["promote_to_skill_candidate"])
+    row: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": LEDGER_STATE_HINT,
+        "strategy_id": strategy_id,
+        "strategy_proposal_path": str(proposal_file),
+        "experiment_rubric_path": str(rubric_file),
+        "evidence_summary_path": str(evidence_file),
+        "promotion_report_path": str(promotion_file),
+        "strategy_ledger_path": str(ledger_file),
+        "decision": promotion["decision"],
+        "promote_to_skill_candidate": promote,
+        "reason_codes": promotion["reason_codes"],
+        "evidence_metric_count": len(evidence),
+        "next_command": "create-skill-candidate"
+        if promote
+        else "record-strategy-proposal",
+    }
+    ledger_file.parent.mkdir(parents=True, exist_ok=True)
+    with ledger_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True) + "\n")
+    return row
 
 
 def _require_nonempty(name: str, value: str) -> None:

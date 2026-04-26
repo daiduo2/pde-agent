@@ -101,6 +101,28 @@ For the constrained-free autonomy fixture, the semantic checks are:
 - the final state is `HERMES_AUTONOMY_DECISION_RECORDED`,
 - the decision artifact uses one supported decision and reason code.
 
+## Strategy Growth Gate
+
+External retrieval and future skill creation must not bypass the
+strategy-growth gate. A strategy found by Hermes, proposed by the base model, or
+selected from a local library must first become auditable data:
+
+- `strategy_proposal.json` records the scientific hypothesis, mechanism,
+  implementation plan, expected observables, and known risks.
+- `experiment_rubric.json` defines the quantitative evaluation standard before
+  the strategy is judged.
+- `promotion_report.json` evaluates evidence against that rubric.
+- `strategy_ledger.jsonl` records the attempt whether it succeeded, failed, or
+  needs revision.
+
+Promotion means only `promote_to_skill_candidate = true`. It does not install a
+skill, patch model code, or grant future execution authority. Skill creation is
+a separate step that must be audited later.
+
+Failed and revised strategies must remain in the ledger. Deleting failed
+attempts makes the agent less scientific: it loses negative evidence and may
+repeat the same weak strategy under a different name.
+
 ## When To Run Hermes
 
 Run real Hermes immediately after any of these changes:

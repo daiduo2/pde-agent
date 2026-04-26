@@ -3,6 +3,7 @@ import json
 import typer
 
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
+from pde_agent.commands.append_strategy_ledger import append_strategy_ledger_command
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
@@ -557,6 +558,29 @@ def evaluate_strategy_promotion_cmd(
                 rubric_path=rubric_path,
                 evidence_summary_path=evidence_summary_path,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("append-strategy-ledger")
+def append_strategy_ledger_cmd(
+    proposal_path: str = typer.Option(...),
+    rubric_path: str = typer.Option(...),
+    evidence_summary_path: str = typer.Option(...),
+    promotion_report_path: str = typer.Option(...),
+    ledger_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            append_strategy_ledger_command(
+                proposal_path=proposal_path,
+                rubric_path=rubric_path,
+                evidence_summary_path=evidence_summary_path,
+                promotion_report_path=promotion_report_path,
+                ledger_path=ledger_path,
             )
         )
     )
