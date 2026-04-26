@@ -8,6 +8,7 @@ from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.eval_rollout import eval_rollout
+from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
@@ -101,6 +102,27 @@ def score_local_rollout_cmd(
                 prediction_path=prediction_path,
                 target_path=target_path,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("generate-baseline-prediction")
+def generate_baseline_prediction_cmd(
+    windows_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    method: str = typer.Option("persistence"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            generate_baseline_prediction(
+                windows_path=windows_path,
+                output_path=output_path,
+                method=method,
+                force=force,
             )
         )
     )
