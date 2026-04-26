@@ -83,7 +83,7 @@ def test_infer_pdebench_fno1d_config_from_state_dict() -> None:
         fc_hidden=5,
     )
 
-    config = _infer_pdebench_fno1d_config(state)
+    config = _infer_pdebench_fno1d_config(state, torch=torch)
 
     assert config.history_steps == 3
     assert config.width == 4
@@ -117,6 +117,30 @@ def test_infer_pdebench_fno1d_config_rejects_non_tensor_values() -> None:
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_infer_pdebench_fno1d_config_rejects_numpy_arrays_when_torch_required() -> None:
+    import torch
+
+    np = pytest.importorskip("numpy")
+    from pde_agent.core.fno_backend import _infer_pdebench_fno1d_config
+
+    state: dict[str, object] = {
+        "fc0.weight": np.zeros((4, 4), dtype=np.float32),
+        "fc0.bias": np.zeros((4,), dtype=np.float32),
+        "fc1.weight": np.zeros((5, 4), dtype=np.float32),
+        "fc1.bias": np.zeros((5,), dtype=np.float32),
+        "fc2.weight": np.zeros((1, 5), dtype=np.float32),
+        "fc2.bias": np.zeros((1,), dtype=np.float32),
+    }
+    for index in range(4):
+        state[f"conv{index}.weights1"] = np.zeros((4, 4, 2), dtype=np.complex64)
+        state[f"w{index}.weight"] = np.zeros((4, 4, 1), dtype=np.float32)
+        state[f"w{index}.bias"] = np.zeros((4,), dtype=np.float32)
+
+    with pytest.raises(FNOBackendError, match="tensor"):
+        _infer_pdebench_fno1d_config(state, torch=torch)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
 def test_pdebench_fno1d_model_loads_official_state_dict_strictly() -> None:
     import torch
 
@@ -126,7 +150,7 @@ def test_pdebench_fno1d_model_loads_official_state_dict_strictly() -> None:
     )
 
     state = _official_fno_state_dict(torch=torch)
-    config = _infer_pdebench_fno1d_config(state)
+    config = _infer_pdebench_fno1d_config(state, torch=torch)
     model_class = _make_pdebench_fno1d_class(torch)
     model = model_class(config)
 
