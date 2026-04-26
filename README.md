@@ -130,3 +130,27 @@ code, execute experiments, or write human-readable research notes. The planned
 next step is `generate-experiment-config`, which expands bounded candidate
 parameters into explicit candidate experiment records. It does not run candidates;
 `execute-candidate-experiment` is a future hook.
+
+## FNO Backend V0
+
+FNO support is optional and requires the torch extra. V0 can inspect
+torch-serialized FNO-style checkpoints and can run fixture-compatible local
+prediction. Official checkpoint prediction may still fail with `FNOBackendError`
+if the checkpoint schema is not supported by the V0 adapter.
+
+```bash
+uv run --frozen --extra torch pde-agent inspect-fno-checkpoint \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-path runs/fno_checkpoint_metadata.json
+
+uv run --frozen --extra torch pde-agent predict-fno-local \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --metadata-path runs/fno_checkpoint_metadata.json \
+  --output-path data/derived/local_fno_prediction_task1_smoke.npz \
+  --force
+```
+
+The prediction command writes the same `prediction` NPZ contract consumed by
+`score-local-rollout`. It never falls back to persistence or the spectral
+baseline while claiming to be FNO.
