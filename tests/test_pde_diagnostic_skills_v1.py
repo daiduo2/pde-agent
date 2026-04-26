@@ -14,6 +14,7 @@ from pde_agent.core.burgers_physics_local import (
     check_burgers_physics_arrays,
     check_burgers_physics_npz,
 )
+from pde_agent.core.pde_hypothesis import select_pde_hypothesis_from_files
 from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
 
 
@@ -455,3 +456,102 @@ def test_check_burgers_physics_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "BURGERS_PHYSICS_CHECKED"
     assert payload["artifacts"]["burgers_physics_check_path"] == str(output_path)
     assert "physics_issue" in payload["metrics"]
+
+
+def _write_error_diagnosis(path: Path, pattern: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "dominant_error_pattern": pattern,
+                "evidence": [f"dominant_error_pattern={pattern}"],
+                "global_rmse": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_physics_check(path: Path, issue: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "physics_issue": issue,
+                "total_variation_ratio": 0.25,
+                "residual_ratio": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_select_pde_hypothesis_maps_overdamping(tmp_path: Path) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    output_path = tmp_path / "hypothesis.json"
+    _write_score(score_path, score=40.0, rmse=0.5)
+    _write_error_diagnosis(error_path, "overdamped_rollout")
+    _write_physics_check(physics_path, "overdissipation")
+
+    result = select_pde_hypothesis_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        output_path=output_path,
+    )
+
+    assert result["selected_hypothesis"] in {
+        "add_spectral_consistency_loss",
+        "add_gradient_weighted_loss",
+    }
+    assert result["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
+    assert output_path.exists()
+
+
+def test_select_pde_hypothesis_maps_long_horizon_drift(tmp_path: Path) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    _write_score(score_path, score=35.0, rmse=0.6)
+    _write_error_diagnosis(error_path, "long_horizon_drift")
+    _write_physics_check(physics_path, "inconclusive")
+
+    result = select_pde_hypothesis_from_files(
+        score_path=score_path,
+        error_diagnosis_path=error_path,
+        physics_check_path=physics_path,
+        output_path=None,
+    )
+
+    assert result["selected_hypothesis"] == "use_scheduled_sampling_rollout_finetune"
+
+
+def test_select_pde_hypothesis_cli_writes_payload(tmp_path: Path) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    output_path = tmp_path / "diagnostics" / "hypothesis.json"
+    _write_score(score_path, score=40.0, rmse=0.5)
+    _write_error_diagnosis(error_path, "overdamped_rollout")
+    _write_physics_check(physics_path, "overdissipation")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "select-pde-hypothesis",
+            "--score-path",
+            str(score_path),
+            "--error-diagnosis-path",
+            str(error_path),
+            "--physics-check-path",
+            str(physics_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "PDE_HYPOTHESIS_SELECTED"
+    assert payload["artifacts"]["selected_pde_hypothesis_path"] == str(output_path)
+    assert "selected_hypothesis" in payload["metrics"]

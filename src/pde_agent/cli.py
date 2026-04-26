@@ -18,6 +18,7 @@ from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
+from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
 from pde_agent.commands.train_baseline import train_baseline
 
 
@@ -234,6 +235,27 @@ def select_hypothesis_cmd(
 ) -> None:
     _ = json_flag
     typer.echo(json.dumps(select_hypothesis(run_id=run_id, run_root=run_root)))
+
+
+@app.command("select-pde-hypothesis")
+def select_pde_hypothesis_cmd(
+    score_path: str = typer.Option(...),
+    error_diagnosis_path: str = typer.Option(...),
+    physics_check_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            select_pde_hypothesis(
+                score_path=score_path,
+                error_diagnosis_path=error_diagnosis_path,
+                physics_check_path=physics_check_path,
+                output_path=output_path,
+            )
+        )
+    )
 
 
 @app.command("record-timing")
