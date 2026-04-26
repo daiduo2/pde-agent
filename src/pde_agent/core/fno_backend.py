@@ -60,25 +60,19 @@ def predict_fno_local(
         raise FNOBackendError(f"prediction output already exists: {output_file}")
 
     context, target = _load_windows(windows_file)
-    checkpoint = _load_checkpoint(checkpoint_file, torch=torch)
+    loaded = _load_checkpoint_with_metadata(checkpoint_file, torch=torch)
+    checkpoint = loaded["checkpoint"]
     if metadata_path is not None:
         _require_file(Path(metadata_path), "metadata")
 
-    prediction_rule = _fixture_prediction_rule(checkpoint)
-    prediction = _predict_fixture_rule(
+    prediction, metadata = _predict_checkpoint(
+        checkpoint=checkpoint,
         context=context,
         forecast_steps=target.shape[1],
-        prediction_rule=prediction_rule,
+        checkpoint_file=checkpoint_file,
+        archive_member=loaded["archive_member"],
+        torch=torch,
     )
-    metadata = {
-        "model_type": "fno",
-        "checkpoint_path": str(checkpoint_file),
-        "checkpoint_format": "torch_serialized",
-        "prediction_rule": prediction_rule,
-        "sample_count": int(prediction.shape[0]),
-        "forecast_steps": int(prediction.shape[1]),
-        "space_points": int(prediction.shape[2]),
-    }
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open("wb") as handle:
         np.savez(
@@ -514,6 +508,143 @@ def _predict_fixture_rule(
     if not np.all(np.isfinite(prediction)):
         raise FNOBackendError("prediction contains non-finite values")
     return prediction.astype(np.float32)
+
+
+def _predict_checkpoint(
+    *,
+    checkpoint: Any,
+    context: np.ndarray,
+    forecast_steps: int,
+    checkpoint_file: Path,
+    archive_member: str | None,
+    torch: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    if isinstance(checkpoint, dict) and checkpoint.get("model_type") == "fno_v0_fixture":
+        prediction_rule = _fixture_prediction_rule(checkpoint)
+        prediction = _predict_fixture_rule(
+            context=context,
+            forecast_steps=forecast_steps,
+            prediction_rule=prediction_rule,
+        )
+        metadata = {
+            "model_type": "fno",
+            "adapter_type": "fixture_delta_extrapolation",
+            "checkpoint_path": str(checkpoint_file),
+            "checkpoint_format": "torch_serialized",
+            "prediction_rule": prediction_rule,
+            "sample_count": int(prediction.shape[0]),
+            "forecast_steps": int(prediction.shape[1]),
+            "space_points": int(prediction.shape[2]),
+        }
+        if archive_member is not None:
+            metadata["archive_member"] = archive_member
+        return prediction, metadata
+
+    if _looks_like_pdebench_fno1d(checkpoint, torch=torch):
+        return _predict_pdebench_fno1d_checkpoint(
+            checkpoint=checkpoint,
+            context=context,
+            forecast_steps=forecast_steps,
+            checkpoint_file=checkpoint_file,
+            archive_member=archive_member,
+            torch=torch,
+        )
+
+    raise FNOBackendError("unsupported FNO checkpoint schema")
+
+
+def _predict_pdebench_fno1d_checkpoint(
+    *,
+    checkpoint: Any,
+    context: np.ndarray,
+    forecast_steps: int,
+    checkpoint_file: Path,
+    archive_member: str | None,
+    torch: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    state = _extract_state_dict(checkpoint)
+    config = _infer_pdebench_fno1d_config(state, torch=torch)
+    prediction = _rollout_pdebench_fno1d(
+        state=state,
+        config=config,
+        context=context,
+        forecast_steps=forecast_steps,
+        torch=torch,
+        device="cpu",
+    )
+    metadata: dict[str, Any] = {
+        "model_type": "fno",
+        "adapter_type": "pdebench_fno1d",
+        "checkpoint_path": str(checkpoint_file),
+        "checkpoint_format": "torch_serialized",
+        "history_steps": config.history_steps,
+        "modes": config.modes,
+        "width": config.width,
+        "fc_hidden": config.fc_hidden,
+        "rollout_steps": int(forecast_steps),
+        "device": "cpu",
+        "sample_count": int(prediction.shape[0]),
+        "forecast_steps": int(prediction.shape[1]),
+        "space_points": int(prediction.shape[2]),
+    }
+    if archive_member is not None:
+        metadata["archive_member"] = archive_member
+    return prediction, metadata
+
+
+def _rollout_pdebench_fno1d(
+    *,
+    state: dict[str, Any],
+    config: PDEBenchFNO1dConfig,
+    context: np.ndarray,
+    forecast_steps: int,
+    torch: Any,
+    device: str,
+) -> np.ndarray:
+    if context.shape[1] < config.history_steps:
+        raise FNOBackendError(
+            "context_steps must be >= official FNO history steps "
+            f"({context.shape[1]} < {config.history_steps})"
+        )
+    available_modes = (context.shape[2] // 2) + 1
+    if config.modes > available_modes:
+        raise FNOBackendError(
+            "PDEBench FNO1d modes exceed available Fourier modes for input grid "
+            f"({config.modes} > {available_modes})"
+        )
+
+    PDEBenchFNO1d = _make_pdebench_fno1d_class(torch)
+    model = PDEBenchFNO1d(config).to(device)
+    model.load_state_dict(state)
+    model.eval()
+    history = torch.as_tensor(
+        context[:, -config.history_steps :, :],
+        dtype=torch.float32,
+        device=device,
+    )
+    grid = torch.linspace(
+        0.0,
+        1.0,
+        context.shape[2],
+        dtype=torch.float32,
+        device=device,
+    ).view(1, context.shape[2], 1)
+    grid = grid.repeat(context.shape[0], 1, 1)
+
+    predictions: list[Any] = []
+    with torch.no_grad():
+        for _ in range(forecast_steps):
+            model_input = torch.cat([history.permute(0, 2, 1), grid], dim=-1)
+            next_step = model(model_input)
+            if not torch.isfinite(next_step).all():
+                raise FNOBackendError("prediction contains non-finite values")
+            predictions.append(next_step)
+            history = torch.cat([history[:, 1:, :], next_step.unsqueeze(1)], dim=1)
+    prediction_tensor = torch.stack(predictions, dim=1)
+    prediction = prediction_tensor.detach().cpu().numpy().astype(np.float32)
+    if not np.all(np.isfinite(prediction)):
+        raise FNOBackendError("prediction contains non-finite values")
+    return prediction
 
 
 def _collect_tensors(

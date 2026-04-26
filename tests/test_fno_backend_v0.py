@@ -299,6 +299,128 @@ def test_predict_fno_local_fixture_writes_prediction(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_official_schema_writes_prediction(tmp_path: Path) -> None:
+    import torch
+
+    np = pytest.importorskip("numpy")
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    output_path = tmp_path / "official_prediction.npz"
+    context, target = _write_windows(windows_path)
+    torch.save(
+        {
+            "model_state_dict": _official_fno_state_dict(
+                torch=torch,
+                history_steps=3,
+                width=4,
+                modes=2,
+                fc_hidden=5,
+            )
+        },
+        checkpoint_path,
+    )
+
+    from pde_agent.core.fno_backend import predict_fno_local
+
+    summary = predict_fno_local(
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        output_path=output_path,
+        metadata_path=None,
+        force=False,
+    )
+
+    assert output_path.exists()
+    with np.load(output_path, allow_pickle=False) as archive:
+        prediction = archive["prediction"]
+        metadata = json.loads(str(archive["metadata_json"]))
+    assert prediction.shape == target.shape
+    assert prediction.dtype == np.float32
+    assert np.all(np.isfinite(prediction))
+    assert metadata["adapter_type"] == "pdebench_fno1d"
+    assert metadata["history_steps"] == 3
+    assert metadata["modes"] == 2
+    assert metadata["width"] == 4
+    assert summary["adapter_type"] == "pdebench_fno1d"
+    assert summary["prediction_shape"] == list(target.shape)
+    assert context.shape[0] == prediction.shape[0]
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_official_schema_rejects_short_context(
+    tmp_path: Path,
+) -> None:
+    import torch
+
+    np = pytest.importorskip("numpy")
+    windows_path = tmp_path / "short_windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    context = np.zeros((2, 2, 8), dtype=np.float32)
+    target = np.zeros((2, 3, 8), dtype=np.float32)
+    np.savez(windows_path, context=context, target=target)
+    torch.save(
+        {
+            "model_state_dict": _official_fno_state_dict(
+                torch=torch,
+                history_steps=3,
+                width=4,
+                modes=2,
+                fc_hidden=5,
+            )
+        },
+        checkpoint_path,
+    )
+
+    from pde_agent.core.fno_backend import predict_fno_local
+
+    with pytest.raises(FNOBackendError, match="context_steps|history"):
+        predict_fno_local(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=tmp_path / "prediction.npz",
+            metadata_path=None,
+            force=False,
+        )
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_official_schema_rejects_large_modes_for_grid(
+    tmp_path: Path,
+) -> None:
+    import torch
+
+    np = pytest.importorskip("numpy")
+    windows_path = tmp_path / "small_grid_windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    context = np.zeros((2, 4, 4), dtype=np.float32)
+    target = np.zeros((2, 3, 4), dtype=np.float32)
+    np.savez(windows_path, context=context, target=target)
+    torch.save(
+        {
+            "model_state_dict": _official_fno_state_dict(
+                torch=torch,
+                history_steps=3,
+                width=4,
+                modes=4,
+                fc_hidden=5,
+            )
+        },
+        checkpoint_path,
+    )
+
+    from pde_agent.core.fno_backend import predict_fno_local
+
+    with pytest.raises(FNOBackendError, match="modes|Fourier"):
+        predict_fno_local(
+            windows_path=windows_path,
+            checkpoint_path=checkpoint_path,
+            output_path=tmp_path / "prediction.npz",
+            metadata_path=None,
+            force=False,
+        )
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
 def test_predict_fno_local_rejects_unsupported_checkpoint(tmp_path: Path) -> None:
     import torch
 
