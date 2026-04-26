@@ -119,3 +119,41 @@ def test_run_fno_iteration_rejects_non_empty_output_without_force(
         )
 
     assert existing.read_text(encoding="utf-8") == "previous"
+
+
+def test_run_fno_iteration_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "official_fno.pt"
+    output_dir = tmp_path / "iteration"
+    _write_windows(windows_path)
+    _write_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-fno-iteration",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-dir",
+            str(output_dir),
+            "--max-train-steps",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "run-fno-iteration"
+    assert payload["state_hint"] == "FNO_ITERATION_COMPLETED"
+    assert payload["artifacts"]["iteration_report_path"] == str(
+        output_dir / "fno_iteration_report.json"
+    )
+    assert payload["metrics"]["candidate_count"] == 2
+    assert payload["metrics"]["winner_experiment_id"]
+    assert payload["next_hint"] == "run-fno-iteration"

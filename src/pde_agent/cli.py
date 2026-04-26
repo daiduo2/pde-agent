@@ -38,6 +38,7 @@ from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
     run_fno_iteration_dryrun_command,
 )
+from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
@@ -324,6 +325,37 @@ def run_fno_iteration_dryrun_cmd(
                 windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-fno-iteration")
+def run_fno_iteration_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    max_train_steps: int = typer.Option(16),
+    learning_rate: float = typer.Option(1e-4),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_fno_iteration_command(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                max_train_steps=max_train_steps,
+                learning_rate=learning_rate,
                 nu=nu,
                 dt=dt,
                 dx=dx,
