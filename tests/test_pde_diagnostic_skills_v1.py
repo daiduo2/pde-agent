@@ -829,6 +829,38 @@ def test_generate_experiment_config_expands_low_pass_candidates(
     assert config["next_command"] == "execute-candidate-experiment"
 
 
+def test_generate_experiment_config_cli_writes_payload(tmp_path: Path) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    output_path = tmp_path / "diagnostics" / "experiment_config.json"
+    _write_next_experiment_plan(plan_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate-experiment-config",
+            "--plan-path",
+            str(plan_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "generate-experiment-config"
+    assert payload["state_hint"] == "EXPERIMENT_CONFIG_GENERATED"
+    assert payload["artifacts"]["experiment_config_path"] == str(output_path)
+    assert payload["metrics"] == {
+        "selected_intervention": "apply_low_pass_stabilization",
+        "candidate_count": 3,
+        "requires_training": False,
+        "change_scope": "postprocess_or_inference_only",
+    }
+    assert payload["next_hint"] == "execute-candidate-experiment"
+    assert output_path.exists()
+
+
 def test_generate_experiment_config_respects_budget_limit(tmp_path: Path) -> None:
     plan_path = tmp_path / "next_experiment_plan.json"
     _write_next_experiment_plan(

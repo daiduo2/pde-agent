@@ -11,6 +11,7 @@ from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
+from pde_agent.commands.generate_experiment_config import generate_experiment_config
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
@@ -324,6 +325,23 @@ def plan_next_experiment_cmd(
                 error_diagnosis_path=error_diagnosis_path,
                 physics_check_path=physics_check_path,
                 hypothesis_path=hypothesis_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("generate-experiment-config")
+def generate_experiment_config_cmd(
+    plan_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            generate_experiment_config(
+                plan_path=plan_path,
                 output_path=output_path,
             )
         )
