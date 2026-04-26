@@ -89,6 +89,18 @@ For FNO iteration, the semantic checks are:
 - winner experiment id is non-empty,
 - winner score and score delta are numeric.
 
+For the constrained-free autonomy fixture, the semantic checks are:
+
+- `fno_iteration_report.json` exists,
+- `candidate_comparison.json` exists,
+- `autonomy_decision.json` exists,
+- Hermes reads only the required fixture files,
+- Hermes runs exactly two terminal commands,
+- the first command is the fixed `run-fno-iteration` command,
+- the second command is one of the explicit `record-autonomy-decision` choices,
+- the final state is `HERMES_AUTONOMY_DECISION_RECORDED`,
+- the decision artifact uses one supported decision and reason code.
+
 ## When To Run Hermes
 
 Run real Hermes immediately after any of these changes:
@@ -126,3 +138,38 @@ Audit the latest saved session without rerunning Hermes:
 ```bash
 uv run --frozen python scripts/run_hermes_fno_iteration.py --audit-only
 ```
+
+## Current Constrained-Free Autonomy Canary
+
+This canary checks whether Hermes/Kimi can make one bounded scientific workflow
+decision without turning the harness into a fully static state machine. The
+protocol still fixes the executable surface, but it leaves Hermes one meaningful
+choice after seeing the `run-fno-iteration` terminal JSON:
+
+- `request_evidence_sweep`: use when a single-window improvement needs
+  validation across more windows.
+- `accept_current_winner`: use when the current winner is clear enough to keep.
+
+Prepare state:
+
+```bash
+uv run --frozen python scripts/prepare_autonomy_constrained_free.py \
+  --windows-path /tmp/pde-agent-window-suite-task1-public/windows_f031.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-dir /tmp/pde-agent-hermes-autonomy-constrained-free-20260427-001 \
+  --max-train-steps 1
+```
+
+Run and audit Hermes:
+
+```bash
+uv run --frozen python scripts/run_hermes_autonomy.py --timeout-seconds 420
+```
+
+Latest validated canary:
+
+- Session: `20260427_005513_d44608`
+- Audit: `integration_tests/hermes_autonomy_constrained_free/reports/audit_20260427_005513_d44608.json`
+- Result: passed
+- Decision: `request_evidence_sweep`
+- Reason code: `single_window_improvement_needs_validation`
