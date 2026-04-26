@@ -3,7 +3,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from typer.testing import CliRunner
 
+from pde_agent.cli import app
 from pde_agent.core.local_scoring import score_prediction_arrays
 from pde_agent.core.spectral_residual_baseline import (
     SpectralResidualBaselineError,
@@ -338,3 +340,89 @@ def test_predict_spectral_residual_baseline_rejects_corrupted_checkpoint_npz(
             output_path=tmp_path / "prediction.npz",
             force=False,
         )
+
+
+def test_train_spectral_residual_baseline_cli_writes_payload(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "train-spectral-residual-baseline",
+            "--windows-npz",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--modes",
+            "6",
+            "--ridge",
+            "1e-6",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "train-spectral-residual-baseline"
+    assert payload["state_hint"] == "LOCAL_MODEL_TRAINED"
+    assert payload["artifacts"]["checkpoint_path"] == str(checkpoint_path)
+    assert payload["metrics"] == {
+        "model_type": "spectral_residual_ridge",
+        "modes": 6,
+        "ridge": 1e-6,
+        "train_sample_count": context.shape[0],
+        "forecast_steps": target.shape[1],
+        "space_points": target.shape[2],
+    }
+    assert payload["next_hint"] == "predict-local-model"
+    assert checkpoint_path.exists()
+    assert not checkpoint_path.with_suffix(".npz").exists()
+
+
+def test_predict_local_model_cli_writes_payload(tmp_path: Path) -> None:
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "checkpoint.npz"
+    prediction_path = tmp_path / "prediction"
+    context, target = _linear_trend_windows()
+    _write_windows(windows_path, context, target)
+    train_spectral_residual_baseline(
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        modes=6,
+        ridge=1e-6,
+        force=False,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "predict-local-model",
+            "--windows-npz",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--prediction-npz",
+            str(prediction_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "predict-local-model"
+    assert payload["state_hint"] == "LOCAL_MODEL_PREDICTED"
+    assert payload["artifacts"]["prediction_npz_path"] == str(prediction_path)
+    assert payload["metrics"] == {
+        "model_type": "spectral_residual_ridge",
+        "sample_count": context.shape[0],
+        "forecast_steps": target.shape[1],
+        "space_points": target.shape[2],
+    }
+    assert payload["next_hint"] == "score-local-rollout"
+    assert prediction_path.exists()
+    assert not prediction_path.with_suffix(".npz").exists()

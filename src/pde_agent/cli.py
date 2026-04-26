@@ -14,12 +14,16 @@ from pde_agent.commands.generate_baseline_prediction import generate_baseline_pr
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.interpret_error import interpret_error
+from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
 from pde_agent.commands.train_baseline import train_baseline
+from pde_agent.commands.train_spectral_residual_baseline import (
+    train_spectral_residual_baseline,
+)
 
 
 app = typer.Typer(help="CLI-first diagnostic harness for PDE agent experiments.")
@@ -126,6 +130,46 @@ def generate_baseline_prediction_cmd(
                 output_path=output_path,
                 method=method,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("train-spectral-residual-baseline")
+def train_spectral_residual_baseline_cmd(
+    windows_npz: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    modes: int = typer.Option(16),
+    ridge: float = typer.Option(1e-3),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            train_spectral_residual_baseline(
+                windows_npz=windows_npz,
+                checkpoint_path=checkpoint_path,
+                modes=modes,
+                ridge=ridge,
+            )
+        )
+    )
+
+
+@app.command("predict-local-model")
+def predict_local_model_cmd(
+    windows_npz: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    prediction_npz: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_local_model(
+                windows_npz=windows_npz,
+                checkpoint_path=checkpoint_path,
+                prediction_npz=prediction_npz,
             )
         )
     )
