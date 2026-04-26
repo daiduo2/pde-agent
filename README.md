@@ -191,3 +191,16 @@ uv run --frozen pde-agent select-pde-hypothesis-from-fno-summary \
 This bridge reuses `select-pde-hypothesis`; it only extracts the score,
 rollout-error, and Burgers-physics artifact paths from the FNO summary so the
 agent does not need to manually pass three separate paths.
+
+Plan the next bounded experiment from the same FNO summary plus the selected
+hypothesis:
+
+```bash
+uv run --frozen pde-agent plan-next-experiment-from-fno-summary \
+  --summary-path runs/fno_rollout_diagnosis/fno_rollout_summary.json \
+  --hypothesis-path runs/fno_rollout_diagnosis/selected_pde_hypothesis.json \
+  --output-path runs/fno_rollout_diagnosis/next_experiment_plan.json
+```
+
+This produces the same `NEXT_EXPERIMENT_PLANNED` artifact as
+`plan-next-experiment`, while keeping the FNO path contract compact for Hermes.
