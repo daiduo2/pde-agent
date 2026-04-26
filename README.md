@@ -179,3 +179,15 @@ The command writes `fno_prediction.npz`, `fno_score.json`,
 `fno_rollout_summary.json`. It does not train or finetune FNO; it only packages
 the existing local prediction, scoring, error diagnosis, and physics checks into
 one reproducible artifact bundle.
+
+Select the next bounded PDE hypothesis directly from that FNO summary:
+
+```bash
+uv run --frozen pde-agent select-pde-hypothesis-from-fno-summary \
+  --summary-path runs/fno_rollout_diagnosis/fno_rollout_summary.json \
+  --output-path runs/fno_rollout_diagnosis/selected_pde_hypothesis.json
+```
+
+This bridge reuses `select-pde-hypothesis`; it only extracts the score,
+rollout-error, and Burgers-physics artifact paths from the FNO summary so the
+agent does not need to manually pass three separate paths.
