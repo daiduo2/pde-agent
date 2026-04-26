@@ -14,7 +14,9 @@ from pde_agent.commands.generate_baseline_prediction import generate_baseline_pr
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
+from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.interpret_error import interpret_error
+from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.record_timing import record_timing
@@ -175,6 +177,46 @@ def predict_local_model_cmd(
                 windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("inspect-fno-checkpoint")
+def inspect_fno_checkpoint_cmd(
+    checkpoint_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            inspect_fno_checkpoint(
+                checkpoint_path=checkpoint_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("predict-fno-local")
+def predict_fno_local_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    metadata_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_fno_local(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_path=output_path,
+                metadata_path=metadata_path,
                 force=force,
             )
         )

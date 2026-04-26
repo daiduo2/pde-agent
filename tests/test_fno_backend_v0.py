@@ -144,3 +144,68 @@ def test_predict_fno_local_rejects_unsupported_checkpoint(tmp_path: Path) -> Non
             metadata_path=None,
             force=False,
         )
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_inspect_fno_checkpoint_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_path = tmp_path / "metadata.json"
+    _write_fixture_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "inspect-fno-checkpoint",
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "inspect-fno-checkpoint"
+    assert payload["state_hint"] == "FNO_CHECKPOINT_INSPECTED"
+    assert payload["artifacts"]["fno_checkpoint_metadata_path"] == str(output_path)
+    assert payload["metrics"]["checkpoint_format"] == "torch_serialized"
+    assert payload["next_hint"] == "predict-fno-local"
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="FNO backend tests require torch extra")
+def test_predict_fno_local_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_path = tmp_path / "prediction.npz"
+    _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "predict-fno-local",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "predict-fno-local"
+    assert payload["state_hint"] == "FNO_PREDICTION_READY"
+    assert payload["artifacts"]["prediction_npz_path"] == str(output_path)
+    assert payload["metrics"]["model_type"] == "fno"
+    assert payload["next_hint"] == "score-local-rollout"
+    assert output_path.exists()
