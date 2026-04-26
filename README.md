@@ -263,5 +263,23 @@ uv run --frozen --extra torch pde-agent execute-fno-finetune-candidate \
 
 This V0 executor only supports `use_scheduled_sampling_rollout_finetune`. It
 writes `finetuned_fno_checkpoint.pt`, `candidate_prediction.npz`, and
-`candidate_execution_report.json`; it does not claim score improvement. Pass the
-prediction to `score-local-rollout` next.
+`candidate_execution_report.json`; it does not claim score improvement.
+
+Evaluate that candidate against the same local windows and optional baseline:
+
+```bash
+uv run --frozen --extra torch pde-agent evaluate-fno-candidate \
+  --candidate-report-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/candidate_execution_report.json \
+  --target-path data/derived/local_windows_task1_smoke.npz \
+  --output-dir runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/evaluation \
+  --baseline-score-path runs/fno_iteration_001/fno_score.json \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+The evaluator writes candidate-scoped score, rollout-error, Burgers-physics,
+selected-hypothesis, and `candidate_evaluation_report.json` artifacts. This is
+the comparison boundary for the next multi-candidate step; short-window
+improvement is only a local proxy, not hidden 190-step evidence.
