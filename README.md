@@ -246,6 +246,25 @@ next experiment plan, experiment config, and `iteration_manifest.json`. It does
 not execute candidate experiments; its purpose is to stabilize the agent-facing
 scientific loop before adding finetuning.
 
+Run the default single-window FNO iteration loop:
+
+```bash
+uv run --frozen --extra torch pde-agent run-fno-iteration \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --output-dir runs/fno_iteration_001 \
+  --max-train-steps 16 \
+  --learning-rate 1e-4 \
+  --force
+```
+
+This is the recommended Hermes entrypoint for ordinary V1 iterations after a
+local window file exists. It runs the dry-run, audits the experiment config,
+executes all generated candidates, evaluates them against the same window, and
+writes `fno_iteration_report.json` plus `candidate_comparison.json`. The current
+V1 planner emits two scheduled-sampling candidates with
+`teacher_forcing_decay = 0.85` and `0.9`.
+
 Before any future executor consumes the generated config, audit it:
 
 ```bash
