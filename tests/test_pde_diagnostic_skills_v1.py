@@ -944,6 +944,20 @@ def test_generate_experiment_config_rejects_non_string_parameter_keys(
         generate_experiment_config(plan=plan, source_plan_path=str(plan_path))
 
 
+def test_generate_experiment_config_rejects_non_json_primitive_parameter(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(plan_path)
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["intervention_plan"]["candidate_parameters"] = {
+        "bad": [Path("not-json")],
+    }
+
+    with pytest.raises(ExperimentConfigError, match="non-primitive"):
+        generate_experiment_config(plan=plan, source_plan_path=str(plan_path))
+
+
 def test_local_pde_diagnostic_chain_cli_end_to_end(tmp_path: Path) -> None:
     windows_path = tmp_path / "windows.npz"
     prediction_path = tmp_path / "prediction.npz"
