@@ -672,7 +672,7 @@ def test_plan_next_experiment_cli_writes_payload(tmp_path: Path) -> None:
         "selected_intervention": "apply_low_pass_stabilization",
         "change_scope": "postprocess_or_inference_only",
         "max_experiment_count": 3,
-        "stop_condition": "generate-experiment-config",
+        "next_command": "generate-experiment-config",
     }
     assert payload["next_hint"] == "generate-experiment-config"
     assert output_path.exists()
@@ -725,7 +725,7 @@ def plan_next_experiment(
             "selected_intervention": result["selected_intervention"],
             "change_scope": result["change_scope"],
             "max_experiment_count": result["budget"]["max_experiment_count"],
-            "stop_condition": result["next_command"],
+            "next_command": result["next_command"],
         },
         next_hint="generate-experiment-config",
     )

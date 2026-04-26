@@ -30,7 +30,7 @@ def plan_next_experiment(
             "selected_intervention": plan["selected_intervention"],
             "change_scope": plan["change_scope"],
             "max_experiment_count": plan["budget"]["max_experiment_count"],
-            "stop_condition": plan["next_command"],
+            "next_command": plan["next_command"],
         },
         next_hint="generate-experiment-config",
     )
