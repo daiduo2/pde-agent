@@ -284,9 +284,13 @@ uv run --frozen --extra torch pde-agent execute-fno-finetune-candidate \
   --force
 ```
 
-This V0 executor only supports `use_scheduled_sampling_rollout_finetune`. It
-writes `finetuned_fno_checkpoint.pt`, `candidate_prediction.npz`, and
-`candidate_execution_report.json`; it does not claim score improvement.
+This executor supports `use_scheduled_sampling_rollout_finetune`. Existing
+candidate plans default to `training_strategy = scheduled_sampling`. Candidate
+plans may also set `training_strategy = late_weighted_scheduled_sampling`, which
+uses the same rollout finetune loop but linearly increases loss weight for later
+rollout steps. It writes `finetuned_fno_checkpoint.pt`,
+`candidate_prediction.npz`, and `candidate_execution_report.json`; it does not
+claim score improvement.
 
 Evaluate that candidate against the same local windows and optional baseline:
 
