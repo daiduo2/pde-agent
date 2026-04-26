@@ -119,9 +119,14 @@ uv run --frozen pde-agent plan-next-experiment \
   --physics-check-path runs/local_spectral_burgers_physics.json \
   --hypothesis-path runs/local_spectral_pde_hypothesis.json \
   --output-path runs/local_spectral_next_experiment_plan.json
+
+uv run --frozen pde-agent generate-experiment-config \
+  --plan-path runs/local_spectral_next_experiment_plan.json \
+  --output-path runs/local_spectral_experiment_config.json
 ```
 
 `plan-next-experiment` writes machine-readable JSON only. It does not modify model
 code, execute experiments, or write human-readable research notes. The planned
-future next step is `generate-experiment-config`, which will convert the JSON plan
-into an executable experiment configuration.
+next step is `generate-experiment-config`, which expands bounded candidate
+parameters into explicit candidate experiment records. It does not run candidates;
+`execute-candidate-experiment` is a future hook.

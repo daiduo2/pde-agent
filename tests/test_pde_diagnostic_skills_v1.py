@@ -888,6 +888,38 @@ def test_generate_experiment_config_respects_budget_limit(tmp_path: Path) -> Non
     }
 
 
+def test_generate_experiment_config_rejects_empty_candidate_parameters(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(plan_path, candidate_parameters={})
+
+    with pytest.raises(ExperimentConfigError, match="candidate_parameters"):
+        generate_experiment_config_from_file(
+            plan_path=plan_path,
+            output_path=None,
+        )
+
+
+def test_generate_experiment_config_rejects_empty_parameter_values(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "next_experiment_plan.json"
+    _write_next_experiment_plan(
+        plan_path,
+        candidate_parameters={
+            "alpha": [1],
+            "beta": [],
+        },
+    )
+
+    with pytest.raises(ExperimentConfigError, match="beta"):
+        generate_experiment_config_from_file(
+            plan_path=plan_path,
+            output_path=None,
+        )
+
+
 def test_generate_experiment_config_does_not_share_mutable_plan_values(
     tmp_path: Path,
 ) -> None:
