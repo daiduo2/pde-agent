@@ -25,6 +25,9 @@ from pde_agent.commands.plan_next_experiment_from_fno_summary import (
 )
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
+from pde_agent.commands.run_fno_iteration_dryrun import (
+    run_fno_iteration_dryrun_command,
+)
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
@@ -245,6 +248,33 @@ def diagnose_fno_rollout_cmd(
     typer.echo(
         json.dumps(
             diagnose_fno_rollout(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-fno-iteration-dryrun")
+def run_fno_iteration_dryrun_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_fno_iteration_dryrun_command(
                 windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,

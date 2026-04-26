@@ -106,3 +106,45 @@ def test_run_fno_iteration_dryrun_rejects_existing_artifact_without_force(
         )
 
     assert existing_manifest.read_text(encoding="utf-8") == "previous"
+
+
+def test_run_fno_iteration_dryrun_cli_writes_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "fixture_fno.pt"
+    output_dir = tmp_path / "fno_iteration"
+    _write_windows(windows_path)
+    _write_fixture_checkpoint(checkpoint_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-fno-iteration-dryrun",
+            "--windows-path",
+            str(windows_path),
+            "--checkpoint-path",
+            str(checkpoint_path),
+            "--output-dir",
+            str(output_dir),
+            "--nu",
+            "0.001",
+            "--dt",
+            "1.0",
+            "--dx",
+            "1.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "run-fno-iteration-dryrun"
+    assert payload["state_hint"] == "FNO_ITERATION_DRYRUN_COMPLETED"
+    assert payload["artifacts"]["iteration_manifest_path"] == str(
+        output_dir / "iteration_manifest.json"
+    )
+    assert payload["metrics"]["candidate_count"] >= 1
+    assert payload["metrics"]["selected_intervention"]
+    assert payload["next_hint"] == "execute-candidate-experiment"
