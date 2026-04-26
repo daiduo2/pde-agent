@@ -112,4 +112,16 @@ uv run --frozen pde-agent select-pde-hypothesis \
   --error-diagnosis-path runs/local_spectral_rollout_error.json \
   --physics-check-path runs/local_spectral_burgers_physics.json \
   --output-path runs/local_spectral_pde_hypothesis.json
+
+uv run --frozen pde-agent plan-next-experiment \
+  --score-path runs/local_spectral_score.json \
+  --error-diagnosis-path runs/local_spectral_rollout_error.json \
+  --physics-check-path runs/local_spectral_burgers_physics.json \
+  --hypothesis-path runs/local_spectral_pde_hypothesis.json \
+  --output-path runs/local_spectral_next_experiment_plan.json
 ```
+
+`plan-next-experiment` writes machine-readable JSON only. It does not modify model
+code, execute experiments, or write human-readable research notes. The planned
+future next step is `generate-experiment-config`, which will convert the JSON plan
+into an executable experiment configuration.

@@ -655,6 +655,36 @@ def test_plan_next_experiment_long_horizon_drift_requests_rollout_finetune(
     ]
 
 
+def test_plan_next_experiment_rejects_missing_required_fields(
+    tmp_path: Path,
+) -> None:
+    score_path = tmp_path / "score.json"
+    error_path = tmp_path / "error.json"
+    physics_path = tmp_path / "physics.json"
+    hypothesis_path = tmp_path / "hypothesis.json"
+    _write_score(score_path, score=77.18, rmse=0.0506)
+    _write_error_diagnosis(error_path, "shock_region_error")
+    physics_path.write_text(
+        json.dumps(
+            {
+                "residual_ratio": 0.9,
+                "total_variation_ratio": 2.7,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_hypothesis(hypothesis_path, "apply_low_pass_stabilization")
+
+    with pytest.raises(NextExperimentPlanError, match="physics_issue"):
+        plan_next_experiment_from_files(
+            score_path=score_path,
+            error_diagnosis_path=error_path,
+            physics_check_path=physics_path,
+            hypothesis_path=hypothesis_path,
+            output_path=None,
+        )
+
+
 def test_plan_next_experiment_cli_writes_payload(tmp_path: Path) -> None:
     score_path = tmp_path / "score.json"
     error_path = tmp_path / "error.json"
