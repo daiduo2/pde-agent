@@ -195,10 +195,11 @@ def _success_transition_seen(
     final_state_hint: str = "STRATEGY_LEDGER_APPENDED",
 ) -> bool:
     normalized = output.replace("*", "").replace("`", "")
+    normalized_lower = normalized.lower()
     if final_state_hint not in normalized:
         return False
     return any(
-        marker in normalized
+        marker.lower() in normalized_lower
         for marker in (
             "Protocol complete",
             "Final command returned",

@@ -17,14 +17,18 @@ def prepare_runtime(*, repo_root: Path, output_dir: Path) -> dict[str, Path]:
     root = fixture_root(repo_root)
     root.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
+    _clear_runtime_outputs(output_dir)
     failed_evidence_path = output_dir / "failed_strategy_evidence_summary.json"
+    promoted_evidence_path = output_dir / "strategy_evidence_summary.json"
     _write_failed_evidence(failed_evidence_path)
+    _write_promoted_evidence(promoted_evidence_path)
     run_state = root / "run_state.yaml"
     run_state.write_text(
         render_template(
             repo_root=repo_root,
             output_dir=output_dir.resolve(),
             failed_evidence_path=failed_evidence_path.resolve(),
+            promoted_evidence_path=promoted_evidence_path.resolve(),
         ),
         encoding="utf-8",
     )
@@ -32,6 +36,7 @@ def prepare_runtime(*, repo_root: Path, output_dir: Path) -> dict[str, Path]:
         "run_state": run_state,
         "output_dir": output_dir,
         "failed_evidence_path": failed_evidence_path,
+        "promoted_evidence_path": promoted_evidence_path,
     }
 
 
@@ -40,6 +45,7 @@ def render_template(
     repo_root: Path,
     output_dir: Path,
     failed_evidence_path: Path,
+    promoted_evidence_path: Path,
 ) -> str:
     root = fixture_root(repo_root)
     template = (root / "run_state.template.yaml").read_text(encoding="utf-8")
@@ -49,6 +55,7 @@ def render_template(
         "{{RUN_ID}}": RUN_ID,
         "{{OUTPUT_DIR}}": str(output_dir),
         "{{FAILED_EVIDENCE_PATH}}": str(failed_evidence_path),
+        "{{PROMOTED_EVIDENCE_PATH}}": str(promoted_evidence_path),
     }
     for key, value in replacements.items():
         template = template.replace(key, value)
@@ -92,6 +99,44 @@ def _write_failed_evidence(path: Path) -> None:
     )
 
 
+def _write_promoted_evidence(path: Path) -> None:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "STRATEGY_EVIDENCE_SUMMARY_BUILT",
+        "model_family": "DeepONet",
+        "source_state_hint": "OPERATOR_EVIDENCE_SUMMARY_BUILT",
+        "evaluation_window_count": 4,
+        "mean_score_delta": 1.2,
+        "score_delta_std": 0.4,
+        "long_window_score_delta": 0.7,
+        "physics_residual_delta": -0.03,
+        "inference_time_regression": 0.02,
+        "failure_rate": 0.0,
+        "best_strategy_id": "burgers_spectral_viscosity_retrieved_v0",
+    }
+    path.write_text(
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _clear_runtime_outputs(output_dir: Path) -> None:
+    for name in [
+        "failed_strategy_evidence_summary.json",
+        "strategy_evidence_summary.json",
+        "strategy_decision.json",
+        "retrieved_strategy_candidate.json",
+        "strategy_proposal.json",
+        "experiment_rubric.json",
+        "promotion_report.json",
+        "strategy_ledger.jsonl",
+        "skill_candidate.json",
+    ]:
+        path = output_dir / name
+        if path.exists():
+            path.unlink()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare Hermes failed-strategy retrieval runtime files."
@@ -113,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     outputs = prepare_runtime(repo_root=repo_root, output_dir=output_dir)
     print(f"generated {outputs['run_state']}")
     print(f"failed_evidence_path {outputs['failed_evidence_path']}")
+    print(f"promoted_evidence_path {outputs['promoted_evidence_path']}")
     print(f"output_dir {output_dir}")
     return 0
 

@@ -1,13 +1,18 @@
 {
   "problem_id": "PDE_Burgers",
-  "task": "Route failed operator evidence into an external-retrieval strategy proposal.",
+  "task": "Route failed operator evidence into an external-retrieval strategy proposal, then convert promoted evidence into a reusable skill candidate.",
   "model_family": "DeepONet",
-  "agent_scope": "failed_evidence_to_external_strategy_proposal",
+  "agent_scope": "failed_evidence_to_external_skill_candidate",
   "required_output": [
     "failed_strategy_evidence_summary.json",
     "strategy_decision.json",
     "retrieved_strategy_candidate.json",
-    "strategy_proposal.json"
+    "strategy_proposal.json",
+    "strategy_evidence_summary.json",
+    "experiment_rubric.json",
+    "promotion_report.json",
+    "strategy_ledger.jsonl",
+    "skill_candidate.json"
   ],
-  "success_state_hint": "STRATEGY_PROPOSAL_RECORDED"
+  "success_state_hint": "SKILL_CANDIDATE_CREATED"
 }

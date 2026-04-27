@@ -8,4 +8,4 @@ Read these files first, in order:
 
 Then execute the exact commands in `allowed_commands`, in order. Do not run
 unlisted commands. Stop only after the final command returns
-`STRATEGY_PROPOSAL_RECORDED`.
+`SKILL_CANDIDATE_CREATED`.

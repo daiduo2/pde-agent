@@ -9,6 +9,7 @@ PROPOSAL_STATE_HINT = "STRATEGY_PROPOSAL_RECORDED"
 RUBRIC_STATE_HINT = "STRATEGY_RUBRIC_BUILT"
 PROMOTION_STATE_HINT = "STRATEGY_PROMOTION_EVALUATED"
 LEDGER_STATE_HINT = "STRATEGY_LEDGER_APPENDED"
+SKILL_CANDIDATE_STATE_HINT = "SKILL_CANDIDATE_CREATED"
 VALID_SOURCE_TYPES = {"local_library", "external_retrieval", "agent_hypothesis"}
 REQUIRED_PROMOTION_METRICS = [
     "evaluation_window_count",
@@ -259,6 +260,76 @@ def append_strategy_ledger(
     return row
 
 
+def create_skill_candidate(
+    *,
+    proposal_path: Path,
+    rubric_path: Path,
+    evidence_summary_path: Path,
+    promotion_report_path: Path,
+    output_path: Path,
+    skill_name: str,
+    skill_dir: str,
+) -> dict[str, Any]:
+    proposal_file = Path(proposal_path)
+    rubric_file = Path(rubric_path)
+    evidence_file = Path(evidence_summary_path)
+    promotion_file = Path(promotion_report_path)
+    output_file = Path(output_path)
+    proposal = _read_json(proposal_file)
+    rubric = _read_json(rubric_file)
+    evidence = _read_json(evidence_file)
+    promotion = _read_json(promotion_file)
+    if proposal.get("state_hint") != PROPOSAL_STATE_HINT:
+        raise StrategyGrowthError("proposal artifact has invalid state_hint")
+    if rubric.get("state_hint") != RUBRIC_STATE_HINT:
+        raise StrategyGrowthError("rubric artifact has invalid state_hint")
+    if promotion.get("state_hint") != PROMOTION_STATE_HINT:
+        raise StrategyGrowthError("promotion artifact has invalid state_hint")
+    strategy_id = proposal.get("strategy_id")
+    if strategy_id != rubric.get("strategy_id") or strategy_id != promotion.get(
+        "strategy_id"
+    ):
+        raise StrategyGrowthError("strategy_id mismatch across growth artifacts")
+    if not promotion.get("promote_to_skill_candidate"):
+        raise StrategyGrowthError("promotion report did not promote this strategy")
+    _require_nonempty("skill_name", skill_name)
+    _require_nonempty("skill_dir", skill_dir)
+    if output_file.exists():
+        raise StrategyGrowthError(f"output file already exists: {output_file}")
+
+    candidate: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": SKILL_CANDIDATE_STATE_HINT,
+        "strategy_id": strategy_id,
+        "skill_name": skill_name,
+        "suggested_skill_dir": skill_dir,
+        "skill_candidate_path": str(output_file),
+        "title": proposal["title"],
+        "source_type": proposal["source_type"],
+        "scientific_basis": {
+            "problem_context": proposal["problem_context"],
+            "hypothesis": proposal["hypothesis"],
+            "mechanism": proposal["mechanism"],
+        },
+        "trigger_conditions": proposal["expected_observables"],
+        "procedure_steps": _procedure_steps(proposal),
+        "failure_boundaries": proposal["known_risks"],
+        "promotion_reason_codes": promotion["reason_codes"],
+        "evidence_sources": {
+            "strategy_proposal_path": str(proposal_file),
+            "experiment_rubric_path": str(rubric_file),
+            "evidence_summary_path": str(evidence_file),
+            "promotion_report_path": str(promotion_file),
+        },
+        "metric_snapshot": {
+            metric: evidence.get(metric) for metric in rubric["required_metrics"]
+        },
+        "next_command": "review-skill-candidate",
+    }
+    _write_json(output_file, candidate)
+    return candidate
+
+
 def _require_nonempty(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise StrategyGrowthError(f"{name} must be a non-empty string")
@@ -270,6 +341,18 @@ def _require_nonempty_list(name: str, value: list[str]) -> None:
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise StrategyGrowthError(f"{name} must contain only non-empty strings")
+
+
+def _procedure_steps(proposal: dict[str, Any]) -> list[str]:
+    plan = proposal["implementation_plan"]
+    commands = plan.get("allowed_commands", [])
+    artifacts = plan.get("expected_artifacts", [])
+    steps = [proposal["mechanism"]]
+    if isinstance(commands, list) and commands:
+        steps.append("Run only the approved commands: " + ", ".join(map(str, commands)))
+    if isinstance(artifacts, list) and artifacts:
+        steps.append("Verify expected artifacts: " + ", ".join(map(str, artifacts)))
+    return steps
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

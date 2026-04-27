@@ -113,3 +113,24 @@ Summary:
         )
         is True
     )
+
+
+def test_run_script_accepts_lowercase_final_command_marker() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _load_module(
+        "run_hermes_strategy_growth",
+        repo_root / "scripts" / "run_hermes_strategy_growth.py",
+    )
+
+    output = """
+All 7 commands executed successfully in order. The final command returned
+`SKILL_CANDIDATE_CREATED`.
+"""
+
+    assert (
+        module._success_transition_seen(
+            output,
+            final_state_hint="SKILL_CANDIDATE_CREATED",
+        )
+        is True
+    )

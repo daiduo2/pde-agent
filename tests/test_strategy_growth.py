@@ -401,3 +401,131 @@ def test_append_strategy_ledger_cli_returns_protocol_payload(
     assert payload["metrics"]["decision"] == "promote"
     assert payload["metrics"]["promote_to_skill_candidate"] is True
     assert payload["next_hint"] == "create-skill-candidate"
+
+
+def test_create_skill_candidate_writes_auditable_artifact(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import create_skill_candidate
+
+    proposal_path, rubric_path, evidence_path, promotion_path = (
+        _write_promoted_strategy_artifacts(tmp_path)
+    )
+    output_path = tmp_path / "skill_candidate.json"
+
+    candidate = create_skill_candidate(
+        proposal_path=proposal_path,
+        rubric_path=rubric_path,
+        evidence_summary_path=evidence_path,
+        promotion_report_path=promotion_path,
+        output_path=output_path,
+        skill_name="pde-fno-spectral-filter",
+        skill_dir="skills/pde-fno-spectral-filter",
+    )
+
+    assert output_path.exists()
+    assert candidate == json.loads(output_path.read_text(encoding="utf-8"))
+    assert candidate["schema_version"] == 1
+    assert candidate["state_hint"] == "SKILL_CANDIDATE_CREATED"
+    assert candidate["strategy_id"] == "fno_spectral_filter_v0"
+    assert candidate["skill_name"] == "pde-fno-spectral-filter"
+    assert candidate["suggested_skill_dir"] == "skills/pde-fno-spectral-filter"
+    assert candidate["evidence_sources"]["promotion_report_path"] == str(promotion_path)
+    assert candidate["promotion_reason_codes"] == ["all_thresholds_passed"]
+    assert "positive mean score delta across windows" in candidate["trigger_conditions"]
+    assert "Apply a low-pass residual filter" in candidate["procedure_steps"][0]
+    assert "over-smoothing shocks" in candidate["failure_boundaries"]
+    assert candidate["next_command"] == "review-skill-candidate"
+
+
+def test_create_skill_candidate_rejects_unpromoted_report(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import (
+        StrategyGrowthError,
+        build_strategy_rubric,
+        create_skill_candidate,
+        evaluate_strategy_promotion,
+        record_strategy_proposal,
+    )
+
+    proposal_path = tmp_path / "strategy_proposal.json"
+    rubric_path = tmp_path / "experiment_rubric.json"
+    evidence_path = tmp_path / "evidence_summary.json"
+    promotion_path = tmp_path / "promotion_report.json"
+    record_strategy_proposal(**_proposal_kwargs(proposal_path))
+    build_strategy_rubric(
+        proposal_path=proposal_path,
+        output_path=rubric_path,
+        min_evaluation_windows=3,
+        max_inference_time_regression=0.10,
+    )
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "evaluation_window_count": 1,
+                "mean_score_delta": 2.5,
+                "score_delta_std": 0.8,
+                "long_window_score_delta": 1.1,
+                "physics_residual_delta": -0.05,
+                "inference_time_regression": 0.02,
+                "failure_rate": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluate_strategy_promotion(
+        proposal_path=proposal_path,
+        rubric_path=rubric_path,
+        evidence_summary_path=evidence_path,
+        output_path=promotion_path,
+    )
+
+    with pytest.raises(StrategyGrowthError, match="promotion report did not promote"):
+        create_skill_candidate(
+            proposal_path=proposal_path,
+            rubric_path=rubric_path,
+            evidence_summary_path=evidence_path,
+            promotion_report_path=promotion_path,
+            output_path=tmp_path / "skill_candidate.json",
+            skill_name="pde-fno-spectral-filter",
+            skill_dir="skills/pde-fno-spectral-filter",
+        )
+
+
+def test_create_skill_candidate_cli_returns_protocol_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    proposal_path, rubric_path, evidence_path, promotion_path = (
+        _write_promoted_strategy_artifacts(tmp_path)
+    )
+    output_path = tmp_path / "skill_candidate.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "create-skill-candidate",
+            "--proposal-path",
+            str(proposal_path),
+            "--rubric-path",
+            str(rubric_path),
+            "--evidence-summary-path",
+            str(evidence_path),
+            "--promotion-report-path",
+            str(promotion_path),
+            "--output-path",
+            str(output_path),
+            "--skill-name",
+            "pde-fno-spectral-filter",
+            "--skill-dir",
+            "skills/pde-fno-spectral-filter",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "create-skill-candidate"
+    assert payload["state_hint"] == "SKILL_CANDIDATE_CREATED"
+    assert payload["artifacts"]["skill_candidate_path"] == str(output_path)
+    assert payload["metrics"]["strategy_id"] == "fno_spectral_filter_v0"
+    assert payload["metrics"]["skill_name"] == "pde-fno-spectral-filter"
+    assert payload["metrics"]["procedure_step_count"] >= 1
+    assert payload["next_hint"] == "review-skill-candidate"

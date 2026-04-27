@@ -22,6 +22,7 @@ from pde_agent.commands.convert_fno_evidence_summary import (
 from pde_agent.commands.convert_operator_evidence_summary import (
     convert_operator_evidence_summary_command,
 )
+from pde_agent.commands.create_skill_candidate import create_skill_candidate_command
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
@@ -785,6 +786,33 @@ def append_strategy_ledger_cmd(
                 evidence_summary_path=evidence_summary_path,
                 promotion_report_path=promotion_report_path,
                 ledger_path=ledger_path,
+            )
+        )
+    )
+
+
+@app.command("create-skill-candidate")
+def create_skill_candidate_cmd(
+    proposal_path: str = typer.Option(...),
+    rubric_path: str = typer.Option(...),
+    evidence_summary_path: str = typer.Option(...),
+    promotion_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    skill_name: str = typer.Option(...),
+    skill_dir: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            create_skill_candidate_command(
+                proposal_path=proposal_path,
+                rubric_path=rubric_path,
+                evidence_summary_path=evidence_summary_path,
+                promotion_report_path=promotion_report_path,
+                output_path=output_path,
+                skill_name=skill_name,
+                skill_dir=skill_dir,
             )
         )
     )

@@ -11,5 +11,5 @@ Rules:
 - Do not download data or perform live internet search in this canary.
 - Do not inspect help output.
 - Do not manually inspect generated artifacts with shell commands.
-- Do not call promotion, ledger, training, or submission commands.
-- Stop after `record-strategy-proposal` returns `STRATEGY_PROPOSAL_RECORDED`.
+- Do not call training or submission commands.
+- Stop after `create-skill-candidate` returns `SKILL_CANDIDATE_CREATED`.
