@@ -12,4 +12,4 @@ Rules:
 - Do not inspect help output.
 - Do not manually inspect generated artifacts with shell commands.
 - Do not call training or submission commands.
-- Stop after `create-skill-candidate` returns `SKILL_CANDIDATE_CREATED`.
+- Stop after `materialize-skill-draft` returns `SKILL_DRAFT_MATERIALIZED`.

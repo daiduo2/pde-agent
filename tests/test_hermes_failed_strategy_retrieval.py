@@ -27,7 +27,7 @@ def _allowed_commands(run_state: str) -> list[str]:
     return commands
 
 
-def test_prepare_failed_strategy_retrieval_renders_skill_candidate_protocol(
+def test_prepare_failed_strategy_retrieval_renders_skill_draft_protocol(
     tmp_path: Path,
 ) -> None:
     module = _load_prepare_module()
@@ -58,7 +58,7 @@ def test_prepare_failed_strategy_retrieval_renders_skill_candidate_protocol(
     run_state = outputs["run_state"].read_text(encoding="utf-8")
     commands = _allowed_commands(run_state)
     assert "{{" not in run_state
-    assert len(commands) == 7
+    assert len(commands) == 9
     assert "recommend-strategy-next-action" in commands[0]
     assert "formalize-external-strategy-candidate" in commands[1]
     assert "record-strategy-proposal" in commands[2]
@@ -66,6 +66,8 @@ def test_prepare_failed_strategy_retrieval_renders_skill_candidate_protocol(
     assert "evaluate-strategy-promotion" in commands[4]
     assert "append-strategy-ledger" in commands[5]
     assert "create-skill-candidate" in commands[6]
+    assert "review-skill-candidate" in commands[7]
+    assert "materialize-skill-draft" in commands[8]
     assert "--source-type external_retrieval" in commands[2]
     assert str(outputs["failed_evidence_path"].resolve()) in commands[0]
     assert str(outputs["promoted_evidence_path"].resolve()) in commands[4]
@@ -73,6 +75,8 @@ def test_prepare_failed_strategy_retrieval_renders_skill_candidate_protocol(
     assert str(outputs["output_dir"] / "strategy_decision.json") in run_state
     assert str(outputs["output_dir"] / "retrieved_strategy_candidate.json") in run_state
     assert str(outputs["output_dir"] / "skill_candidate.json") in run_state
+    assert str(outputs["output_dir"] / "skill_review.json") in run_state
+    assert str(outputs["output_dir"] / "generated_skills") in run_state
     assert outputs["failed_evidence_path"].exists()
     assert outputs["promoted_evidence_path"].exists()
-    assert "SKILL_CANDIDATE_CREATED" in run_state
+    assert "SKILL_DRAFT_MATERIALIZED" in run_state

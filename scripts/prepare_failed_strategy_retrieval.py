@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -131,10 +132,14 @@ def _clear_runtime_outputs(output_dir: Path) -> None:
         "promotion_report.json",
         "strategy_ledger.jsonl",
         "skill_candidate.json",
+        "skill_review.json",
     ]:
         path = output_dir / name
         if path.exists():
             path.unlink()
+    generated_skills = output_dir / "generated_skills"
+    if generated_skills.exists():
+        shutil.rmtree(generated_skills)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

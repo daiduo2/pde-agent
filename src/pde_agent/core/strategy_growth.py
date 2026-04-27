@@ -10,6 +10,8 @@ RUBRIC_STATE_HINT = "STRATEGY_RUBRIC_BUILT"
 PROMOTION_STATE_HINT = "STRATEGY_PROMOTION_EVALUATED"
 LEDGER_STATE_HINT = "STRATEGY_LEDGER_APPENDED"
 SKILL_CANDIDATE_STATE_HINT = "SKILL_CANDIDATE_CREATED"
+SKILL_REVIEW_STATE_HINT = "SKILL_CANDIDATE_REVIEWED"
+SKILL_DRAFT_STATE_HINT = "SKILL_DRAFT_MATERIALIZED"
 VALID_SOURCE_TYPES = {"local_library", "external_retrieval", "agent_hypothesis"}
 REQUIRED_PROMOTION_METRICS = [
     "evaluation_window_count",
@@ -330,6 +332,108 @@ def create_skill_candidate(
     return candidate
 
 
+def review_skill_candidate(
+    *,
+    skill_candidate_path: Path,
+    output_path: Path,
+    reviewer_id: str,
+) -> dict[str, Any]:
+    candidate_file = Path(skill_candidate_path)
+    output_file = Path(output_path)
+    candidate = _read_json(candidate_file)
+    if candidate.get("state_hint") != SKILL_CANDIDATE_STATE_HINT:
+        raise StrategyGrowthError("skill candidate artifact has invalid state_hint")
+    _require_nonempty("reviewer_id", reviewer_id)
+    if output_file.exists():
+        raise StrategyGrowthError(f"output file already exists: {output_file}")
+
+    checklist = {
+        "has_evidence_sources": _nonempty_dict(candidate.get("evidence_sources")),
+        "has_failure_boundaries": _nonempty_list(candidate.get("failure_boundaries")),
+        "has_procedure_steps": _nonempty_list(candidate.get("procedure_steps")),
+        "has_trigger_conditions": _nonempty_list(candidate.get("trigger_conditions")),
+        "has_scientific_basis": _nonempty_dict(candidate.get("scientific_basis")),
+    }
+    reason_codes = [
+        reason
+        for passed, reason in (
+            (checklist["has_evidence_sources"], "missing_evidence_sources"),
+            (checklist["has_failure_boundaries"], "missing_failure_boundaries"),
+            (checklist["has_procedure_steps"], "missing_procedure_steps"),
+            (checklist["has_trigger_conditions"], "missing_trigger_conditions"),
+            (checklist["has_scientific_basis"], "missing_scientific_basis"),
+        )
+        if not passed
+    ]
+    approved = not reason_codes
+    if approved:
+        reason_codes = ["candidate_review_passed"]
+
+    review: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": SKILL_REVIEW_STATE_HINT,
+        "strategy_id": candidate["strategy_id"],
+        "skill_name": candidate["skill_name"],
+        "skill_candidate_path": str(candidate_file),
+        "skill_review_path": str(output_file),
+        "reviewer_id": reviewer_id,
+        "decision": "approve" if approved else "reject",
+        "approved_for_draft": approved,
+        "reason_codes": reason_codes,
+        "review_checklist": checklist,
+        "next_command": "materialize-skill-draft"
+        if approved
+        else "revise-skill-candidate",
+    }
+    _write_json(output_file, review)
+    return review
+
+
+def materialize_skill_draft(
+    *,
+    skill_candidate_path: Path,
+    skill_review_path: Path,
+    draft_root: Path,
+) -> dict[str, Any]:
+    candidate_file = Path(skill_candidate_path)
+    review_file = Path(skill_review_path)
+    root = Path(draft_root)
+    candidate = _read_json(candidate_file)
+    review = _read_json(review_file)
+    if candidate.get("state_hint") != SKILL_CANDIDATE_STATE_HINT:
+        raise StrategyGrowthError("skill candidate artifact has invalid state_hint")
+    if review.get("state_hint") != SKILL_REVIEW_STATE_HINT:
+        raise StrategyGrowthError("skill review artifact has invalid state_hint")
+    if candidate.get("strategy_id") != review.get("strategy_id"):
+        raise StrategyGrowthError("strategy_id mismatch across skill artifacts")
+    if not review.get("approved_for_draft"):
+        raise StrategyGrowthError("skill review is not approved for draft materialization")
+
+    skill_dir = root / candidate["skill_name"]
+    skill_md = skill_dir / "SKILL.md"
+    manifest_path = skill_dir / "skill_draft_manifest.json"
+    if skill_md.exists() or manifest_path.exists():
+        raise StrategyGrowthError(f"skill draft already exists: {skill_dir}")
+
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_md.write_text(_skill_markdown(candidate), encoding="utf-8")
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": SKILL_DRAFT_STATE_HINT,
+        "strategy_id": candidate["strategy_id"],
+        "skill_name": candidate["skill_name"],
+        "skill_draft_dir": str(skill_dir),
+        "skill_md_path": str(skill_md),
+        "skill_draft_manifest_path": str(manifest_path),
+        "skill_candidate_path": str(candidate_file),
+        "skill_review_path": str(review_file),
+        "review_decision": review["decision"],
+        "next_command": "human-review-skill-draft",
+    }
+    _write_json(manifest_path, manifest)
+    return manifest
+
+
 def _require_nonempty(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise StrategyGrowthError(f"{name} must be a non-empty string")
@@ -343,6 +447,14 @@ def _require_nonempty_list(name: str, value: list[str]) -> None:
             raise StrategyGrowthError(f"{name} must contain only non-empty strings")
 
 
+def _nonempty_list(value: object) -> bool:
+    return isinstance(value, list) and bool(value)
+
+
+def _nonempty_dict(value: object) -> bool:
+    return isinstance(value, dict) and bool(value)
+
+
 def _procedure_steps(proposal: dict[str, Any]) -> list[str]:
     plan = proposal["implementation_plan"]
     commands = plan.get("allowed_commands", [])
@@ -353,6 +465,33 @@ def _procedure_steps(proposal: dict[str, Any]) -> list[str]:
     if isinstance(artifacts, list) and artifacts:
         steps.append("Verify expected artifacts: " + ", ".join(map(str, artifacts)))
     return steps
+
+
+def _skill_markdown(candidate: dict[str, Any]) -> str:
+    basis = candidate["scientific_basis"]
+    lines = [
+        "---",
+        f"name: {candidate['skill_name']}",
+        "description: "
+        + candidate["title"].replace("\n", " ").strip(),
+        "---",
+        "",
+        "# Purpose",
+        "",
+        basis["hypothesis"],
+        "",
+        "# When To Use",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in candidate["trigger_conditions"])
+    lines.extend(["", "# Procedure", ""])
+    lines.extend(f"{index}. {step}" for index, step in enumerate(candidate["procedure_steps"], start=1))
+    lines.extend(["", "# Failure Boundaries", ""])
+    lines.extend(f"- {item}" for item in candidate["failure_boundaries"])
+    lines.extend(["", "# Evidence Sources", ""])
+    for name, path in candidate["evidence_sources"].items():
+        lines.append(f"- `{name}`: `{path}`")
+    return "\n".join(lines) + "\n"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

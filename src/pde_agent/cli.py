@@ -51,6 +51,7 @@ from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.interpret_error import interpret_error
+from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
@@ -69,6 +70,7 @@ from pde_agent.commands.record_strategy_proposal import (
 from pde_agent.commands.recommend_strategy_next_action import (
     recommend_strategy_next_action_command,
 )
+from pde_agent.commands.review_skill_candidate import review_skill_candidate_command
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -813,6 +815,44 @@ def create_skill_candidate_cmd(
                 output_path=output_path,
                 skill_name=skill_name,
                 skill_dir=skill_dir,
+            )
+        )
+    )
+
+
+@app.command("review-skill-candidate")
+def review_skill_candidate_cmd(
+    skill_candidate_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    reviewer_id: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            review_skill_candidate_command(
+                skill_candidate_path=skill_candidate_path,
+                output_path=output_path,
+                reviewer_id=reviewer_id,
+            )
+        )
+    )
+
+
+@app.command("materialize-skill-draft")
+def materialize_skill_draft_cmd(
+    skill_candidate_path: str = typer.Option(...),
+    skill_review_path: str = typer.Option(...),
+    draft_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            materialize_skill_draft_command(
+                skill_candidate_path=skill_candidate_path,
+                skill_review_path=skill_review_path,
+                draft_root=draft_root,
             )
         )
     )

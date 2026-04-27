@@ -16,6 +16,8 @@ allowed_actions:
   - evaluate_strategy_promotion
   - append_strategy_ledger
   - create_skill_candidate
+  - review_skill_candidate
+  - materialize_skill_draft
 
 forbidden_actions:
   - patch_code
@@ -45,6 +47,9 @@ required_artifacts:
   - {{OUTPUT_DIR}}/promotion_report.json
   - {{OUTPUT_DIR}}/strategy_ledger.jsonl
   - {{OUTPUT_DIR}}/skill_candidate.json
+  - {{OUTPUT_DIR}}/skill_review.json
+  - {{OUTPUT_DIR}}/generated_skills/pde-deeponet-spectral-viscosity/SKILL.md
+  - {{OUTPUT_DIR}}/generated_skills/pde-deeponet-spectral-viscosity/skill_draft_manifest.json
 
 allowed_commands:
   - name: recommend_strategy_next_action
@@ -61,6 +66,10 @@ allowed_commands:
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent append-strategy-ledger --proposal-path {{OUTPUT_DIR}}/strategy_proposal.json --rubric-path {{OUTPUT_DIR}}/experiment_rubric.json --evidence-summary-path {{PROMOTED_EVIDENCE_PATH}} --promotion-report-path {{OUTPUT_DIR}}/promotion_report.json --ledger-path {{OUTPUT_DIR}}/strategy_ledger.jsonl
   - name: create_skill_candidate
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent create-skill-candidate --proposal-path {{OUTPUT_DIR}}/strategy_proposal.json --rubric-path {{OUTPUT_DIR}}/experiment_rubric.json --evidence-summary-path {{PROMOTED_EVIDENCE_PATH}} --promotion-report-path {{OUTPUT_DIR}}/promotion_report.json --output-path {{OUTPUT_DIR}}/skill_candidate.json --skill-name pde-deeponet-spectral-viscosity --skill-dir skills/pde-deeponet-spectral-viscosity
+  - name: review_skill_candidate
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent review-skill-candidate --skill-candidate-path {{OUTPUT_DIR}}/skill_candidate.json --output-path {{OUTPUT_DIR}}/skill_review.json --reviewer-id hermes-protocol-reviewer
+  - name: materialize_skill_draft
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent materialize-skill-draft --skill-candidate-path {{OUTPUT_DIR}}/skill_candidate.json --skill-review-path {{OUTPUT_DIR}}/skill_review.json --draft-root {{OUTPUT_DIR}}/generated_skills
 
 success_transition:
-  on_complete: SKILL_CANDIDATE_CREATED
+  on_complete: SKILL_DRAFT_MATERIALIZED

@@ -529,3 +529,198 @@ def test_create_skill_candidate_cli_returns_protocol_payload(tmp_path: Path) -> 
     assert payload["metrics"]["skill_name"] == "pde-fno-spectral-filter"
     assert payload["metrics"]["procedure_step_count"] >= 1
     assert payload["next_hint"] == "review-skill-candidate"
+
+
+def _write_skill_candidate(tmp_path: Path) -> Path:
+    from pde_agent.core.strategy_growth import create_skill_candidate
+
+    proposal_path, rubric_path, evidence_path, promotion_path = (
+        _write_promoted_strategy_artifacts(tmp_path)
+    )
+    candidate_path = tmp_path / "skill_candidate.json"
+    create_skill_candidate(
+        proposal_path=proposal_path,
+        rubric_path=rubric_path,
+        evidence_summary_path=evidence_path,
+        promotion_report_path=promotion_path,
+        output_path=candidate_path,
+        skill_name="pde-fno-spectral-filter",
+        skill_dir="skills/pde-fno-spectral-filter",
+    )
+    return candidate_path
+
+
+def test_review_skill_candidate_approves_complete_candidate(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import review_skill_candidate
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    review_path = tmp_path / "skill_review.json"
+
+    review = review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=review_path,
+        reviewer_id="codex-local-reviewer",
+    )
+
+    assert review_path.exists()
+    assert review == json.loads(review_path.read_text(encoding="utf-8"))
+    assert review["schema_version"] == 1
+    assert review["state_hint"] == "SKILL_CANDIDATE_REVIEWED"
+    assert review["strategy_id"] == "fno_spectral_filter_v0"
+    assert review["decision"] == "approve"
+    assert review["approved_for_draft"] is True
+    assert review["reason_codes"] == ["candidate_review_passed"]
+    assert review["review_checklist"]["has_evidence_sources"] is True
+    assert review["review_checklist"]["has_failure_boundaries"] is True
+    assert review["review_checklist"]["has_procedure_steps"] is True
+    assert review["next_command"] == "materialize-skill-draft"
+
+
+def test_review_skill_candidate_rejects_incomplete_candidate(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import review_skill_candidate
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["failure_boundaries"] = []
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    review = review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=tmp_path / "skill_review.json",
+        reviewer_id="codex-local-reviewer",
+    )
+
+    assert review["decision"] == "reject"
+    assert review["approved_for_draft"] is False
+    assert "missing_failure_boundaries" in review["reason_codes"]
+    assert review["next_command"] == "revise-skill-candidate"
+
+
+def test_review_skill_candidate_cli_returns_protocol_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    review_path = tmp_path / "skill_review.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "review-skill-candidate",
+            "--skill-candidate-path",
+            str(candidate_path),
+            "--output-path",
+            str(review_path),
+            "--reviewer-id",
+            "codex-local-reviewer",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "review-skill-candidate"
+    assert payload["state_hint"] == "SKILL_CANDIDATE_REVIEWED"
+    assert payload["artifacts"]["skill_review_path"] == str(review_path)
+    assert payload["metrics"]["decision"] == "approve"
+    assert payload["metrics"]["approved_for_draft"] is True
+    assert payload["next_hint"] == "materialize-skill-draft"
+
+
+def test_materialize_skill_draft_writes_skill_markdown_and_manifest(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.strategy_growth import (
+        materialize_skill_draft,
+        review_skill_candidate,
+    )
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    review_path = tmp_path / "skill_review.json"
+    review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=review_path,
+        reviewer_id="codex-local-reviewer",
+    )
+
+    manifest = materialize_skill_draft(
+        skill_candidate_path=candidate_path,
+        skill_review_path=review_path,
+        draft_root=tmp_path / "generated_skills",
+    )
+
+    skill_md = Path(manifest["skill_md_path"])
+    manifest_path = Path(manifest["skill_draft_manifest_path"])
+    assert skill_md.exists()
+    assert manifest_path.exists()
+    assert manifest == json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["state_hint"] == "SKILL_DRAFT_MATERIALIZED"
+    assert manifest["skill_name"] == "pde-fno-spectral-filter"
+    assert manifest["review_decision"] == "approve"
+    skill_text = skill_md.read_text(encoding="utf-8")
+    assert "name: pde-fno-spectral-filter" in skill_text
+    assert "Removing unstable high-frequency residual modes" in skill_text
+    assert "over-smoothing shocks" in skill_text
+
+
+def test_materialize_skill_draft_rejects_unapproved_review(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import (
+        StrategyGrowthError,
+        materialize_skill_draft,
+        review_skill_candidate,
+    )
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["procedure_steps"] = []
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+    review_path = tmp_path / "skill_review.json"
+    review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=review_path,
+        reviewer_id="codex-local-reviewer",
+    )
+
+    with pytest.raises(StrategyGrowthError, match="skill review is not approved"):
+        materialize_skill_draft(
+            skill_candidate_path=candidate_path,
+            skill_review_path=review_path,
+            draft_root=tmp_path / "generated_skills",
+        )
+
+
+def test_materialize_skill_draft_cli_returns_protocol_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from pde_agent.core.strategy_growth import review_skill_candidate
+    from typer.testing import CliRunner
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    review_path = tmp_path / "skill_review.json"
+    review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=review_path,
+        reviewer_id="codex-local-reviewer",
+    )
+    draft_root = tmp_path / "generated_skills"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "materialize-skill-draft",
+            "--skill-candidate-path",
+            str(candidate_path),
+            "--skill-review-path",
+            str(review_path),
+            "--draft-root",
+            str(draft_root),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "materialize-skill-draft"
+    assert payload["state_hint"] == "SKILL_DRAFT_MATERIALIZED"
+    assert payload["metrics"]["skill_name"] == "pde-fno-spectral-filter"
+    assert Path(payload["artifacts"]["skill_md_path"]).exists()
+    assert payload["next_hint"] == "human-review-skill-draft"

@@ -1,8 +1,8 @@
 {
   "problem_id": "PDE_Burgers",
-  "task": "Route failed operator evidence into an external-retrieval strategy proposal, then convert promoted evidence into a reusable skill candidate.",
+  "task": "Route failed operator evidence into an external-retrieval strategy proposal, then convert promoted evidence into a reviewed skill draft.",
   "model_family": "DeepONet",
-  "agent_scope": "failed_evidence_to_external_skill_candidate",
+  "agent_scope": "failed_evidence_to_external_skill_draft",
   "required_output": [
     "failed_strategy_evidence_summary.json",
     "strategy_decision.json",
@@ -12,7 +12,10 @@
     "experiment_rubric.json",
     "promotion_report.json",
     "strategy_ledger.jsonl",
-    "skill_candidate.json"
+    "skill_candidate.json",
+    "skill_review.json",
+    "generated_skills/pde-deeponet-spectral-viscosity/SKILL.md",
+    "generated_skills/pde-deeponet-spectral-viscosity/skill_draft_manifest.json"
   ],
-  "success_state_hint": "SKILL_CANDIDATE_CREATED"
+  "success_state_hint": "SKILL_DRAFT_MATERIALIZED"
 }
