@@ -1,0 +1,14 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Route an existing FNO evidence sweep summary through the strategy-growth gate.",
+  "model_family": "FNO",
+  "agent_scope": "evidence_to_strategy_growth_gate",
+  "required_output": [
+    "strategy_evidence_summary.json",
+    "strategy_proposal.json",
+    "experiment_rubric.json",
+    "promotion_report.json",
+    "strategy_ledger.jsonl"
+  ],
+  "success_state_hint": "STRATEGY_LEDGER_APPENDED"
+}
