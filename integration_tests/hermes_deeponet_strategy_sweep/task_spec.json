@@ -1,0 +1,14 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Run a bounded DeepONet strategy sweep and route evidence into strategy-growth.",
+  "model_family": "DeepONet",
+  "agent_scope": "strategy_sweep_to_strategy_growth_gate",
+  "required_output": [
+    "strategy_sweep/deeponet_strategy_sweep_summary.json",
+    "strategy_sweep/deeponet_strategy_sweep_summary.csv",
+    "strategy_sweep/deeponet_evidence/evidence_summary.json",
+    "strategy_evidence_summary.json",
+    "strategy_ledger.jsonl"
+  ],
+  "success_state_hint": "STRATEGY_LEDGER_APPENDED"
+}

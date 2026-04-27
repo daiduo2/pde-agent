@@ -1,0 +1,66 @@
+run_id: {{RUN_ID}}
+run_root: {{OUTPUT_DIR}}
+working_directory: {{FIXTURE_ROOT}}
+command_prefix: cd {{REPO_ROOT}} && uv run --frozen pde-agent
+
+current_state: TASK_PARSED
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - run_deeponet_strategy_sweep
+  - convert_operator_evidence_summary
+  - record_strategy_proposal
+  - build_strategy_rubric
+  - evaluate_strategy_promotion
+  - append_strategy_ledger
+
+forbidden_actions:
+  - patch_code
+  - patch_input_data
+  - implicit_download
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+  - manually_inspect_generated_artifacts
+  - cleanup_artifacts
+  - move_artifacts
+  - retry_failed_command_with_unlisted_command
+  - call_build_submission
+  - call_evaluate_strategy_promotion_before_convert_operator_evidence_summary
+
+required_reads:
+  - {{FIXTURE_ROOT}}/run_state.yaml
+  - {{FIXTURE_ROOT}}/bootstrap_prompt.md
+  - {{FIXTURE_ROOT}}/task_spec.json
+
+required_artifacts:
+  - {{OUTPUT_DIR}}/strategy_sweep/deeponet_strategy_sweep_summary.json
+  - {{OUTPUT_DIR}}/strategy_sweep/deeponet_strategy_sweep_summary.csv
+  - {{OUTPUT_DIR}}/strategy_sweep/deeponet_evidence/evidence_summary.json
+  - {{OUTPUT_DIR}}/strategy_sweep/deeponet_evidence/evidence_summary.csv
+  - {{OUTPUT_DIR}}/strategy_evidence_summary.json
+  - {{OUTPUT_DIR}}/strategy_proposal.json
+  - {{OUTPUT_DIR}}/experiment_rubric.json
+  - {{OUTPUT_DIR}}/promotion_report.json
+  - {{OUTPUT_DIR}}/strategy_ledger.jsonl
+
+allowed_commands:
+  - name: run_deeponet_strategy_sweep
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent run-deeponet-strategy-sweep --windows-path {{WINDOWS_PATH}} --output-dir {{OUTPUT_DIR}}/strategy_sweep --baseline-score-path {{BASELINE_SCORE_PATH}} --start-index 0 --train-steps 4 --hidden-width 8 --hidden-width 16 --latent-dim 4 --learning-rate 0.01 --seed 5 --nu 0.001 --dt 1.0 --dx 1.0
+  - name: convert_operator_evidence_summary
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent convert-operator-evidence-summary --sweep-summary-path {{OUTPUT_DIR}}/strategy_sweep/deeponet_evidence/evidence_summary.json --output-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --model-family DeepONet --source-state-hint DEEPONET_EVIDENCE_SWEEP_COMPLETED --long-window-threshold 3 --force
+  - name: record_strategy_proposal
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent record-strategy-proposal --strategy-id deeponet_strategy_sweep_v0 --title "DeepONet strategy sweep gate" --source-type local_library --problem-context "1D Burgers DeepONet bounded strategy sweep protocol validation" --hypothesis "A bounded DeepONet strategy matrix should produce evidence-compatible candidate comparisons before promotion." --mechanism "Run a tiny branch-trunk DeepONet strategy matrix over hidden width variants, then route evidence through operator summary and strategy promotion gates." --implementation-plan-json "{\"model_family\":\"DeepONet\",\"mode\":\"strategy_sweep\",\"allowed_commands\":[\"run-deeponet-strategy-sweep\",\"convert-operator-evidence-summary\"]}" --expected-observable "strategy sweep summary and DeepONet evidence summary are produced from at least two candidates" --known-risk "tiny synthetic strategy matrix is an engineering canary, not scientific proof of competitive DeepONet quality" --output-path {{OUTPUT_DIR}}/strategy_proposal.json
+  - name: build_strategy_rubric
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent build-strategy-rubric --proposal-path {{OUTPUT_DIR}}/strategy_proposal.json --output-path {{OUTPUT_DIR}}/experiment_rubric.json --min-evaluation-windows 2 --max-inference-time-regression 0.10
+  - name: evaluate_strategy_promotion
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent evaluate-strategy-promotion --proposal-path {{OUTPUT_DIR}}/strategy_proposal.json --rubric-path {{OUTPUT_DIR}}/experiment_rubric.json --evidence-summary-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --output-path {{OUTPUT_DIR}}/promotion_report.json
+  - name: append_strategy_ledger
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent append-strategy-ledger --proposal-path {{OUTPUT_DIR}}/strategy_proposal.json --rubric-path {{OUTPUT_DIR}}/experiment_rubric.json --evidence-summary-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --promotion-report-path {{OUTPUT_DIR}}/promotion_report.json --ledger-path {{OUTPUT_DIR}}/strategy_ledger.jsonl
+
+success_transition:
+  on_complete: STRATEGY_LEDGER_APPENDED
