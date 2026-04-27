@@ -144,6 +144,33 @@ directly, such as physics-residual delta and inference-time regression. Those
 neutral placeholders are acceptable for wiring the gate, but they should not be
 confused with real physical validation.
 
+The canonical Hermes fixture for this bridge is
+`integration_tests/hermes_fno_strategy_growth`. It starts from an existing FNO
+evidence sweep summary and exposes exactly five commands:
+
+1. `convert-fno-evidence-summary`
+2. `record-strategy-proposal`
+3. `build-strategy-rubric`
+4. `evaluate-strategy-promotion`
+5. `append-strategy-ledger`
+
+The audit for this fixture requires that exact sequence. Passing a raw
+`FNO_EVIDENCE_SWEEP_COMPLETED` file directly to `evaluate-strategy-promotion`
+is a protocol violation.
+
+Prepare state:
+
+```bash
+uv run --frozen python scripts/prepare_fno_strategy_growth.py \
+  --fno-sweep-summary-path /tmp/pde-agent-hermes-fno-strategy-growth-20260427-001/fno_evidence_summary.json
+```
+
+Run and audit Hermes:
+
+```bash
+uv run --frozen python scripts/run_hermes_strategy_growth.py --timeout-seconds 420
+```
+
 ## When To Run Hermes
 
 Run real Hermes immediately after any of these changes:
