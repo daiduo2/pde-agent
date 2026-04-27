@@ -13,6 +13,9 @@ from pde_agent.commands.check_burgers_physics_local import check_burgers_physics
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
 from pde_agent.commands.compare_fno_candidates import compare_fno_candidates_command
+from pde_agent.commands.convert_fno_evidence_summary import (
+    convert_fno_evidence_summary_command,
+)
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
@@ -415,6 +418,27 @@ def run_fno_evidence_sweep_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("convert-fno-evidence-summary")
+def convert_fno_evidence_summary_cmd(
+    sweep_summary_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    long_window_threshold: int = typer.Option(31),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            convert_fno_evidence_summary_command(
+                sweep_summary_path=sweep_summary_path,
+                output_path=output_path,
+                long_window_threshold=long_window_threshold,
                 force=force,
             )
         )
