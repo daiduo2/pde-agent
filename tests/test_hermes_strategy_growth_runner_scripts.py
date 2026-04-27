@@ -59,3 +59,19 @@ def test_run_script_renders_strategy_growth_prompt() -> None:
     assert str(fixture_root / "bootstrap_prompt.md") in prompt
     assert str(fixture_root / "task_spec.json") in prompt
     assert "STRATEGY_LEDGER_APPENDED" in prompt
+
+
+def test_run_script_accepts_protocol_complete_terminal_message() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _load_module(
+        "run_hermes_strategy_growth",
+        repo_root / "scripts" / "run_hermes_strategy_growth.py",
+    )
+
+    output = """
+Protocol complete. Final command returned `STRATEGY_LEDGER_APPENDED`.
+Summary:
+- append_strategy_ledger: appended ledger entry.
+"""
+
+    assert module._success_transition_seen(output) is True

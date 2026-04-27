@@ -57,7 +57,14 @@ def test_prepare_fno_strategy_growth_renders_gate_protocol(
     sweep_summary_path = tmp_path / "fno_evidence_summary.json"
     output_dir = tmp_path / "runs" / "strategy_growth_001"
     sweep_summary_path.write_text(
-        '{"state_hint": "FNO_EVIDENCE_SWEEP_COMPLETED"}',
+        """
+{
+  "state_hint": "FNO_EVIDENCE_SWEEP_COMPLETED",
+  "comparison_winners": [
+    {"start_index": 0, "winner_score_delta": 1.0}
+  ]
+}
+""",
         encoding="utf-8",
     )
 
@@ -100,6 +107,41 @@ def test_prepare_fno_strategy_growth_rejects_missing_sweep_summary(
         module.prepare_runtime(
             repo_root=repo_root,
             fno_sweep_summary_path=tmp_path / "missing_summary.json",
+            output_dir=tmp_path / "runs" / "strategy_growth_001",
+            long_window_threshold=31,
+        )
+
+    assert not (fixture_root / "run_state.yaml").exists()
+
+
+def test_prepare_fno_strategy_growth_rejects_invalid_sweep_summary_schema(
+    tmp_path: Path,
+) -> None:
+    module = _load_prepare_module()
+    repo_root = tmp_path / "repo"
+    fixture_root = repo_root / "integration_tests" / "hermes_fno_strategy_growth"
+    fixture_root.mkdir(parents=True)
+    (fixture_root / "run_state.template.yaml").write_text("run_id: {{RUN_ID}}\n")
+    sweep_summary_path = tmp_path / "fno_evidence_summary.json"
+    sweep_summary_path.write_text(
+        """
+{
+  "state_hint": "FNO_EVIDENCE_SWEEP_COMPLETED",
+  "comparison_winners": [
+    {"start_index": 0, "score_delta_finetuned_minus_baseline": 1.0}
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SystemExit,
+        match=r"comparison_winners\[0\]\.winner_score_delta must be numeric",
+    ):
+        module.prepare_runtime(
+            repo_root=repo_root,
+            fno_sweep_summary_path=sweep_summary_path,
             output_dir=tmp_path / "runs" / "strategy_growth_001",
             long_window_threshold=31,
         )

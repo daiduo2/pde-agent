@@ -190,6 +190,8 @@ def _success_transition_seen(output: str) -> bool:
     return any(
         marker in normalized
         for marker in (
+            "Protocol complete",
+            "Final command returned",
             "Success transition",
             "completed successfully",
             "No forbidden actions",

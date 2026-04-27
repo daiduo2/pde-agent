@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -46,6 +47,7 @@ def prepare_runtime(
         raise SystemExit(f"FNO sweep summary is not a file: {fno_sweep_summary_path}")
     if long_window_threshold <= 0:
         raise SystemExit("long_window_threshold must be positive")
+    _validate_fno_sweep_summary_schema(fno_sweep_summary_path)
 
     root = fixture_root(repo_root)
     root.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,25 @@ def prepare_runtime(
         encoding="utf-8",
     )
     return {"run_state": run_state}
+
+
+def _validate_fno_sweep_summary_schema(path: Path) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"FNO sweep summary must be valid JSON: {exc}") from exc
+
+    winners = payload.get("comparison_winners")
+    if not isinstance(winners, list) or not winners:
+        raise SystemExit("FNO sweep summary must include non-empty comparison_winners")
+    for index, winner in enumerate(winners):
+        if not isinstance(winner, dict):
+            raise SystemExit(f"comparison_winners[{index}] must be an object")
+        delta = winner.get("winner_score_delta")
+        if isinstance(delta, bool) or not isinstance(delta, (int, float)):
+            raise SystemExit(
+                f"comparison_winners[{index}].winner_score_delta must be numeric"
+            )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
