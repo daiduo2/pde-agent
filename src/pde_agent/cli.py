@@ -41,6 +41,9 @@ from pde_agent.commands.execute_deeponet_candidate_dryrun import (
 from pde_agent.commands.execute_fno_finetune_candidate import (
     execute_fno_finetune_candidate_command,
 )
+from pde_agent.commands.formalize_external_strategy_candidate import (
+    formalize_external_strategy_candidate_command,
+)
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
 from pde_agent.commands.init_run import init_run
@@ -656,6 +659,48 @@ def record_strategy_proposal_cmd(
                 expected_observables=expected_observables,
                 known_risks=known_risks,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("formalize-external-strategy-candidate")
+def formalize_external_strategy_candidate_cmd(
+    strategy_decision_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    strategy_id: str = typer.Option(...),
+    title: str = typer.Option(...),
+    source_title: str = typer.Option(...),
+    source_url: str = typer.Option(...),
+    scientific_claim: str = typer.Option(...),
+    mechanism: str = typer.Option(...),
+    applicable_pde: str = typer.Option(...),
+    targeted_failure_modes: list[str] = typer.Option(
+        ...,
+        "--targeted-failure-mode",
+    ),
+    implementation_plan_json: str = typer.Option(...),
+    expected_observables: list[str] = typer.Option(..., "--expected-observable"),
+    known_risks: list[str] = typer.Option(..., "--known-risk"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            formalize_external_strategy_candidate_command(
+                strategy_decision_path=strategy_decision_path,
+                output_path=output_path,
+                strategy_id=strategy_id,
+                title=title,
+                source_title=source_title,
+                source_url=source_url,
+                scientific_claim=scientific_claim,
+                mechanism=mechanism,
+                applicable_pde=applicable_pde,
+                targeted_failure_modes=targeted_failure_modes,
+                implementation_plan=json.loads(implementation_plan_json),
+                expected_observables=expected_observables,
+                known_risks=known_risks,
             )
         )
     )

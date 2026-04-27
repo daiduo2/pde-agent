@@ -1,0 +1,13 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Route failed operator evidence into an external-retrieval strategy proposal.",
+  "model_family": "DeepONet",
+  "agent_scope": "failed_evidence_to_external_strategy_proposal",
+  "required_output": [
+    "failed_strategy_evidence_summary.json",
+    "strategy_decision.json",
+    "retrieved_strategy_candidate.json",
+    "strategy_proposal.json"
+  ],
+  "success_state_hint": "STRATEGY_PROPOSAL_RECORDED"
+}

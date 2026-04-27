@@ -31,6 +31,7 @@ def main() -> int:
     required_reads = _yaml_list(run_state, "required_reads")
     required_artifacts = _yaml_list(run_state, "required_artifacts")
     allowed_commands = _yaml_command_list(run_state)
+    final_state_hint = _yaml_success_transition(run_state)
 
     report = audit_hermes_strategy_growth_session(
         session_path=session_path,
@@ -38,6 +39,7 @@ def main() -> int:
         required_reads=required_reads,
         allowed_commands=allowed_commands,
         arm=args.arm or _arm_from_fixture_root(fixture_root),
+        final_state_hint=final_state_hint,
     )
     report_path = (
         Path(args.report_path)
@@ -103,6 +105,20 @@ def _yaml_command_list(text: str) -> list[str]:
         if stripped.startswith("command: "):
             commands.append(stripped.removeprefix("command: "))
     return commands
+
+
+def _yaml_success_transition(text: str) -> str:
+    inside = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "success_transition:":
+            inside = True
+            continue
+        if inside and line and not line.startswith(" "):
+            break
+        if inside and stripped.startswith("on_complete: "):
+            return stripped.removeprefix("on_complete: ")
+    return "STRATEGY_LEDGER_APPENDED"
 
 
 if __name__ == "__main__":

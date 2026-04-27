@@ -36,6 +36,10 @@ def _terminal_result(command: str, *, exit_code: int = 0) -> dict:
     )
     state_by_command = {
         "convert-fno-evidence-summary": "STRATEGY_EVIDENCE_SUMMARY_BUILT",
+        "recommend-strategy-next-action": "STRATEGY_NEXT_ACTION_RECOMMENDED",
+        "formalize-external-strategy-candidate": (
+            "EXTERNAL_STRATEGY_CANDIDATE_FORMALIZED"
+        ),
         "record-strategy-proposal": "STRATEGY_PROPOSAL_RECORDED",
         "build-strategy-rubric": "STRATEGY_RUBRIC_BUILT",
         "evaluate-strategy-promotion": "STRATEGY_PROMOTION_EVALUATED",
@@ -220,3 +224,48 @@ def test_strategy_growth_audit_fails_on_missing_ledger(tmp_path: Path) -> None:
 
     assert report["status"] == "failed"
     assert "ledger_artifact" in report["errors"]
+
+
+def test_strategy_growth_audit_accepts_external_retrieval_proposal_terminal_state(
+    tmp_path: Path,
+) -> None:
+    commands = [
+        "cd /repo && uv run --frozen pde-agent recommend-strategy-next-action --evidence-summary-path /tmp/out/failed_strategy_evidence_summary.json --output-path /tmp/out/strategy_decision.json --min-evaluation-windows 3",
+        'cd /repo && uv run --frozen pde-agent formalize-external-strategy-candidate --strategy-decision-path /tmp/out/strategy_decision.json --output-path /tmp/out/retrieved_strategy_candidate.json --strategy-id burgers_spectral_viscosity_retrieved_v0 --title "Spectral viscosity stabilization" --source-title "Local retrieval seed" --source-url local://strategy-library/spectral-viscosity --scientific-claim "Spectral viscosity stabilizes failed rollouts." --mechanism "Damp high-wavenumber residuals." --applicable-pde "1D Burgers" --targeted-failure-mode long_horizon_drift --implementation-plan-json "{\\"model_family\\":\\"DeepONet\\"}" --expected-observable "late-window RMSE decreases" --known-risk "over-smoothing shocks"',
+        'cd /repo && uv run --frozen pde-agent record-strategy-proposal --strategy-id burgers_spectral_viscosity_retrieved_v0 --title "Spectral viscosity stabilization" --source-type external_retrieval --problem-context "failed DeepONet evidence" --hypothesis "Spectral viscosity stabilizes failed rollouts." --mechanism "Damp high-wavenumber residuals." --implementation-plan-json "{\\"model_family\\":\\"DeepONet\\"}" --expected-observable "late-window RMSE decreases" --known-risk "over-smoothing shocks" --output-path /tmp/out/strategy_proposal.json',
+    ]
+    session_path = tmp_path / "session_20260427_retrieval01.json"
+    session_path.write_text(json.dumps(_session(commands)), encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    artifacts = [
+        str(output_dir / "failed_strategy_evidence_summary.json"),
+        str(output_dir / "strategy_decision.json"),
+        str(output_dir / "retrieved_strategy_candidate.json"),
+        str(output_dir / "strategy_proposal.json"),
+    ]
+    for path in artifacts[:-1]:
+        Path(path).write_text("{}", encoding="utf-8")
+    Path(artifacts[-1]).write_text(
+        json.dumps(
+            {
+                "state_hint": "STRATEGY_PROPOSAL_RECORDED",
+                "strategy_id": "burgers_spectral_viscosity_retrieved_v0",
+                "source_type": "external_retrieval",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_hermes_strategy_growth_session(
+        session_path=session_path,
+        required_artifacts=artifacts,
+        required_reads=REQUIRED_READS,
+        allowed_commands=commands,
+        arm="failed_strategy_retrieval",
+        final_state_hint="STRATEGY_PROPOSAL_RECORDED",
+    )
+
+    assert report["status"] == "passed"
+    assert report["metrics"]["command_count"] == 3
+    assert report["terminal_artifact"]["state_hint"] == "STRATEGY_PROPOSAL_RECORDED"

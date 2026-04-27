@@ -16,6 +16,7 @@ def audit_hermes_strategy_growth_session(
     required_reads: list[str],
     allowed_commands: list[str],
     arm: str = "fno_strategy_growth",
+    final_state_hint: str = FINAL_STATE_HINT,
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -82,7 +83,7 @@ def audit_hermes_strategy_growth_session(
         errors,
         "final_state",
         final_payload.get("status") == "ok"
-        and final_payload.get("state_hint") == FINAL_STATE_HINT,
+        and final_payload.get("state_hint") == final_state_hint,
         {"final_payload": final_payload},
     )
     _add_check(
@@ -92,15 +93,16 @@ def audit_hermes_strategy_growth_session(
         _required_artifacts_exist(required_artifacts),
         {"required_artifacts": required_artifacts},
     )
-    ledger_ok, ledger = _ledger_artifact_ok(
-        Path(required_artifacts[-1]) if required_artifacts else None
+    terminal_ok, terminal_artifact = _terminal_artifact_ok(
+        Path(required_artifacts[-1]) if required_artifacts else None,
+        final_state_hint=final_state_hint,
     )
     _add_check(
         checks,
         errors,
-        "ledger_artifact",
-        ledger_ok,
-        {"ledger_path": required_artifacts[-1] if required_artifacts else None},
+        "ledger_artifact" if final_state_hint == FINAL_STATE_HINT else "terminal_artifact",
+        terminal_ok,
+        {"terminal_artifact_path": required_artifacts[-1] if required_artifacts else None},
     )
 
     return {
@@ -112,7 +114,8 @@ def audit_hermes_strategy_growth_session(
         "checks": checks,
         "tool_call_summary": tool_summary,
         "terminal_commands": terminal_commands,
-        "ledger": ledger,
+        "ledger": terminal_artifact if final_state_hint == FINAL_STATE_HINT else {},
+        "terminal_artifact": terminal_artifact,
         "metrics": {"command_count": len(terminal_commands)},
         "errors": errors,
     }
@@ -122,17 +125,28 @@ def _required_artifacts_exist(paths: list[str]) -> bool:
     return bool(paths) and all(Path(path).exists() for path in paths)
 
 
-def _ledger_artifact_ok(path: Path | None) -> tuple[bool, dict[str, Any]]:
+def _terminal_artifact_ok(
+    path: Path | None,
+    *,
+    final_state_hint: str,
+) -> tuple[bool, dict[str, Any]]:
     if path is None or not path.exists():
         return False, {}
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
-    if not lines:
-        return False, {}
     try:
-        latest = json.loads(lines[-1])
+        if final_state_hint == FINAL_STATE_HINT:
+            lines = [
+                line for line in path.read_text(encoding="utf-8").splitlines() if line
+            ]
+            if not lines:
+                return False, {}
+            latest = json.loads(lines[-1])
+        else:
+            latest = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return False, {}
-    ok = latest.get("state_hint") == FINAL_STATE_HINT and bool(latest.get("strategy_id"))
+    ok = latest.get("state_hint") == final_state_hint and bool(
+        latest.get("strategy_id")
+    )
     return ok, latest if isinstance(latest, dict) else {}
 
 

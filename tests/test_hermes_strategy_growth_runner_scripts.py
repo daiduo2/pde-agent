@@ -43,6 +43,7 @@ success_transition:
         "cd /repo && uv run --frozen pde-agent convert-fno-evidence-summary --sweep-summary-path /tmp/fno.json --output-path /tmp/out/strategy_evidence_summary.json --long-window-threshold 31 --force",
         "cd /repo && uv run --frozen pde-agent append-strategy-ledger --proposal-path /tmp/out/strategy_proposal.json --rubric-path /tmp/out/experiment_rubric.json --evidence-summary-path /tmp/out/strategy_evidence_summary.json --promotion-report-path /tmp/out/promotion_report.json --ledger-path /tmp/out/strategy_ledger.jsonl",
     ]
+    assert module._yaml_success_transition(run_state) == "STRATEGY_LEDGER_APPENDED"
 
 
 def test_strategy_growth_audit_script_derives_arm_from_fixture_root() -> None:
@@ -90,3 +91,25 @@ Summary:
 """
 
     assert module._success_transition_seen(output) is True
+
+
+def test_run_script_accepts_custom_protocol_complete_terminal_message() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _load_module(
+        "run_hermes_strategy_growth",
+        repo_root / "scripts" / "run_hermes_strategy_growth.py",
+    )
+
+    output = """
+Protocol complete. Final command returned `STRATEGY_PROPOSAL_RECORDED`.
+Summary:
+- record_strategy_proposal: external proposal recorded.
+"""
+
+    assert (
+        module._success_transition_seen(
+            output,
+            final_state_hint="STRATEGY_PROPOSAL_RECORDED",
+        )
+        is True
+    )

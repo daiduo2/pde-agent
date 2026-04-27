@@ -31,11 +31,13 @@ def main() -> int:
 
     if not args.audit_only:
         prompt = _render_prompt(fixture_root)
+        final_state_hint = _success_transition_from_run_state(fixture_root)
         session_id = _run_hermes(
             profile=args.profile,
             fixture_root=fixture_root,
             prompt=prompt,
             timeout_seconds=args.timeout_seconds,
+            final_state_hint=final_state_hint,
         )
     else:
         session_id = args.session_id
@@ -130,6 +132,7 @@ def _run_hermes(
     fixture_root: Path,
     prompt: str,
     timeout_seconds: int,
+    final_state_hint: str,
 ) -> str | None:
     process = subprocess.Popen(
         ["script", "-q", "/dev/null", "hermes", "-p", profile],
@@ -164,7 +167,10 @@ def _run_hermes(
             elif (
                 prompt_submitted
                 and not exit_submitted
-                and _success_transition_seen(output)
+                and _success_transition_seen(
+                    output,
+                    final_state_hint=final_state_hint,
+                )
             ):
                 process.stdin.write(b"/exit\r")
                 process.stdin.flush()
@@ -183,9 +189,13 @@ def _run_hermes(
     return session_id
 
 
-def _success_transition_seen(output: str) -> bool:
+def _success_transition_seen(
+    output: str,
+    *,
+    final_state_hint: str = "STRATEGY_LEDGER_APPENDED",
+) -> bool:
     normalized = output.replace("*", "").replace("`", "")
-    if "STRATEGY_LEDGER_APPENDED" not in normalized:
+    if final_state_hint not in normalized:
         return False
     return any(
         marker in normalized
@@ -200,6 +210,23 @@ def _success_transition_seen(output: str) -> bool:
             "state_hint",
         )
     )
+
+
+def _success_transition_from_run_state(fixture_root: Path) -> str:
+    run_state_path = fixture_root / "run_state.yaml"
+    if not run_state_path.exists():
+        return "STRATEGY_LEDGER_APPENDED"
+    inside = False
+    for line in run_state_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped == "success_transition:":
+            inside = True
+            continue
+        if inside and line and not line.startswith(" "):
+            break
+        if inside and stripped.startswith("on_complete: "):
+            return stripped.removeprefix("on_complete: ")
+    return "STRATEGY_LEDGER_APPENDED"
 
 
 def _extract_session_id(output: str) -> str | None:
