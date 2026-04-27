@@ -168,6 +168,66 @@ def test_run_deeponet_strategy_sweep_accepts_multiple_training_strategies(
     }
 
 
+def test_run_deeponet_strategy_sweep_expands_loss_weights_by_strategy(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    baseline_score_path = tmp_path / "baseline_score.json"
+    output_dir = tmp_path / "strategy_sweep"
+    _write_windows(windows_path)
+    baseline_score_path.write_text(
+        json.dumps({"competition_like_score_short": 1.0}),
+        encoding="utf-8",
+    )
+
+    summary = run_deeponet_strategy_sweep(
+        windows_path=windows_path,
+        output_dir=output_dir,
+        baseline_score_path=baseline_score_path,
+        start_indices=[1],
+        training_strategies=[
+            "branch_trunk_spectral",
+            "branch_trunk_physics_residual",
+        ],
+        train_steps=[3],
+        hidden_widths=[8],
+        latent_dims=[4],
+        learning_rates=[1e-2],
+        seeds=[5],
+        spectral_weights=[0.05, 0.1],
+        physics_weights=[0.005, 0.01],
+        force=False,
+    )
+
+    assert summary["inputs"]["spectral_weights"] == [0.05, 0.1]
+    assert summary["inputs"]["physics_weights"] == [0.005, 0.01]
+    assert summary["record_count"] == 4
+    assert {
+        (
+            record["training_strategy"],
+            record["spectral_weight"],
+            record["physics_weight"],
+            record["strategy_label"],
+        )
+        for record in summary["records"]
+    } == {
+        ("branch_trunk_spectral", 0.05, 0.01, "spectral_sw5e2_h8_l4_lr1e2_seed5"),
+        ("branch_trunk_spectral", 0.1, 0.01, "spectral_sw1e1_h8_l4_lr1e2_seed5"),
+        (
+            "branch_trunk_physics_residual",
+            0.1,
+            0.005,
+            "physics_residual_pw5e3_h8_l4_lr1e2_seed5",
+        ),
+        (
+            "branch_trunk_physics_residual",
+            0.1,
+            0.01,
+            "physics_residual_pw1e2_h8_l4_lr1e2_seed5",
+        ),
+    }
+
+
 def test_run_deeponet_strategy_sweep_cli_writes_payload(
     tmp_path: Path,
 ) -> None:

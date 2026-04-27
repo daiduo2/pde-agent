@@ -479,6 +479,8 @@ def run_deeponet_strategy_sweep_cmd(
     latent_dims: list[int] = typer.Option(..., "--latent-dim"),
     learning_rates: list[float] = typer.Option(..., "--learning-rate"),
     seeds: list[int] = typer.Option(..., "--seed"),
+    spectral_weights: list[float] = typer.Option([0.1], "--spectral-weight"),
+    physics_weights: list[float] = typer.Option([0.01], "--physics-weight"),
     nu: float = typer.Option(0.001),
     dt: float = typer.Option(1.0),
     dx: float = typer.Option(1.0),
@@ -499,6 +501,8 @@ def run_deeponet_strategy_sweep_cmd(
                 latent_dims=latent_dims,
                 learning_rates=learning_rates,
                 seeds=seeds,
+                spectral_weights=spectral_weights,
+                physics_weights=physics_weights,
                 nu=nu,
                 dt=dt,
                 dx=dx,
@@ -981,6 +985,8 @@ def execute_deeponet_candidate_cmd(
     nu: float = typer.Option(0.001),
     dt: float = typer.Option(1.0),
     dx: float = typer.Option(1.0),
+    spectral_weight: float = typer.Option(0.1),
+    physics_weight: float = typer.Option(0.01),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1001,6 +1007,8 @@ def execute_deeponet_candidate_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+                spectral_weight=spectral_weight,
+                physics_weight=physics_weight,
                 force=force,
             )
         )

@@ -12,5 +12,5 @@ uv run --frozen python scripts/prepare_deeponet_strategy_sweep.py \
 
 The fixture uses synthetic local windows, two evaluation start indices, and a
 tiny strategy matrix covering supervised, spectral, and Burgers-residual
-DeepONet losses. It is an agent-protocol canary, not a scientific quality
-benchmark.
+DeepONet losses with small spectral and physics weight sweeps. It is an
+agent-protocol canary, not a scientific quality benchmark.

@@ -21,6 +21,8 @@ def execute_deeponet_candidate_command(
     nu: float,
     dt: float,
     dx: float,
+    spectral_weight: float,
+    physics_weight: float,
     force: bool,
 ) -> dict[str, object]:
     report = execute_deeponet_candidate(
@@ -37,6 +39,8 @@ def execute_deeponet_candidate_command(
         nu=nu,
         dt=dt,
         dx=dx,
+        spectral_weight=spectral_weight,
+        physics_weight=physics_weight,
         force=force,
     )
     loss_trace = report["train"]["loss_trace"]
@@ -67,6 +71,7 @@ def execute_deeponet_candidate_command(
             "latent_dim": report["train"]["latent_dim"],
             "learning_rate": report["train"]["learning_rate"],
             "loss_terms": report["train"]["loss_terms"],
+            "loss_weights": report["train"]["loss_weights"],
             "forecast_steps": report["inputs"]["forecast_steps"],
         },
         next_hint="evaluate-deeponet-candidate",

@@ -29,6 +29,8 @@ def execute_deeponet_candidate(
     nu: float = 0.001,
     dt: float = 1.0,
     dx: float = 1.0,
+    spectral_weight: float = 0.1,
+    physics_weight: float = 0.01,
     force: bool = False,
 ) -> dict[str, Any]:
     torch = _require_torch()
@@ -44,6 +46,8 @@ def execute_deeponet_candidate(
     pde_nu = _positive_float(nu, "nu")
     pde_dt = _positive_float(dt, "dt")
     pde_dx = _positive_float(dx, "dx")
+    spectral_w = _positive_float(spectral_weight, "spectral_weight")
+    physics_w = _positive_float(physics_weight, "physics_weight")
 
     output_root = Path(output_dir)
     paths = {
@@ -75,6 +79,8 @@ def execute_deeponet_candidate(
         nu=pde_nu,
         dt=pde_dt,
         dx=pde_dx,
+        spectral_weight=spectral_w,
+        physics_weight=physics_w,
     )
     prediction = _predict(torch=torch, model=model, context=context, coords=coords)
 
@@ -99,6 +105,8 @@ def execute_deeponet_candidate(
                 "nu": pde_nu,
                 "dt": pde_dt,
                 "dx": pde_dx,
+                "spectral_weight": spectral_w,
+                "physics_weight": physics_w,
             },
         },
         paths["candidate_checkpoint_path"],
@@ -149,6 +157,10 @@ def execute_deeponet_candidate(
             "latent_dim": latent,
             "learning_rate": lr,
             "pde": {"nu": pde_nu, "dt": pde_dt, "dx": pde_dx},
+            "loss_weights": {
+                "spectral": spectral_w,
+                "burgers_residual": physics_w,
+            },
         },
         "next_command": "evaluate-deeponet-candidate",
     }
@@ -222,6 +234,8 @@ def _train_model(
     nu: float,
     dt: float,
     dx: float,
+    spectral_weight: float,
+    physics_weight: float,
 ) -> list[float]:
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -239,6 +253,8 @@ def _train_model(
             nu=nu,
             dt=dt,
             dx=dx,
+            spectral_weight=spectral_weight,
+            physics_weight=physics_weight,
         )
         if not torch.isfinite(loss):
             raise DeepONetCandidateExecutionError("training loss is non-finite")
@@ -257,6 +273,8 @@ def _training_loss(
     nu: float,
     dt: float,
     dx: float,
+    spectral_weight: float,
+    physics_weight: float,
 ) -> Any:
     mse = torch.nn.functional.mse_loss(prediction, target)
     if training_strategy == "branch_trunk_supervised":
@@ -265,7 +283,7 @@ def _training_loss(
         pred_spec = torch.abs(torch.fft.rfft(prediction, dim=-1))
         target_spec = torch.abs(torch.fft.rfft(target, dim=-1))
         spectral = torch.nn.functional.mse_loss(pred_spec, target_spec)
-        return mse + 0.1 * spectral
+        return mse + spectral_weight * spectral
     if training_strategy == "branch_trunk_physics_residual":
         residual = _burgers_residual(
             torch=torch,
@@ -274,7 +292,7 @@ def _training_loss(
             dt=dt,
             dx=dx,
         )
-        return mse + 0.01 * torch.mean(residual * residual)
+        return mse + physics_weight * torch.mean(residual * residual)
     raise DeepONetCandidateExecutionError(
         f"unsupported training strategy: {training_strategy}"
     )

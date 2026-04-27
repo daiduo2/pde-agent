@@ -28,6 +28,8 @@ _CSV_FIELDS = [
     "latent_dim",
     "learning_rate",
     "seed",
+    "spectral_weight",
+    "physics_weight",
     "baseline_score",
     "score",
     "score_delta",
@@ -53,6 +55,8 @@ def run_deeponet_strategy_sweep(
     latent_dims: list[int],
     learning_rates: list[float],
     seeds: list[int],
+    spectral_weights: list[float] | None = None,
+    physics_weights: list[float] | None = None,
     nu: float = 0.001,
     dt: float = 1.0,
     dx: float = 1.0,
@@ -73,6 +77,16 @@ def run_deeponet_strategy_sweep(
     latent_values = _unique_positive_ints(latent_dims, label="latent_dims")
     lr_values = _unique_positive_floats(learning_rates, label="learning_rates")
     seed_values = _unique_non_negative_ints(seeds, label="seeds")
+    spectral_weight_values = _loss_weights(
+        spectral_weights,
+        default=0.1,
+        label="spectral_weights",
+    )
+    physics_weight_values = _loss_weights(
+        physics_weights,
+        default=0.01,
+        label="physics_weights",
+    )
 
     records: list[dict[str, Any]] = []
     evaluation_paths: list[Path] = []
@@ -85,63 +99,71 @@ def run_deeponet_strategy_sweep(
         lr_values,
         seed_values,
     ):
-        label = _strategy_label(
+        for spectral_weight, physics_weight, loss_suffix in _loss_weight_variants(
             training_strategy=training_strategy,
-            hidden_width=width,
-            latent_dim=latent,
-            learning_rate=lr,
-            seed=seed,
-            include_strategy_prefix=len(strategy_values) > 1,
-        )
-        candidate_root = (
-            output_root
-            / "candidates"
-            / label
-            / f"start_{start:04d}"
-            / f"steps_{step_count:04d}"
-        )
-        execution = execute_deeponet_candidate(
-            windows_path=windows_file,
-            output_dir=candidate_root,
-            start_index=start,
-            train_steps=step_count,
-            training_strategy=training_strategy,
-            hidden_width=width,
-            latent_dim=latent,
-            learning_rate=lr,
-            seed=seed,
-            strategy_label=label,
-            nu=nu,
-            dt=dt,
-            dx=dx,
-            force=force,
-        )
-        evaluation_root = candidate_root / "evaluation"
-        evaluation = evaluate_deeponet_candidate(
-            candidate_report_path=execution["artifacts"][
-                "candidate_execution_report_path"
-            ],
-            target_path=windows_file,
-            output_dir=evaluation_root,
-            baseline_score_path=baseline_file,
-            nu=nu,
-            dt=dt,
-            dx=dx,
-            force=force,
-        )
-        evaluation_path = evaluation_root / "candidate_evaluation_report.json"
-        evaluation_paths.append(evaluation_path)
-        records.append(
-            _record(
-                execution=execution,
-                evaluation=evaluation,
-                evaluation_report_path=evaluation_path,
+            spectral_weights=spectral_weight_values,
+            physics_weights=physics_weight_values,
+        ):
+            label = _strategy_label(
+                training_strategy=training_strategy,
                 hidden_width=width,
                 latent_dim=latent,
                 learning_rate=lr,
                 seed=seed,
+                include_strategy_prefix=len(strategy_values) > 1,
+                loss_weight_suffix=loss_suffix,
             )
-        )
+            candidate_root = (
+                output_root
+                / "candidates"
+                / label
+                / f"start_{start:04d}"
+                / f"steps_{step_count:04d}"
+            )
+            execution = execute_deeponet_candidate(
+                windows_path=windows_file,
+                output_dir=candidate_root,
+                start_index=start,
+                train_steps=step_count,
+                training_strategy=training_strategy,
+                hidden_width=width,
+                latent_dim=latent,
+                learning_rate=lr,
+                seed=seed,
+                strategy_label=label,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                spectral_weight=spectral_weight,
+                physics_weight=physics_weight,
+                force=force,
+            )
+            evaluation_root = candidate_root / "evaluation"
+            evaluation = evaluate_deeponet_candidate(
+                candidate_report_path=execution["artifacts"][
+                    "candidate_execution_report_path"
+                ],
+                target_path=windows_file,
+                output_dir=evaluation_root,
+                baseline_score_path=baseline_file,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+            evaluation_path = evaluation_root / "candidate_evaluation_report.json"
+            evaluation_paths.append(evaluation_path)
+            records.append(
+                _record(
+                    execution=execution,
+                    evaluation=evaluation,
+                    evaluation_report_path=evaluation_path,
+                    hidden_width=width,
+                    latent_dim=latent,
+                    learning_rate=lr,
+                    seed=seed,
+                )
+            )
 
     evidence = build_deeponet_evidence_sweep(
         evaluation_report_paths=evaluation_paths,
@@ -167,6 +189,8 @@ def run_deeponet_strategy_sweep(
             "latent_dims": latent_values,
             "learning_rates": lr_values,
             "seeds": seed_values,
+            "spectral_weights": spectral_weight_values,
+            "physics_weights": physics_weight_values,
             "nu": nu,
             "dt": dt,
             "dx": dx,
@@ -226,6 +250,8 @@ def _record(
         "latent_dim": latent_dim,
         "learning_rate": learning_rate,
         "seed": seed,
+        "spectral_weight": execution["train"]["loss_weights"]["spectral"],
+        "physics_weight": execution["train"]["loss_weights"]["burgers_residual"],
         "baseline_score": evaluation["baseline_comparison"]["baseline_score"],
         "score": evaluation["score"]["competition_like_score_short"],
         "score_delta": evaluation["baseline_comparison"]["score_delta"],
@@ -312,16 +338,48 @@ def _strategy_label(
     learning_rate: float,
     seed: int,
     include_strategy_prefix: bool,
+    loss_weight_suffix: str,
 ) -> str:
     prefix = f"{_strategy_prefix(training_strategy)}_" if include_strategy_prefix else ""
+    weight_part = f"{loss_weight_suffix}_" if loss_weight_suffix else ""
     return (
-        f"{prefix}h{hidden_width}_l{latent_dim}_lr{_learning_rate_label(learning_rate)}"
+        f"{prefix}{weight_part}h{hidden_width}_l{latent_dim}_"
+        f"lr{_learning_rate_label(learning_rate)}"
         f"_seed{seed}"
     )
 
 
 def _strategy_prefix(training_strategy: str) -> str:
     return training_strategy.removeprefix("branch_trunk_")
+
+
+def _loss_weight_variants(
+    *,
+    training_strategy: str,
+    spectral_weights: list[float],
+    physics_weights: list[float],
+) -> list[tuple[float, float, str]]:
+    default_spectral = 0.1
+    default_physics = 0.01
+    if training_strategy == "branch_trunk_spectral":
+        return [
+            (
+                value,
+                default_physics,
+                f"sw{_learning_rate_label(value)}" if len(spectral_weights) > 1 else "",
+            )
+            for value in spectral_weights
+        ]
+    if training_strategy == "branch_trunk_physics_residual":
+        return [
+            (
+                default_spectral,
+                value,
+                f"pw{_learning_rate_label(value)}" if len(physics_weights) > 1 else "",
+            )
+            for value in physics_weights
+        ]
+    return [(default_spectral, default_physics, "")]
 
 
 def _learning_rate_label(value: float) -> str:
@@ -411,6 +469,15 @@ def _training_strategies(values: list[str] | None) -> list[str]:
         seen.add(value)
         normalized.append(value)
     return normalized
+
+
+def _loss_weights(
+    values: list[float] | None,
+    *,
+    default: float,
+    label: str,
+) -> list[float]:
+    return _unique_positive_floats([default] if values is None else values, label=label)
 
 
 def _unique_positive_floats(values: list[float], *, label: str) -> list[float]:

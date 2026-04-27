@@ -62,6 +62,8 @@ def test_prepare_deeponet_strategy_sweep_renders_protocol(
     assert "run-deeponet-strategy-sweep" in commands[0]
     assert commands[0].count("--start-index") == 2
     assert commands[0].count("--training-strategy") == 3
+    assert commands[0].count("--spectral-weight") == 2
+    assert commands[0].count("--physics-weight") == 2
     assert "branch_trunk_physics_residual" in commands[0]
     assert "convert-operator-evidence-summary" in commands[1]
     assert "record-strategy-proposal" in commands[2]

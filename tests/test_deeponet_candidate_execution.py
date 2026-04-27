@@ -180,6 +180,7 @@ def test_execute_deeponet_candidate_supports_pde_aware_training_strategies(
         latent_dim=8,
         learning_rate=1e-2,
         seed=7,
+        spectral_weight=0.25,
         force=False,
     )
     physics = execute_deeponet_candidate(
@@ -195,17 +196,26 @@ def test_execute_deeponet_candidate_supports_pde_aware_training_strategies(
         nu=0.001,
         dt=1.0,
         dx=0.1,
+        physics_weight=0.02,
         force=False,
     )
 
     assert spectral["candidate"]["training_strategy"] == "branch_trunk_spectral"
     assert spectral["train"]["loss_terms"] == ["mse", "spectral"]
+    assert spectral["train"]["loss_weights"] == {
+        "spectral": 0.25,
+        "burgers_residual": 0.01,
+    }
     assert len(spectral["train"]["loss_trace"]) == 4
     assert spectral["train"]["final_loss"] >= 0.0
     assert physics["candidate"]["training_strategy"] == (
         "branch_trunk_physics_residual"
     )
     assert physics["train"]["loss_terms"] == ["mse", "burgers_residual"]
+    assert physics["train"]["loss_weights"] == {
+        "spectral": 0.1,
+        "burgers_residual": 0.02,
+    }
     assert physics["train"]["pde"] == {"nu": 0.001, "dt": 1.0, "dx": 0.1}
     assert len(physics["train"]["loss_trace"]) == 4
     assert physics["train"]["final_loss"] >= 0.0
