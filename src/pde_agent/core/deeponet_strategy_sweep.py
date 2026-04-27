@@ -45,7 +45,8 @@ def run_deeponet_strategy_sweep(
     windows_path: str | Path,
     output_dir: str | Path,
     baseline_score_path: str | Path,
-    start_index: int,
+    start_index: int | None = None,
+    start_indices: list[int] | None = None,
     train_steps: list[int],
     hidden_widths: list[int],
     latent_dims: list[int],
@@ -64,7 +65,7 @@ def run_deeponet_strategy_sweep(
             f"output_dir already contains files: {output_root}"
         )
 
-    start = _non_negative_int(start_index, "start_index")
+    start_values = _start_indices(start_index=start_index, start_indices=start_indices)
     step_values = _unique_positive_ints(train_steps, label="train_steps")
     width_values = _unique_positive_ints(hidden_widths, label="hidden_widths")
     latent_values = _unique_positive_ints(latent_dims, label="latent_dims")
@@ -73,7 +74,8 @@ def run_deeponet_strategy_sweep(
 
     records: list[dict[str, Any]] = []
     evaluation_paths: list[Path] = []
-    for step_count, width, latent, lr, seed in product(
+    for start, step_count, width, latent, lr, seed in product(
+        start_values,
         step_values,
         width_values,
         latent_values,
@@ -86,7 +88,13 @@ def run_deeponet_strategy_sweep(
             learning_rate=lr,
             seed=seed,
         )
-        candidate_root = output_root / "candidates" / label / f"steps_{step_count:04d}"
+        candidate_root = (
+            output_root
+            / "candidates"
+            / label
+            / f"start_{start:04d}"
+            / f"steps_{step_count:04d}"
+        )
         execution = execute_deeponet_candidate(
             windows_path=windows_file,
             output_dir=candidate_root,
@@ -143,7 +151,8 @@ def run_deeponet_strategy_sweep(
         "inputs": {
             "windows_path": str(windows_file),
             "baseline_score_path": str(baseline_file),
-            "start_index": start,
+            "start_index": start_values[0],
+            "start_indices": start_values,
             "train_steps": step_values,
             "hidden_widths": width_values,
             "latent_dims": latent_values,
@@ -171,6 +180,9 @@ def run_deeponet_strategy_sweep(
             "comparison_count": evidence["comparison_count"],
             "comparison_winners": evidence["comparison_winners"],
         },
+        "evaluation_window_count": len(
+            {record["start_index"] for record in records}
+        ),
         "recommendation": recommendation,
         "next_command": recommendation["next_command"],
     }
@@ -342,6 +354,22 @@ def _unique_non_negative_ints(values: list[int], *, label: str) -> list[int]:
         seen.add(value)
         normalized.append(value)
     return normalized
+
+
+def _start_indices(
+    *,
+    start_index: int | None,
+    start_indices: list[int] | None,
+) -> list[int]:
+    if start_indices is not None:
+        if start_index is not None:
+            raise DeepONetStrategySweepError(
+                "use either start_index or start_indices, not both"
+            )
+        return _unique_non_negative_ints(start_indices, label="start_indices")
+    if start_index is None:
+        raise DeepONetStrategySweepError("start_index or start_indices is required")
+    return [_non_negative_int(start_index, "start_index")]
 
 
 def _unique_positive_floats(values: list[float], *, label: str) -> list[float]:

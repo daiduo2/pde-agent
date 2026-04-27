@@ -60,6 +60,7 @@ def test_prepare_deeponet_strategy_sweep_renders_protocol(
     assert "{{" not in run_state
     assert len(commands) == 6
     assert "run-deeponet-strategy-sweep" in commands[0]
+    assert commands[0].count("--start-index") == 2
     assert "--hidden-width 8 --hidden-width 16" in commands[0]
     assert "convert-operator-evidence-summary" in commands[1]
     assert "record-strategy-proposal" in commands[2]

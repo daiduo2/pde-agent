@@ -10,5 +10,6 @@ uv run --frozen python scripts/prepare_deeponet_strategy_sweep.py \
   --output-dir /tmp/pde-agent-hermes-deeponet-strategy-sweep-001
 ```
 
-The fixture uses synthetic local windows and a tiny strategy matrix. It is an
-agent-protocol canary, not a scientific quality benchmark.
+The fixture uses synthetic local windows, two evaluation start indices, and a
+tiny strategy matrix. It is an agent-protocol canary, not a scientific quality
+benchmark.

@@ -71,6 +71,47 @@ def test_run_deeponet_strategy_sweep_writes_summary_and_evidence(
     assert written == summary
 
 
+def test_run_deeponet_strategy_sweep_accepts_multiple_start_indices(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    baseline_score_path = tmp_path / "baseline_score.json"
+    output_dir = tmp_path / "strategy_sweep"
+    _write_windows(windows_path)
+    baseline_score_path.write_text(
+        json.dumps({"competition_like_score_short": 1.0}),
+        encoding="utf-8",
+    )
+
+    summary = run_deeponet_strategy_sweep(
+        windows_path=windows_path,
+        output_dir=output_dir,
+        baseline_score_path=baseline_score_path,
+        start_indices=[1, 2],
+        train_steps=[3],
+        hidden_widths=[8, 16],
+        latent_dims=[4],
+        learning_rates=[1e-2],
+        seeds=[5],
+        force=False,
+    )
+
+    assert summary["inputs"]["start_indices"] == [1, 2]
+    assert summary["record_count"] == 4
+    assert summary["evidence_sweep"]["comparison_count"] == 2
+    assert {
+        (record["start_index"], record["strategy_label"])
+        for record in summary["records"]
+    } == {
+        (1, "h8_l4_lr1e2_seed5"),
+        (1, "h16_l4_lr1e2_seed5"),
+        (2, "h8_l4_lr1e2_seed5"),
+        (2, "h16_l4_lr1e2_seed5"),
+    }
+    assert summary["strategy_statistics"]["h8_l4_lr1e2_seed5"]["count"] == 2
+    assert summary["strategy_statistics"]["h16_l4_lr1e2_seed5"]["count"] == 2
+
+
 def test_run_deeponet_strategy_sweep_cli_writes_payload(
     tmp_path: Path,
 ) -> None:
@@ -98,6 +139,8 @@ def test_run_deeponet_strategy_sweep_cli_writes_payload(
             str(baseline_score_path),
             "--start-index",
             "2",
+            "--start-index",
+            "1",
             "--train-steps",
             "3",
             "--hidden-width",
@@ -118,7 +161,8 @@ def test_run_deeponet_strategy_sweep_cli_writes_payload(
     assert payload["status"] == "ok"
     assert payload["command"] == "run-deeponet-strategy-sweep"
     assert payload["state_hint"] == "DEEPONET_STRATEGY_SWEEP_COMPLETED"
-    assert payload["metrics"]["record_count"] == 2
+    assert payload["metrics"]["record_count"] == 4
+    assert payload["metrics"]["evaluation_window_count"] == 2
     assert payload["metrics"]["winner_experiment_id"]
     assert payload["metrics"]["best_score"] > 0
     assert payload["next_hint"] == "run-deeponet-strategy-sweep"
