@@ -32,6 +32,9 @@ from pde_agent.commands.evaluate_deeponet_candidate import (
     evaluate_deeponet_candidate_command,
 )
 from pde_agent.commands.evaluate_fno_candidate import evaluate_fno_candidate_command
+from pde_agent.commands.execute_deeponet_candidate_dryrun import (
+    execute_deeponet_candidate_dryrun_command,
+)
 from pde_agent.commands.execute_fno_finetune_candidate import (
     execute_fno_finetune_candidate_command,
 )
@@ -882,6 +885,31 @@ def execute_fno_finetune_candidate_cmd(
                 checkpoint_path=checkpoint_path,
                 max_train_steps=max_train_steps,
                 learning_rate=learning_rate,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("execute-deeponet-candidate-dryrun")
+def execute_deeponet_candidate_dryrun_cmd(
+    windows_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    start_index: int = typer.Option(0),
+    train_steps: int = typer.Option(1),
+    training_strategy: str = typer.Option("branch_trunk_rollout"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            execute_deeponet_candidate_dryrun_command(
+                windows_path=windows_path,
+                output_dir=output_dir,
+                start_index=start_index,
+                train_steps=train_steps,
+                training_strategy=training_strategy,
                 force=force,
             )
         )
