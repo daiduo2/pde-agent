@@ -1,0 +1,14 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Run a lightweight DeepONet dry-run candidate through evaluation and strategy-growth.",
+  "model_family": "DeepONet",
+  "agent_scope": "dryrun_candidate_to_strategy_growth_gate",
+  "required_output": [
+    "candidate/candidate_execution_report.json",
+    "evaluation/candidate_evaluation_report.json",
+    "deeponet_evidence/evidence_summary.json",
+    "strategy_evidence_summary.json",
+    "strategy_ledger.jsonl"
+  ],
+  "success_state_hint": "STRATEGY_LEDGER_APPENDED"
+}
