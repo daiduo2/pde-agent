@@ -40,6 +40,9 @@ def convert_operator_evidence_summary_command(
             "mean_score_delta": evidence["mean_score_delta"],
             "long_window_score_delta": evidence["long_window_score_delta"],
             "failure_rate": evidence["failure_rate"],
+            "candidate_record_count": len(evidence["candidate_records"]),
+            "strategy_ranking_count": len(evidence["strategy_ranking"]),
+            "best_strategy_id": evidence["best_strategy_id"],
         },
         next_hint=str(evidence["next_command"]),
     )
