@@ -10,6 +10,10 @@ Rules:
 - Do not pass raw DeepONet evaluation reports directly to `evaluate-strategy-promotion`.
 - Do not skip `build-deeponet-evidence-sweep`.
 - Do not skip `convert-operator-evidence-summary`.
+- Do not skip `recommend-strategy-next-action`.
+- Do not call `evaluate-strategy-promotion` before
+  `recommend-strategy-next-action`.
+- Treat `strategy_decision.json` as the promotion gate routing artifact.
 - Do not patch source code or input data.
 - Do not download data.
 - Do not inspect help output.

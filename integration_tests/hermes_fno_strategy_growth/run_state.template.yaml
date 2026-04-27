@@ -10,6 +10,7 @@ allowed_actions:
   - read_bootstrap_prompt
   - read_task_spec
   - convert_fno_evidence_summary
+  - recommend_strategy_next_action
   - record_strategy_proposal
   - build_strategy_rubric
   - evaluate_strategy_promotion
@@ -28,6 +29,7 @@ forbidden_actions:
   - call_evaluate_fno_candidate_directly
   - call_compare_fno_candidates_directly
   - call_build_submission
+  - call_evaluate_strategy_promotion_before_recommend_strategy_next_action
   - call_evaluate_strategy_promotion_before_convert_fno_evidence_summary
 
 required_reads:
@@ -37,6 +39,7 @@ required_reads:
 
 required_artifacts:
   - {{OUTPUT_DIR}}/strategy_evidence_summary.json
+  - {{OUTPUT_DIR}}/strategy_decision.json
   - {{OUTPUT_DIR}}/strategy_proposal.json
   - {{OUTPUT_DIR}}/experiment_rubric.json
   - {{OUTPUT_DIR}}/promotion_report.json
@@ -45,6 +48,8 @@ required_artifacts:
 allowed_commands:
   - name: convert_fno_evidence_summary
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent convert-fno-evidence-summary --sweep-summary-path {{FNO_SWEEP_SUMMARY_PATH}} --output-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --long-window-threshold {{LONG_WINDOW_THRESHOLD}} --force
+  - name: recommend_strategy_next_action
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent recommend-strategy-next-action --evidence-summary-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --output-path {{OUTPUT_DIR}}/strategy_decision.json --min-evaluation-windows 3
   - name: record_strategy_proposal
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent record-strategy-proposal --strategy-id fno_scheduled_sampling_evidence_v0 --title "FNO scheduled sampling evidence gate" --source-type local_library --problem-context "1D Burgers FNO evidence sweep strategy-growth gate" --hypothesis "Scheduled sampling rollout fine-tuning should only be promoted when multi-window evidence is stable." --mechanism "Use FNO evidence sweep winners as quantitative evidence before skill promotion." --implementation-plan-json "{\"model_family\":\"FNO\",\"allowed_commands\":[\"run-fno-evidence-sweep\",\"convert-fno-evidence-summary\"],\"expected_artifacts\":[\"strategy_evidence_summary.json\"]}" --expected-observable "positive mean score delta across multiple windows" --expected-observable "non-negative long-window score delta" --known-risk "single-window improvement may not generalize" --known-risk "physics residual evidence may be neutral until measured directly" --output-path {{OUTPUT_DIR}}/strategy_proposal.json
   - name: build_strategy_rubric

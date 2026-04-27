@@ -11,6 +11,7 @@ allowed_actions:
   - read_task_spec
   - build_deeponet_evidence_sweep
   - convert_operator_evidence_summary
+  - recommend_strategy_next_action
   - record_strategy_proposal
   - build_strategy_rubric
   - evaluate_strategy_promotion
@@ -28,6 +29,7 @@ forbidden_actions:
   - manually_inspect_generated_artifacts
   - call_train_deeponet_directly
   - call_build_submission
+  - call_evaluate_strategy_promotion_before_recommend_strategy_next_action
   - call_evaluate_strategy_promotion_before_convert_operator_evidence_summary
 
 required_reads:
@@ -39,6 +41,7 @@ required_artifacts:
   - {{OUTPUT_DIR}}/deeponet_evidence/evidence_summary.json
   - {{OUTPUT_DIR}}/deeponet_evidence/evidence_summary.csv
   - {{OUTPUT_DIR}}/strategy_evidence_summary.json
+  - {{OUTPUT_DIR}}/strategy_decision.json
   - {{OUTPUT_DIR}}/strategy_proposal.json
   - {{OUTPUT_DIR}}/experiment_rubric.json
   - {{OUTPUT_DIR}}/promotion_report.json
@@ -49,6 +52,8 @@ allowed_commands:
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent build-deeponet-evidence-sweep {{EVALUATION_REPORT_ARGS}} --output-dir {{OUTPUT_DIR}}/deeponet_evidence --force
   - name: convert_operator_evidence_summary
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent convert-operator-evidence-summary --sweep-summary-path {{OUTPUT_DIR}}/deeponet_evidence/evidence_summary.json --output-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --model-family DeepONet --source-state-hint DEEPONET_EVIDENCE_SWEEP_COMPLETED --long-window-threshold {{LONG_WINDOW_THRESHOLD}} --force
+  - name: recommend_strategy_next_action
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent recommend-strategy-next-action --evidence-summary-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --output-path {{OUTPUT_DIR}}/strategy_decision.json --min-evaluation-windows 2
   - name: record_strategy_proposal
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent record-strategy-proposal --strategy-id deeponet_branch_trunk_evidence_v0 --title "DeepONet branch-trunk evidence gate" --source-type local_library --problem-context "1D Burgers DeepONet evidence reports strategy-growth gate" --hypothesis "DeepONet branch/trunk rollout strategies should only be promoted when multi-window candidate evidence is stable." --mechanism "Use DeepONet candidate evaluation winners as quantitative evidence before skill promotion." --implementation-plan-json "{\"model_family\":\"DeepONet\",\"allowed_commands\":[\"build-deeponet-evidence-sweep\",\"convert-operator-evidence-summary\"],\"expected_artifacts\":[\"deeponet_evidence/evidence_summary.json\",\"strategy_evidence_summary.json\"]}" --expected-observable "positive mean score delta across multiple windows" --expected-observable "non-negative long-window score delta" --known-risk "candidate reports may be synthetic before real DeepONet training exists" --known-risk "physics residual evidence may be neutral until PI constraints are measured directly" --output-path {{OUTPUT_DIR}}/strategy_proposal.json
   - name: build_strategy_rubric

@@ -21,7 +21,13 @@ def _load_prepare_module():
     return module
 
 
-def _write_eval(path: Path, *, state_hint: str = "DEEPONET_CANDIDATE_EVALUATED") -> Path:
+def _write_eval(
+    path: Path,
+    *,
+    state_hint: str = "DEEPONET_CANDIDATE_EVALUATED",
+    experiment_id: str = "deeponet_a",
+    start_index: int = 0,
+) -> Path:
     path.write_text(
         json.dumps(
             {
@@ -29,8 +35,8 @@ def _write_eval(path: Path, *, state_hint: str = "DEEPONET_CANDIDATE_EVALUATED")
                 "state_hint": state_hint,
                 "inputs": {"forecast_steps": 31},
                 "candidate": {
-                    "experiment_id": "deeponet_a",
-                    "start_index": 0,
+                    "experiment_id": experiment_id,
+                    "start_index": start_index,
                     "train_steps": 1,
                     "training_strategy": "branch_trunk_rollout",
                 },
@@ -86,12 +92,17 @@ def test_prepare_deeponet_strategy_growth_renders_protocol(
             (source_fixture / name).read_text(encoding="utf-8"),
             encoding="utf-8",
         )
-    eval_path = _write_eval(tmp_path / "candidate.json")
+    eval_path = _write_eval(tmp_path / "candidate_0.json")
+    eval_path_2 = _write_eval(
+        tmp_path / "candidate_1.json",
+        experiment_id="deeponet_b",
+        start_index=1,
+    )
     output_dir = tmp_path / "runs" / "deeponet_strategy_growth_001"
 
     outputs = module.prepare_runtime(
         repo_root=repo_root,
-        evaluation_report_paths=[eval_path],
+        evaluation_report_paths=[eval_path, eval_path_2],
         output_dir=output_dir,
         long_window_threshold=31,
     )
@@ -99,15 +110,18 @@ def test_prepare_deeponet_strategy_growth_renders_protocol(
     run_state = outputs["run_state"].read_text(encoding="utf-8")
     commands = _allowed_commands(run_state)
     assert "{{" not in run_state
-    assert len(commands) == 6
+    assert len(commands) == 7
     assert "build-deeponet-evidence-sweep" in commands[0]
     assert "convert-operator-evidence-summary" in commands[1]
-    assert "record-strategy-proposal" in commands[2]
-    assert "build-strategy-rubric" in commands[3]
-    assert "evaluate-strategy-promotion" in commands[4]
-    assert "append-strategy-ledger" in commands[5]
+    assert "recommend-strategy-next-action" in commands[2]
+    assert "record-strategy-proposal" in commands[3]
+    assert "build-strategy-rubric" in commands[4]
+    assert "evaluate-strategy-promotion" in commands[5]
+    assert "append-strategy-ledger" in commands[6]
     assert str(eval_path.resolve()) in commands[0]
+    assert str(eval_path_2.resolve()) in commands[0]
     assert str(output_dir / "deeponet_evidence" / "evidence_summary.json") in run_state
+    assert str(output_dir / "strategy_decision.json") in run_state
     assert "convert-fno-evidence-summary" not in run_state
     assert "train-deeponet" not in run_state
 

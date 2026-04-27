@@ -60,8 +60,16 @@ def test_prepare_fno_strategy_growth_renders_gate_protocol(
         """
 {
   "state_hint": "FNO_EVIDENCE_SWEEP_COMPLETED",
+  "inputs": {"forecast_steps": 31},
   "comparison_winners": [
-    {"start_index": 0, "winner_score_delta": 1.0}
+    {"start_index": 0, "winner_experiment_id": "candidate_000", "winner_training_strategy": "scheduled_sampling", "winner_score": 41.0, "winner_score_delta": 1.0},
+    {"start_index": 1, "winner_experiment_id": "candidate_001", "winner_training_strategy": "scheduled_sampling", "winner_score": 42.0, "winner_score_delta": 2.0},
+    {"start_index": 2, "winner_experiment_id": "candidate_002", "winner_training_strategy": "scheduled_sampling", "winner_score": 43.0, "winner_score_delta": 3.0}
+  ],
+  "records": [
+    {"start_index": 0, "train_steps": 1, "experiment_id": "candidate_000", "training_strategy": "scheduled_sampling", "score": 41.0, "score_delta": 1.0, "rel_mse": 0.2, "rmse": 0.3, "dominant_error_pattern": "long_horizon_drift", "physics_issue": "inconclusive"},
+    {"start_index": 1, "train_steps": 1, "experiment_id": "candidate_001", "training_strategy": "scheduled_sampling", "score": 42.0, "score_delta": 2.0, "rel_mse": 0.2, "rmse": 0.3, "dominant_error_pattern": "long_horizon_drift", "physics_issue": "inconclusive"},
+    {"start_index": 2, "train_steps": 1, "experiment_id": "candidate_002", "training_strategy": "scheduled_sampling", "score": 43.0, "score_delta": 3.0, "rel_mse": 0.2, "rmse": 0.3, "dominant_error_pattern": "long_horizon_drift", "physics_issue": "inconclusive"}
   ]
 }
 """,
@@ -78,13 +86,15 @@ def test_prepare_fno_strategy_growth_renders_gate_protocol(
     run_state = outputs["run_state"].read_text(encoding="utf-8")
     commands = _allowed_commands(run_state)
     assert "{{" not in run_state
-    assert len(commands) == 5
+    assert len(commands) == 6
     assert "convert-fno-evidence-summary" in commands[0]
-    assert "record-strategy-proposal" in commands[1]
-    assert "build-strategy-rubric" in commands[2]
-    assert "evaluate-strategy-promotion" in commands[3]
-    assert "append-strategy-ledger" in commands[4]
+    assert "recommend-strategy-next-action" in commands[1]
+    assert "record-strategy-proposal" in commands[2]
+    assert "build-strategy-rubric" in commands[3]
+    assert "evaluate-strategy-promotion" in commands[4]
+    assert "append-strategy-ledger" in commands[5]
     assert str(output_dir / "strategy_evidence_summary.json") in run_state
+    assert str(output_dir / "strategy_decision.json") in run_state
     assert str(output_dir / "strategy_proposal.json") in run_state
     assert str(output_dir / "experiment_rubric.json") in run_state
     assert str(output_dir / "promotion_report.json") in run_state

@@ -6,6 +6,7 @@
   "required_output": [
     "deeponet_evidence/evidence_summary.json",
     "strategy_evidence_summary.json",
+    "strategy_decision.json",
     "strategy_proposal.json",
     "experiment_rubric.json",
     "promotion_report.json",

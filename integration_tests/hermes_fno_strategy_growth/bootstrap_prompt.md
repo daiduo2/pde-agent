@@ -9,6 +9,10 @@ Rules:
 - Execute commands in the listed order.
 - Do not pass raw FNO sweep output directly to `evaluate-strategy-promotion`.
 - Do not skip `convert-fno-evidence-summary`.
+- Do not skip `recommend-strategy-next-action`.
+- Do not call `evaluate-strategy-promotion` before
+  `recommend-strategy-next-action`.
+- Treat `strategy_decision.json` as the promotion gate routing artifact.
 - Do not patch source code.
 - Do not download data.
 - Do not inspect help output.

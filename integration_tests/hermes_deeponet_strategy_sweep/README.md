@@ -1,7 +1,8 @@
 # Hermes DeepONet Strategy Sweep
 
-This fixture verifies that Hermes can run the DeepONet strategy-sweep command
-and route its evidence into the strategy-growth gate.
+This fixture verifies that Hermes can run the DeepONet strategy-sweep command,
+route its evidence through the strategy next-action router, and then enter the
+strategy-growth gate.
 
 Prepare runtime state:
 

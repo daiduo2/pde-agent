@@ -1,7 +1,8 @@
 # Hermes FNO Strategy Growth
 
-This fixture verifies that Hermes routes FNO evidence through the
-strategy-growth gate instead of promoting raw FNO sweep output directly.
+This fixture verifies that Hermes routes FNO evidence through the strategy
+next-action router and strategy-growth gate instead of promoting raw FNO sweep
+output directly.
 
 Prepare runtime state:
 

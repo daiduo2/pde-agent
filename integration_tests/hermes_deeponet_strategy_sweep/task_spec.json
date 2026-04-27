@@ -8,6 +8,7 @@
     "strategy_sweep/deeponet_strategy_sweep_summary.csv",
     "strategy_sweep/deeponet_evidence/evidence_summary.json",
     "strategy_evidence_summary.json",
+    "strategy_decision.json",
     "strategy_ledger.jsonl"
   ],
   "success_state_hint": "STRATEGY_LEDGER_APPENDED"

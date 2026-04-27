@@ -58,7 +58,7 @@ def test_prepare_deeponet_strategy_sweep_renders_protocol(
     run_state = outputs["run_state"].read_text(encoding="utf-8")
     commands = _allowed_commands(run_state)
     assert "{{" not in run_state
-    assert len(commands) == 6
+    assert len(commands) == 7
     assert "run-deeponet-strategy-sweep" in commands[0]
     assert commands[0].count("--start-index") == 2
     assert commands[0].count("--training-strategy") == 3
@@ -66,8 +66,9 @@ def test_prepare_deeponet_strategy_sweep_renders_protocol(
     assert commands[0].count("--physics-weight") == 2
     assert "branch_trunk_physics_residual" in commands[0]
     assert "convert-operator-evidence-summary" in commands[1]
-    assert "record-strategy-proposal" in commands[2]
-    assert "append-strategy-ledger" in commands[5]
+    assert "recommend-strategy-next-action" in commands[2]
+    assert "record-strategy-proposal" in commands[3]
+    assert "append-strategy-ledger" in commands[6]
     assert str(outputs["windows_path"].resolve()) in commands[0]
     assert str(outputs["baseline_score_path"].resolve()) in commands[0]
     assert outputs["windows_path"].exists()

@@ -5,6 +5,7 @@
   "agent_scope": "evidence_to_strategy_growth_gate",
   "required_output": [
     "strategy_evidence_summary.json",
+    "strategy_decision.json",
     "strategy_proposal.json",
     "experiment_rubric.json",
     "promotion_report.json",

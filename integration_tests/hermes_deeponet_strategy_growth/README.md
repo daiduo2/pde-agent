@@ -1,8 +1,8 @@
 # Hermes DeepONet Strategy Growth
 
 This fixture verifies that Hermes can route DeepONet candidate evaluation
-reports through the generic operator evidence interface and then through the
-strategy-growth gate.
+reports through the generic operator evidence interface, the strategy
+next-action router, and then the strategy-growth gate.
 
 Prepare runtime state:
 
