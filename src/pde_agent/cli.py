@@ -62,6 +62,9 @@ from pde_agent.commands.record_autonomy_decision import (
 from pde_agent.commands.record_strategy_proposal import (
     record_strategy_proposal_command,
 )
+from pde_agent.commands.recommend_strategy_next_action import (
+    recommend_strategy_next_action_command,
+)
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -695,6 +698,25 @@ def evaluate_strategy_promotion_cmd(
                 rubric_path=rubric_path,
                 evidence_summary_path=evidence_summary_path,
                 output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("recommend-strategy-next-action")
+def recommend_strategy_next_action_cmd(
+    evidence_summary_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    min_evaluation_windows: int = typer.Option(3),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            recommend_strategy_next_action_command(
+                evidence_summary_path=evidence_summary_path,
+                output_path=output_path,
+                min_evaluation_windows=min_evaluation_windows,
             )
         )
     )
