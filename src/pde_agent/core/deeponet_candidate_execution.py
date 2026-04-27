@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ def execute_deeponet_candidate(
     latent_dim: int = 16,
     learning_rate: float = 1e-3,
     seed: int = 0,
+    strategy_label: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     torch = _require_torch()
@@ -35,6 +37,7 @@ def execute_deeponet_candidate(
     width = _positive_int(hidden_width, "hidden_width")
     latent = _positive_int(latent_dim, "latent_dim")
     lr = _positive_float(learning_rate, "learning_rate")
+    label = _strategy_label(strategy_label)
 
     output_root = Path(output_dir)
     paths = {
@@ -65,7 +68,8 @@ def execute_deeponet_candidate(
     )
     prediction = _predict(torch=torch, model=model, context=context, coords=coords)
 
-    experiment_id = f"deeponet_{strategy}_s{start:04d}_steps{steps:04d}"
+    label_part = f"_{label}" if label is not None else ""
+    experiment_id = f"deeponet_{strategy}{label_part}_s{start:04d}_steps{steps:04d}"
     torch.save(
         {
             "model_state_dict": model.state_dict(),
@@ -74,6 +78,7 @@ def execute_deeponet_candidate(
                 "adapter_type": "torch_deeponet_minimal",
                 "experiment_id": experiment_id,
                 "training_strategy": strategy,
+                "strategy_label": label,
                 "source_windows_path": str(windows_file),
                 "context_shape": list(context.shape),
                 "target_shape": list(target.shape),
@@ -95,6 +100,7 @@ def execute_deeponet_candidate(
                     "adapter_type": "torch_deeponet_minimal",
                     "experiment_id": experiment_id,
                     "training_strategy": strategy,
+                    "strategy_label": label,
                     "source_windows_path": str(windows_file),
                     "checkpoint_path": str(paths["candidate_checkpoint_path"]),
                 },
@@ -117,6 +123,7 @@ def execute_deeponet_candidate(
             "start_index": start,
             "train_steps": steps,
             "training_strategy": strategy,
+            "strategy_label": label,
         },
         "artifacts": {name: str(path) for name, path in paths.items()},
         "train": {
@@ -263,6 +270,20 @@ def _training_strategy(value: str) -> str:
     if value not in {"branch_trunk_supervised"}:
         raise DeepONetCandidateExecutionError(
             "training_strategy must be branch_trunk_supervised"
+        )
+    return value
+
+
+def _strategy_label(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise DeepONetCandidateExecutionError(
+            "strategy_label must be a non-empty string when provided"
+        )
+    if re.fullmatch(r"[A-Za-z0-9_]+", value) is None:
+        raise DeepONetCandidateExecutionError(
+            "strategy_label may contain only letters, digits, and underscores"
         )
     return value
 

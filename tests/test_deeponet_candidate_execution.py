@@ -48,6 +48,7 @@ def test_execute_deeponet_candidate_trains_torch_model_and_writes_report(
         "start_index": 2,
         "train_steps": 8,
         "training_strategy": "branch_trunk_supervised",
+        "strategy_label": None,
     }
     assert report["train"]["mode"] == "torch_deeponet"
     assert len(report["train"]["loss_trace"]) == 8
@@ -117,6 +118,50 @@ def test_execute_deeponet_candidate_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["metrics"]["final_loss"] >= 0.0
     assert payload["artifacts"]["candidate_execution_report_path"]
     assert payload["next_hint"] == "evaluate-deeponet-candidate"
+
+
+def test_execute_deeponet_candidate_uses_strategy_label_for_unique_ids(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    _write_windows(windows_path)
+
+    first = execute_deeponet_candidate(
+        windows_path=windows_path,
+        output_dir=tmp_path / "candidate_a",
+        start_index=2,
+        train_steps=4,
+        training_strategy="branch_trunk_supervised",
+        hidden_width=16,
+        latent_dim=8,
+        learning_rate=1e-2,
+        seed=123,
+        strategy_label="h16_l8_lr1e2_seed123",
+        force=False,
+    )
+    second = execute_deeponet_candidate(
+        windows_path=windows_path,
+        output_dir=tmp_path / "candidate_b",
+        start_index=2,
+        train_steps=4,
+        training_strategy="branch_trunk_supervised",
+        hidden_width=32,
+        latent_dim=8,
+        learning_rate=1e-2,
+        seed=123,
+        strategy_label="h32_l8_lr1e2_seed123",
+        force=False,
+    )
+
+    assert first["candidate"]["strategy_label"] == "h16_l8_lr1e2_seed123"
+    assert second["candidate"]["strategy_label"] == "h32_l8_lr1e2_seed123"
+    assert first["candidate"]["experiment_id"] == (
+        "deeponet_branch_trunk_supervised_h16_l8_lr1e2_seed123_s0002_steps0004"
+    )
+    assert second["candidate"]["experiment_id"] == (
+        "deeponet_branch_trunk_supervised_h32_l8_lr1e2_seed123_s0002_steps0004"
+    )
+    assert first["candidate"]["experiment_id"] != second["candidate"]["experiment_id"]
 
 
 def test_trainable_deeponet_candidate_enters_evidence_sweep(

@@ -71,6 +71,9 @@ from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
+from pde_agent.commands.run_deeponet_strategy_sweep import (
+    run_deeponet_strategy_sweep_command,
+)
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
@@ -452,6 +455,45 @@ def run_fno_evidence_sweep_cmd(
                 space_reduction=space_reduction,
                 train_steps=train_steps,
                 learning_rate=learning_rate,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-deeponet-strategy-sweep")
+def run_deeponet_strategy_sweep_cmd(
+    windows_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    baseline_score_path: str = typer.Option(...),
+    start_index: int = typer.Option(0),
+    train_steps: list[int] = typer.Option(..., "--train-steps"),
+    hidden_widths: list[int] = typer.Option(..., "--hidden-width"),
+    latent_dims: list[int] = typer.Option(..., "--latent-dim"),
+    learning_rates: list[float] = typer.Option(..., "--learning-rate"),
+    seeds: list[int] = typer.Option(..., "--seed"),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_deeponet_strategy_sweep_command(
+                windows_path=windows_path,
+                output_dir=output_dir,
+                baseline_score_path=baseline_score_path,
+                start_index=start_index,
+                train_steps=train_steps,
+                hidden_widths=hidden_widths,
+                latent_dims=latent_dims,
+                learning_rates=learning_rates,
+                seeds=seeds,
                 nu=nu,
                 dt=dt,
                 dx=dx,
@@ -930,6 +972,7 @@ def execute_deeponet_candidate_cmd(
     latent_dim: int = typer.Option(16),
     learning_rate: float = typer.Option(1e-3),
     seed: int = typer.Option(0),
+    strategy_label: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -946,6 +989,7 @@ def execute_deeponet_candidate_cmd(
                 latent_dim=latent_dim,
                 learning_rate=learning_rate,
                 seed=seed,
+                strategy_label=strategy_label,
                 force=force,
             )
         )

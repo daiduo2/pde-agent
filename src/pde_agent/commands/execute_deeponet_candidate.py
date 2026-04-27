@@ -17,6 +17,7 @@ def execute_deeponet_candidate_command(
     latent_dim: int,
     learning_rate: float,
     seed: int,
+    strategy_label: str | None,
     force: bool,
 ) -> dict[str, object]:
     report = execute_deeponet_candidate(
@@ -29,6 +30,7 @@ def execute_deeponet_candidate_command(
         latent_dim=latent_dim,
         learning_rate=learning_rate,
         seed=seed,
+        strategy_label=strategy_label,
         force=force,
     )
     loss_trace = report["train"]["loss_trace"]
@@ -52,6 +54,7 @@ def execute_deeponet_candidate_command(
             "start_index": report["candidate"]["start_index"],
             "train_steps": report["candidate"]["train_steps"],
             "training_strategy": report["candidate"]["training_strategy"],
+            "strategy_label": report["candidate"]["strategy_label"],
             "initial_loss": loss_trace[0] if loss_trace else None,
             "final_loss": loss_trace[-1] if loss_trace else None,
             "hidden_width": report["train"]["hidden_width"],
