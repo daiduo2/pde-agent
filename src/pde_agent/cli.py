@@ -32,6 +32,9 @@ from pde_agent.commands.evaluate_deeponet_candidate import (
     evaluate_deeponet_candidate_command,
 )
 from pde_agent.commands.evaluate_fno_candidate import evaluate_fno_candidate_command
+from pde_agent.commands.execute_deeponet_candidate import (
+    execute_deeponet_candidate_command,
+)
 from pde_agent.commands.execute_deeponet_candidate_dryrun import (
     execute_deeponet_candidate_dryrun_command,
 )
@@ -910,6 +913,39 @@ def execute_deeponet_candidate_dryrun_cmd(
                 start_index=start_index,
                 train_steps=train_steps,
                 training_strategy=training_strategy,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("execute-deeponet-candidate")
+def execute_deeponet_candidate_cmd(
+    windows_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    start_index: int = typer.Option(0),
+    train_steps: int = typer.Option(8),
+    training_strategy: str = typer.Option("branch_trunk_supervised"),
+    hidden_width: int = typer.Option(32),
+    latent_dim: int = typer.Option(16),
+    learning_rate: float = typer.Option(1e-3),
+    seed: int = typer.Option(0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            execute_deeponet_candidate_command(
+                windows_path=windows_path,
+                output_dir=output_dir,
+                start_index=start_index,
+                train_steps=train_steps,
+                training_strategy=training_strategy,
+                hidden_width=hidden_width,
+                latent_dim=latent_dim,
+                learning_rate=learning_rate,
+                seed=seed,
                 force=force,
             )
         )
