@@ -61,7 +61,9 @@ def test_convert_fno_evidence_summary_writes_strategy_growth_evidence(
     assert evidence == json.loads(output_path.read_text(encoding="utf-8"))
     assert evidence["schema_version"] == 1
     assert evidence["state_hint"] == "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+    assert evidence["model_family"] == "FNO"
     assert evidence["source_state_hint"] == "FNO_EVIDENCE_SWEEP_COMPLETED"
+    assert evidence["source_evidence_summary_path"] == str(sweep_path)
     assert evidence["evidence_summary_path"] == str(output_path)
     assert evidence["source_fno_evidence_summary_path"] == str(sweep_path)
     assert evidence["evaluation_window_count"] == 3

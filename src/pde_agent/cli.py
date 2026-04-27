@@ -16,6 +16,9 @@ from pde_agent.commands.compare_fno_candidates import compare_fno_candidates_com
 from pde_agent.commands.convert_fno_evidence_summary import (
     convert_fno_evidence_summary_command,
 )
+from pde_agent.commands.convert_operator_evidence_summary import (
+    convert_operator_evidence_summary_command,
+)
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
@@ -438,6 +441,31 @@ def convert_fno_evidence_summary_cmd(
             convert_fno_evidence_summary_command(
                 sweep_summary_path=sweep_summary_path,
                 output_path=output_path,
+                long_window_threshold=long_window_threshold,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("convert-operator-evidence-summary")
+def convert_operator_evidence_summary_cmd(
+    sweep_summary_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    model_family: str = typer.Option(...),
+    source_state_hint: str = typer.Option(...),
+    long_window_threshold: int = typer.Option(31),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            convert_operator_evidence_summary_command(
+                sweep_summary_path=sweep_summary_path,
+                output_path=output_path,
+                model_family=model_family,
+                source_state_hint=source_state_hint,
                 long_window_threshold=long_window_threshold,
                 force=force,
             )
