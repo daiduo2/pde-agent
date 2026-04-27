@@ -7,6 +7,9 @@ from pde_agent.commands.append_strategy_ledger import append_strategy_ledger_com
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
+from pde_agent.commands.build_deeponet_evidence_sweep import (
+    build_deeponet_evidence_sweep_command,
+)
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.build_strategy_rubric import build_strategy_rubric_command
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
@@ -167,6 +170,28 @@ def build_local_window_suite_cmd(
                 forecast_steps=forecast_steps,
                 time_reduction=time_reduction,
                 space_reduction=space_reduction,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-deeponet-evidence-sweep")
+def build_deeponet_evidence_sweep_cmd(
+    evaluation_report_paths: list[str] = typer.Option(
+        ...,
+        "--evaluation-report-path",
+    ),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_deeponet_evidence_sweep_command(
+                evaluation_report_paths=evaluation_report_paths,
+                output_dir=output_dir,
                 force=force,
             )
         )
