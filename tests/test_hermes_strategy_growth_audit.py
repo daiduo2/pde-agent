@@ -140,6 +140,23 @@ def test_strategy_growth_audit_passes_for_exact_gate_sequence(tmp_path: Path) ->
     assert report["errors"] == []
 
 
+def test_strategy_growth_audit_uses_supplied_arm_label(tmp_path: Path) -> None:
+    session_path = tmp_path / "session_20260427_strategy_deeponet.json"
+    session_path.write_text(json.dumps(_session()), encoding="utf-8")
+    artifacts = _write_required_artifacts(tmp_path / "out")
+
+    report = audit_hermes_strategy_growth_session(
+        session_path=session_path,
+        required_artifacts=artifacts,
+        required_reads=REQUIRED_READS,
+        allowed_commands=COMMANDS,
+        arm="deeponet_strategy_growth",
+    )
+
+    assert report["status"] == "passed"
+    assert report["arm"] == "deeponet_strategy_growth"
+
+
 def test_strategy_growth_audit_fails_if_raw_fno_summary_is_promoted_directly(
     tmp_path: Path,
 ) -> None:

@@ -12,7 +12,7 @@ from pde_agent.core.hermes_strategy_growth_audit import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Audit a saved Hermes FNO strategy-growth session."
+        description="Audit a saved Hermes strategy-growth session."
     )
     parser.add_argument(
         "--fixture-root",
@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--session-id")
     parser.add_argument("--session-path")
     parser.add_argument("--report-path")
+    parser.add_argument("--arm")
     args = parser.parse_args()
 
     repo_root = Path.cwd()
@@ -36,6 +37,7 @@ def main() -> int:
         required_artifacts=required_artifacts,
         required_reads=required_reads,
         allowed_commands=allowed_commands,
+        arm=args.arm or _arm_from_fixture_root(fixture_root),
     )
     report_path = (
         Path(args.report_path)
@@ -70,6 +72,13 @@ def _resolve_session_path(
     if not sessions:
         return sessions_dir / "session_missing.json"
     return sessions[-1]
+
+
+def _arm_from_fixture_root(fixture_root: Path) -> str:
+    name = fixture_root.name
+    if name.startswith("hermes_"):
+        name = name.removeprefix("hermes_")
+    return name
 
 
 def _yaml_list(text: str, key: str) -> list[str]:

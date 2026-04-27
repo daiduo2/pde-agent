@@ -15,6 +15,7 @@ def audit_hermes_strategy_growth_session(
     required_artifacts: list[str],
     required_reads: list[str],
     allowed_commands: list[str],
+    arm: str = "fno_strategy_growth",
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -24,6 +25,7 @@ def audit_hermes_strategy_growth_session(
             session_path,
             required_artifacts,
             f"session file not found: {session_path}",
+            arm=arm,
         )
 
     session = json.loads(session_path.read_text(encoding="utf-8"))
@@ -103,7 +105,7 @@ def audit_hermes_strategy_growth_session(
 
     return {
         "status": "passed" if not errors else "failed",
-        "arm": "fno_strategy_growth",
+        "arm": arm,
         "session_id": _session_id_from_path(session_path),
         "session_path": str(session_path),
         "required_artifacts": required_artifacts,
@@ -225,10 +227,12 @@ def _error_report(
     session_path: Path,
     required_artifacts: list[str],
     message: str,
+    *,
+    arm: str,
 ) -> dict[str, Any]:
     return {
         "status": "error",
-        "arm": "fno_strategy_growth",
+        "arm": arm,
         "session_id": _session_id_from_path(session_path),
         "session_path": str(session_path),
         "required_artifacts": required_artifacts,

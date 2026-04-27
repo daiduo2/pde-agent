@@ -45,6 +45,21 @@ success_transition:
     ]
 
 
+def test_strategy_growth_audit_script_derives_arm_from_fixture_root() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    module = _load_module(
+        "audit_hermes_strategy_growth",
+        repo_root / "scripts" / "audit_hermes_strategy_growth.py",
+    )
+
+    assert (
+        module._arm_from_fixture_root(
+            repo_root / "integration_tests" / "hermes_deeponet_strategy_growth"
+        )
+        == "deeponet_strategy_growth"
+    )
+
+
 def test_run_script_renders_strategy_growth_prompt() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     module = _load_module(
