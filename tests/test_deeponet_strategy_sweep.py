@@ -112,6 +112,62 @@ def test_run_deeponet_strategy_sweep_accepts_multiple_start_indices(
     assert summary["strategy_statistics"]["h16_l4_lr1e2_seed5"]["count"] == 2
 
 
+def test_run_deeponet_strategy_sweep_accepts_multiple_training_strategies(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    baseline_score_path = tmp_path / "baseline_score.json"
+    output_dir = tmp_path / "strategy_sweep"
+    _write_windows(windows_path)
+    baseline_score_path.write_text(
+        json.dumps({"competition_like_score_short": 1.0}),
+        encoding="utf-8",
+    )
+
+    summary = run_deeponet_strategy_sweep(
+        windows_path=windows_path,
+        output_dir=output_dir,
+        baseline_score_path=baseline_score_path,
+        start_indices=[1, 2],
+        training_strategies=[
+            "branch_trunk_supervised",
+            "branch_trunk_spectral",
+            "branch_trunk_physics_residual",
+        ],
+        train_steps=[3],
+        hidden_widths=[8],
+        latent_dims=[4],
+        learning_rates=[1e-2],
+        seeds=[5],
+        nu=0.001,
+        dt=1.0,
+        dx=0.1,
+        force=False,
+    )
+
+    assert summary["inputs"]["training_strategies"] == [
+        "branch_trunk_supervised",
+        "branch_trunk_spectral",
+        "branch_trunk_physics_residual",
+    ]
+    assert summary["record_count"] == 6
+    assert summary["evidence_sweep"]["comparison_count"] == 2
+    assert {
+        record["training_strategy"] for record in summary["records"]
+    } == {
+        "branch_trunk_supervised",
+        "branch_trunk_spectral",
+        "branch_trunk_physics_residual",
+    }
+    assert {
+        record["strategy_label"] for record in summary["records"]
+    } == {
+        "supervised_h8_l4_lr1e2_seed5",
+        "spectral_h8_l4_lr1e2_seed5",
+        "physics_residual_h8_l4_lr1e2_seed5",
+    }
+
+
 def test_run_deeponet_strategy_sweep_cli_writes_payload(
     tmp_path: Path,
 ) -> None:

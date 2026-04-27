@@ -470,6 +470,10 @@ def run_deeponet_strategy_sweep_cmd(
     output_dir: str = typer.Option(...),
     baseline_score_path: str = typer.Option(...),
     start_indices: list[int] = typer.Option(..., "--start-index"),
+    training_strategies: list[str] = typer.Option(
+        ["branch_trunk_supervised"],
+        "--training-strategy",
+    ),
     train_steps: list[int] = typer.Option(..., "--train-steps"),
     hidden_widths: list[int] = typer.Option(..., "--hidden-width"),
     latent_dims: list[int] = typer.Option(..., "--latent-dim"),
@@ -489,6 +493,7 @@ def run_deeponet_strategy_sweep_cmd(
                 output_dir=output_dir,
                 baseline_score_path=baseline_score_path,
                 start_indices=start_indices,
+                training_strategies=training_strategies,
                 train_steps=train_steps,
                 hidden_widths=hidden_widths,
                 latent_dims=latent_dims,
@@ -973,6 +978,9 @@ def execute_deeponet_candidate_cmd(
     learning_rate: float = typer.Option(1e-3),
     seed: int = typer.Option(0),
     strategy_label: str | None = typer.Option(None),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -990,6 +998,9 @@ def execute_deeponet_candidate_cmd(
                 learning_rate=learning_rate,
                 seed=seed,
                 strategy_label=strategy_label,
+                nu=nu,
+                dt=dt,
+                dx=dx,
                 force=force,
             )
         )

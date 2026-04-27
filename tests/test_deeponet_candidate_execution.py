@@ -164,6 +164,53 @@ def test_execute_deeponet_candidate_uses_strategy_label_for_unique_ids(
     assert first["candidate"]["experiment_id"] != second["candidate"]["experiment_id"]
 
 
+def test_execute_deeponet_candidate_supports_pde_aware_training_strategies(
+    tmp_path: Path,
+) -> None:
+    windows_path = tmp_path / "windows.npz"
+    _write_windows(windows_path)
+
+    spectral = execute_deeponet_candidate(
+        windows_path=windows_path,
+        output_dir=tmp_path / "spectral",
+        start_index=1,
+        train_steps=4,
+        training_strategy="branch_trunk_spectral",
+        hidden_width=16,
+        latent_dim=8,
+        learning_rate=1e-2,
+        seed=7,
+        force=False,
+    )
+    physics = execute_deeponet_candidate(
+        windows_path=windows_path,
+        output_dir=tmp_path / "physics",
+        start_index=1,
+        train_steps=4,
+        training_strategy="branch_trunk_physics_residual",
+        hidden_width=16,
+        latent_dim=8,
+        learning_rate=1e-2,
+        seed=7,
+        nu=0.001,
+        dt=1.0,
+        dx=0.1,
+        force=False,
+    )
+
+    assert spectral["candidate"]["training_strategy"] == "branch_trunk_spectral"
+    assert spectral["train"]["loss_terms"] == ["mse", "spectral"]
+    assert len(spectral["train"]["loss_trace"]) == 4
+    assert spectral["train"]["final_loss"] >= 0.0
+    assert physics["candidate"]["training_strategy"] == (
+        "branch_trunk_physics_residual"
+    )
+    assert physics["train"]["loss_terms"] == ["mse", "burgers_residual"]
+    assert physics["train"]["pde"] == {"nu": 0.001, "dt": 1.0, "dx": 0.1}
+    assert len(physics["train"]["loss_trace"]) == 4
+    assert physics["train"]["final_loss"] >= 0.0
+
+
 def test_trainable_deeponet_candidate_enters_evidence_sweep(
     tmp_path: Path,
 ) -> None:

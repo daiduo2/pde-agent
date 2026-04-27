@@ -47,6 +47,7 @@ def run_deeponet_strategy_sweep(
     baseline_score_path: str | Path,
     start_index: int | None = None,
     start_indices: list[int] | None = None,
+    training_strategies: list[str] | None = None,
     train_steps: list[int],
     hidden_widths: list[int],
     latent_dims: list[int],
@@ -66,6 +67,7 @@ def run_deeponet_strategy_sweep(
         )
 
     start_values = _start_indices(start_index=start_index, start_indices=start_indices)
+    strategy_values = _training_strategies(training_strategies)
     step_values = _unique_positive_ints(train_steps, label="train_steps")
     width_values = _unique_positive_ints(hidden_widths, label="hidden_widths")
     latent_values = _unique_positive_ints(latent_dims, label="latent_dims")
@@ -74,8 +76,9 @@ def run_deeponet_strategy_sweep(
 
     records: list[dict[str, Any]] = []
     evaluation_paths: list[Path] = []
-    for start, step_count, width, latent, lr, seed in product(
+    for start, training_strategy, step_count, width, latent, lr, seed in product(
         start_values,
+        strategy_values,
         step_values,
         width_values,
         latent_values,
@@ -83,10 +86,12 @@ def run_deeponet_strategy_sweep(
         seed_values,
     ):
         label = _strategy_label(
+            training_strategy=training_strategy,
             hidden_width=width,
             latent_dim=latent,
             learning_rate=lr,
             seed=seed,
+            include_strategy_prefix=len(strategy_values) > 1,
         )
         candidate_root = (
             output_root
@@ -100,12 +105,15 @@ def run_deeponet_strategy_sweep(
             output_dir=candidate_root,
             start_index=start,
             train_steps=step_count,
-            training_strategy="branch_trunk_supervised",
+            training_strategy=training_strategy,
             hidden_width=width,
             latent_dim=latent,
             learning_rate=lr,
             seed=seed,
             strategy_label=label,
+            nu=nu,
+            dt=dt,
+            dx=dx,
             force=force,
         )
         evaluation_root = candidate_root / "evaluation"
@@ -153,6 +161,7 @@ def run_deeponet_strategy_sweep(
             "baseline_score_path": str(baseline_file),
             "start_index": start_values[0],
             "start_indices": start_values,
+            "training_strategies": strategy_values,
             "train_steps": step_values,
             "hidden_widths": width_values,
             "latent_dims": latent_values,
@@ -297,15 +306,22 @@ def _strategy_statistics(records: list[dict[str, Any]]) -> dict[str, dict[str, f
 
 def _strategy_label(
     *,
+    training_strategy: str,
     hidden_width: int,
     latent_dim: int,
     learning_rate: float,
     seed: int,
+    include_strategy_prefix: bool,
 ) -> str:
+    prefix = f"{_strategy_prefix(training_strategy)}_" if include_strategy_prefix else ""
     return (
-        f"h{hidden_width}_l{latent_dim}_lr{_learning_rate_label(learning_rate)}"
+        f"{prefix}h{hidden_width}_l{latent_dim}_lr{_learning_rate_label(learning_rate)}"
         f"_seed{seed}"
     )
+
+
+def _strategy_prefix(training_strategy: str) -> str:
+    return training_strategy.removeprefix("branch_trunk_")
 
 
 def _learning_rate_label(value: float) -> str:
@@ -370,6 +386,31 @@ def _start_indices(
     if start_index is None:
         raise DeepONetStrategySweepError("start_index or start_indices is required")
     return [_non_negative_int(start_index, "start_index")]
+
+
+def _training_strategies(values: list[str] | None) -> list[str]:
+    raw_values = values if values is not None else ["branch_trunk_supervised"]
+    if not raw_values:
+        raise DeepONetStrategySweepError("training_strategies must be non-empty")
+    allowed = {
+        "branch_trunk_supervised",
+        "branch_trunk_spectral",
+        "branch_trunk_physics_residual",
+    }
+    seen: set[str] = set()
+    normalized = []
+    for value in raw_values:
+        if value not in allowed:
+            raise DeepONetStrategySweepError(
+                "training_strategies must contain only: " + ", ".join(sorted(allowed))
+            )
+        if value in seen:
+            raise DeepONetStrategySweepError(
+                f"training_strategies contains duplicate value: {value}"
+            )
+        seen.add(value)
+        normalized.append(value)
+    return normalized
 
 
 def _unique_positive_floats(values: list[float], *, label: str) -> list[float]:

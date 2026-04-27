@@ -50,7 +50,7 @@ required_artifacts:
 
 allowed_commands:
   - name: run_deeponet_strategy_sweep
-    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent run-deeponet-strategy-sweep --windows-path {{WINDOWS_PATH}} --output-dir {{OUTPUT_DIR}}/strategy_sweep --baseline-score-path {{BASELINE_SCORE_PATH}} --start-index 0 --start-index 1 --train-steps 4 --hidden-width 8 --hidden-width 16 --latent-dim 4 --learning-rate 0.01 --seed 5 --nu 0.001 --dt 1.0 --dx 1.0
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent run-deeponet-strategy-sweep --windows-path {{WINDOWS_PATH}} --output-dir {{OUTPUT_DIR}}/strategy_sweep --baseline-score-path {{BASELINE_SCORE_PATH}} --start-index 0 --start-index 1 --training-strategy branch_trunk_supervised --training-strategy branch_trunk_spectral --training-strategy branch_trunk_physics_residual --train-steps 4 --hidden-width 8 --latent-dim 4 --learning-rate 0.01 --seed 5 --nu 0.001 --dt 1.0 --dx 1.0
   - name: convert_operator_evidence_summary
     command: cd {{REPO_ROOT}} && uv run --frozen pde-agent convert-operator-evidence-summary --sweep-summary-path {{OUTPUT_DIR}}/strategy_sweep/deeponet_evidence/evidence_summary.json --output-path {{OUTPUT_DIR}}/strategy_evidence_summary.json --model-family DeepONet --source-state-hint DEEPONET_EVIDENCE_SWEEP_COMPLETED --long-window-threshold 3 --force
   - name: record_strategy_proposal
