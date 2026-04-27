@@ -123,6 +123,27 @@ Failed and revised strategies must remain in the ledger. Deleting failed
 attempts makes the agent less scientific: it loses negative evidence and may
 repeat the same weak strategy under a different name.
 
+### FNO Evidence Bridge
+
+FNO evidence enters the strategy-growth gate through
+`convert-fno-evidence-summary`. Hermes should not hand a raw
+`run-fno-evidence-sweep` summary directly to `evaluate-strategy-promotion`.
+
+Required sequence:
+
+1. `run-fno-evidence-sweep`
+2. `convert-fno-evidence-summary`
+3. `record-strategy-proposal`
+4. `build-strategy-rubric`
+5. `evaluate-strategy-promotion`
+6. `append-strategy-ledger`
+
+The adapter derives the canonical promotion metrics from comparison winners and
+records provenance notes for metrics that the current FNO sweep cannot measure
+directly, such as physics-residual delta and inference-time regression. Those
+neutral placeholders are acceptable for wiring the gate, but they should not be
+confused with real physical validation.
+
 ## When To Run Hermes
 
 Run real Hermes immediately after any of these changes:
