@@ -108,6 +108,9 @@ from pde_agent.commands.run_official_operator_comparison import (
 from pde_agent.commands.run_spectral_residual_evidence_sweep import (
     run_spectral_residual_evidence_sweep_command,
 )
+from pde_agent.commands.run_spectral_residual_convergence_grid import (
+    run_spectral_residual_convergence_grid_command,
+)
 from pde_agent.commands.run_deeponet_strategy_sweep import (
     run_deeponet_strategy_sweep_command,
 )
@@ -673,6 +676,45 @@ def run_spectral_residual_evidence_sweep_cmd(
                 space_reduction=space_reduction,
                 spectral_modes=spectral_modes,
                 spectral_ridge=spectral_ridge,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-spectral-residual-convergence-grid")
+def run_spectral_residual_convergence_grid_cmd(
+    audit_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    source_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    sample_limit: int = typer.Option(8),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(31),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_spectral_residual_convergence_grid_command(
+                audit_path=audit_path,
+                output_dir=output_dir,
+                source_path=source_path,
+                dataset_key=dataset_key,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
                 nu=nu,
                 dt=dt,
                 dx=dx,
