@@ -89,6 +89,54 @@ def test_convert_operator_evidence_summary_supports_deeponet_family(
     assert evidence["next_command"] == "evaluate-strategy-promotion"
 
 
+def test_convert_operator_evidence_summary_supports_unet_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.operator_strategy_evidence import (
+        convert_operator_evidence_summary,
+    )
+
+    sweep_path = _write_operator_sweep_summary(
+        tmp_path / "unet_evidence_summary.json",
+        state_hint="UNET_EVIDENCE_SWEEP_COMPLETED",
+        records=[
+            {
+                "start_index": 0,
+                "train_steps": 4,
+                "experiment_id": "unet_a",
+                "training_strategy": "unet_spectral",
+                "strategy_label": "spectral_c8_d2_lr1e2_seed5",
+                "base_channels": 8,
+                "depth": 2,
+                "score": 42.0,
+                "score_delta": 2.0,
+                "rel_mse": 0.2,
+                "rmse": 0.3,
+                "dominant_error_pattern": "long_horizon_drift",
+                "physics_issue": "inconclusive",
+            }
+        ],
+        winner_deltas=[2.0],
+    )
+    output_path = tmp_path / "strategy_evidence_summary.json"
+
+    evidence = convert_operator_evidence_summary(
+        sweep_summary_path=sweep_path,
+        output_path=output_path,
+        model_family="UNet",
+        source_state_hint="UNET_EVIDENCE_SWEEP_COMPLETED",
+        long_window_threshold=31,
+    )
+
+    assert evidence["model_family"] == "UNet"
+    assert evidence["source_unet_evidence_summary_path"] == str(sweep_path)
+    assert evidence["candidate_records"][0]["hyperparameters"] == {
+        "base_channels": 8,
+        "depth": 2,
+    }
+    assert evidence["best_strategy_id"] == "spectral_c8_d2_lr1e2_seed5"
+
+
 def test_convert_operator_evidence_summary_cli_returns_protocol_payload(
     tmp_path: Path,
 ) -> None:

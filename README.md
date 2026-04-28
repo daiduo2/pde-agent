@@ -190,6 +190,33 @@ The command writes `burgers_spectral_viscosity_benchmark_report.json` plus the
 underlying baseline, DeepONet sweep, operator evidence, and strategy-decision
 artifacts.
 
+## UNet Strategy Sweep
+
+UNet support adds a local convolutional operator-family baseline for the same
+window, scoring, Burgers residual, and operator-evidence contracts used by
+DeepONet. It is intended as a bounded evidence generator, not a tuned contest
+model.
+
+```bash
+uv run --frozen --extra torch pde-agent run-unet-strategy-sweep \
+  --windows-path runs/burgers_spectral_viscosity_benchmark_001/baseline/windows_f031.npz \
+  --baseline-score-path runs/burgers_spectral_viscosity_benchmark_001/baseline/persistence_score.json \
+  --output-dir runs/unet_strategy_sweep_001 \
+  --start-index 0 \
+  --training-strategy unet_supervised \
+  --training-strategy unet_spectral \
+  --training-strategy unet_physics_residual \
+  --train-steps 4 \
+  --base-channels 8 \
+  --depth 2 \
+  --learning-rate 0.01 \
+  --seed 5 \
+  --force
+```
+
+The command writes `unet_strategy_sweep_summary.json`, a CSV summary, candidate
+artifacts, evaluation reports, and `unet_evidence/evidence_summary.json`.
+
 ## FNO Backend V0
 
 FNO support is optional and requires the torch extra. V0 can inspect

@@ -12,6 +12,9 @@ from pde_agent.commands.build_deeponet_evidence_sweep import (
 )
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.build_strategy_rubric import build_strategy_rubric_command
+from pde_agent.commands.build_unet_evidence_sweep import (
+    build_unet_evidence_sweep_command,
+)
 from pde_agent.commands.check_burgers_physics_local import check_burgers_physics_local
 from pde_agent.commands.check_physics import check_physics
 from pde_agent.commands.collect_artifacts import collect_artifacts
@@ -36,6 +39,7 @@ from pde_agent.commands.evaluate_deeponet_candidate import (
     evaluate_deeponet_candidate_command,
 )
 from pde_agent.commands.evaluate_fno_candidate import evaluate_fno_candidate_command
+from pde_agent.commands.evaluate_unet_candidate import evaluate_unet_candidate_command
 from pde_agent.commands.execute_deeponet_candidate import (
     execute_deeponet_candidate_command,
 )
@@ -45,6 +49,7 @@ from pde_agent.commands.execute_deeponet_candidate_dryrun import (
 from pde_agent.commands.execute_fno_finetune_candidate import (
     execute_fno_finetune_candidate_command,
 )
+from pde_agent.commands.execute_unet_candidate import execute_unet_candidate_command
 from pde_agent.commands.formalize_external_strategy_candidate import (
     formalize_external_strategy_candidate_command,
 )
@@ -94,6 +99,7 @@ from pde_agent.commands.run_deeponet_strategy_sweep import (
 from pde_agent.commands.run_burgers_spectral_viscosity_benchmark import (
     run_burgers_spectral_viscosity_benchmark_command,
 )
+from pde_agent.commands.run_unet_strategy_sweep import run_unet_strategy_sweep_command
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
@@ -222,6 +228,28 @@ def build_deeponet_evidence_sweep_cmd(
     typer.echo(
         json.dumps(
             build_deeponet_evidence_sweep_command(
+                evaluation_report_paths=evaluation_report_paths,
+                output_dir=output_dir,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-unet-evidence-sweep")
+def build_unet_evidence_sweep_cmd(
+    evaluation_report_paths: list[str] = typer.Option(
+        ...,
+        "--evaluation-report-path",
+    ),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_unet_evidence_sweep_command(
                 evaluation_report_paths=evaluation_report_paths,
                 output_dir=output_dir,
                 force=force,
@@ -519,6 +547,54 @@ def run_deeponet_strategy_sweep_cmd(
                 train_steps=train_steps,
                 hidden_widths=hidden_widths,
                 latent_dims=latent_dims,
+                learning_rates=learning_rates,
+                seeds=seeds,
+                spectral_weights=spectral_weights,
+                physics_weights=physics_weights,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-unet-strategy-sweep")
+def run_unet_strategy_sweep_cmd(
+    windows_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    baseline_score_path: str = typer.Option(...),
+    start_indices: list[int] = typer.Option(..., "--start-index"),
+    training_strategies: list[str] = typer.Option(
+        ["unet_supervised"],
+        "--training-strategy",
+    ),
+    train_steps: list[int] = typer.Option(..., "--train-steps"),
+    base_channels: list[int] = typer.Option(..., "--base-channels"),
+    depths: list[int] = typer.Option(..., "--depth"),
+    learning_rates: list[float] = typer.Option(..., "--learning-rate"),
+    seeds: list[int] = typer.Option(..., "--seed"),
+    spectral_weights: list[float] = typer.Option([0.1], "--spectral-weight"),
+    physics_weights: list[float] = typer.Option([0.01], "--physics-weight"),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_unet_strategy_sweep_command(
+                windows_path=windows_path,
+                output_dir=output_dir,
+                baseline_score_path=baseline_score_path,
+                start_indices=start_indices,
+                training_strategies=training_strategies,
+                train_steps=train_steps,
+                base_channels=base_channels,
+                depths=depths,
                 learning_rates=learning_rates,
                 seeds=seeds,
                 spectral_weights=spectral_weights,
@@ -1324,6 +1400,51 @@ def execute_deeponet_candidate_cmd(
     )
 
 
+@app.command("execute-unet-candidate")
+def execute_unet_candidate_cmd(
+    windows_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    start_index: int = typer.Option(0),
+    train_steps: int = typer.Option(8),
+    training_strategy: str = typer.Option("unet_supervised"),
+    base_channels: int = typer.Option(16),
+    depth: int = typer.Option(2),
+    learning_rate: float = typer.Option(1e-3),
+    seed: int = typer.Option(0),
+    strategy_label: str | None = typer.Option(None),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    spectral_weight: float = typer.Option(0.1),
+    physics_weight: float = typer.Option(0.01),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            execute_unet_candidate_command(
+                windows_path=windows_path,
+                output_dir=output_dir,
+                start_index=start_index,
+                train_steps=train_steps,
+                training_strategy=training_strategy,
+                base_channels=base_channels,
+                depth=depth,
+                learning_rate=learning_rate,
+                seed=seed,
+                strategy_label=strategy_label,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                spectral_weight=spectral_weight,
+                physics_weight=physics_weight,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("evaluate-fno-candidate")
 def evaluate_fno_candidate_cmd(
     candidate_report_path: str = typer.Option(...),
@@ -1369,6 +1490,35 @@ def evaluate_deeponet_candidate_cmd(
     typer.echo(
         json.dumps(
             evaluate_deeponet_candidate_command(
+                candidate_report_path=candidate_report_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                baseline_score_path=baseline_score_path,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("evaluate-unet-candidate")
+def evaluate_unet_candidate_cmd(
+    candidate_report_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    baseline_score_path: str | None = typer.Option(None),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            evaluate_unet_candidate_command(
                 candidate_report_path=candidate_report_path,
                 target_path=target_path,
                 output_dir=output_dir,
