@@ -25,6 +25,9 @@ from pde_agent.commands.convert_fno_evidence_summary import (
 from pde_agent.commands.convert_operator_evidence_summary import (
     convert_operator_evidence_summary_command,
 )
+from pde_agent.commands.convert_official_comparison_evidence import (
+    convert_official_comparison_evidence_command,
+)
 from pde_agent.commands.create_skill_candidate import create_skill_candidate_command
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_unet_rollout import diagnose_unet_rollout
@@ -824,6 +827,27 @@ def convert_operator_evidence_summary_cmd(
                 output_path=output_path,
                 model_family=model_family,
                 source_state_hint=source_state_hint,
+                long_window_threshold=long_window_threshold,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("convert-official-comparison-evidence")
+def convert_official_comparison_evidence_cmd(
+    comparison_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    long_window_threshold: int = typer.Option(31),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            convert_official_comparison_evidence_command(
+                comparison_report_path=comparison_report_path,
+                output_path=output_path,
                 long_window_threshold=long_window_threshold,
                 force=force,
             )

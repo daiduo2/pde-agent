@@ -286,6 +286,22 @@ This writes `official_operator_comparison_report.json` with a ranked leaderboard
 per-model artifact paths, and a narrow recommendation. It does not train or
 finetune the official checkpoints.
 
+Convert that comparison into the strategy evidence contract and route it through
+the existing decision gate:
+
+```bash
+uv run --frozen pde-agent convert-official-comparison-evidence \
+  --comparison-report-path runs/official_operator_comparison_001/official_operator_comparison_report.json \
+  --output-path runs/official_operator_comparison_001/strategy_evidence_summary.json \
+  --long-window-threshold 31 \
+  --force
+
+uv run --frozen pde-agent recommend-strategy-next-action \
+  --evidence-summary-path runs/official_operator_comparison_001/strategy_evidence_summary.json \
+  --output-path runs/official_operator_comparison_001/strategy_decision.json \
+  --min-evaluation-windows 4
+```
+
 ## FNO Backend V0
 
 FNO support is optional and requires the torch extra. V0 can inspect

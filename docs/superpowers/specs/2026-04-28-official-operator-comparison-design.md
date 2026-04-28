@@ -79,3 +79,19 @@ Use fixture-friendly tests:
 - The report clearly separates official checkpoint evidence from trainable
   strategy-sweep evidence.
 - Existing full tests remain green.
+
+## Follow-up: Strategy Evidence Adapter
+
+The comparison report should also be convertible into the existing
+`STRATEGY_EVIDENCE_SUMMARY_BUILT` contract. The adapter should:
+
+- read `OFFICIAL_OPERATOR_COMPARISON_COMPLETED`;
+- exclude persistence as the baseline;
+- treat `spectral_residual`, `official_fno`, and `official_unet` as candidate
+  strategy records;
+- use `score_delta_vs_persistence` as `score_delta`;
+- use `sample_limit` as `evaluation_window_count`;
+- set `best_strategy_id` from the normalized ranking.
+
+This lets the existing `recommend-strategy-next-action` gate route the official
+comparison result without adding a special decision engine.
