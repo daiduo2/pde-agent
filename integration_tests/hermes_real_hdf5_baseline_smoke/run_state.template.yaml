@@ -1,0 +1,40 @@
+run_id: {{RUN_ID}}
+run_root: {{OUTPUT_DIR}}
+working_directory: {{FIXTURE_ROOT}}
+command_prefix: cd {{REPO_ROOT}} && uv run --frozen pde-agent
+
+current_state: TASK_PARSED
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - call_run_real_hdf5_baseline_smoke
+
+forbidden_actions:
+  - patch_code
+  - implicit_download
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+  - run_training
+  - call_run_fno_iteration
+  - call_train_baseline
+  - call_build_submission
+
+required_reads:
+  - {{FIXTURE_ROOT}}/run_state.yaml
+  - {{FIXTURE_ROOT}}/bootstrap_prompt.md
+  - {{FIXTURE_ROOT}}/task_spec.json
+
+required_artifacts:
+  - {{OUTPUT_DIR}}/real_hdf5_baseline_smoke_summary.json
+
+allowed_commands:
+  - name: run_real_hdf5_baseline_smoke
+    command: cd {{REPO_ROOT}} && uv run --frozen pde-agent run-real-hdf5-baseline-smoke --source-path {{SOURCE_PATH}} --output-dir {{OUTPUT_DIR}} --dataset-key {{DATASET_KEY}} --start-index {{START_INDEX}} --sample-limit {{SAMPLE_LIMIT}} --context-steps {{CONTEXT_STEPS}} --forecast-steps {{FORECAST_STEPS}} --time-reduction {{TIME_REDUCTION}} --space-reduction {{SPACE_REDUCTION}} --nu {{NU}} --dt {{DT}} --dx {{DX}} --force
+
+success_transition:
+  on_complete: REAL_HDF5_BASELINE_SMOKE_COMPLETED
