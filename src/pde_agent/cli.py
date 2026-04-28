@@ -91,6 +91,9 @@ from pde_agent.commands.run_fno_evidence_sweep import (
 from pde_agent.commands.run_deeponet_strategy_sweep import (
     run_deeponet_strategy_sweep_command,
 )
+from pde_agent.commands.run_burgers_spectral_viscosity_benchmark import (
+    run_burgers_spectral_viscosity_benchmark_command,
+)
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
@@ -520,6 +523,61 @@ def run_deeponet_strategy_sweep_cmd(
                 seeds=seeds,
                 spectral_weights=spectral_weights,
                 physics_weights=physics_weights,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-burgers-spectral-viscosity-benchmark")
+def run_burgers_spectral_viscosity_benchmark_cmd(
+    source_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    sample_limit: int = typer.Option(8),
+    min_evaluation_windows: int = typer.Option(4),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(31),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    train_steps: list[int] = typer.Option([4], "--train-steps"),
+    hidden_widths: list[int] = typer.Option([8], "--hidden-width"),
+    latent_dims: list[int] = typer.Option([4], "--latent-dim"),
+    learning_rates: list[float] = typer.Option([0.01], "--learning-rate"),
+    seeds: list[int] = typer.Option([5], "--seed"),
+    spectral_weights: list[float] = typer.Option([0.05, 0.1], "--spectral-weight"),
+    physics_weights: list[float] = typer.Option([0.005], "--physics-weight"),
+    proposal_id: str = typer.Option("burgers_spectral_viscosity_real_hdf5_v0"),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_burgers_spectral_viscosity_benchmark_command(
+                source_path=source_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                sample_limit=sample_limit,
+                min_evaluation_windows=min_evaluation_windows,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                train_steps=train_steps,
+                hidden_widths=hidden_widths,
+                latent_dims=latent_dims,
+                learning_rates=learning_rates,
+                seeds=seeds,
+                spectral_weights=spectral_weights,
+                physics_weights=physics_weights,
+                proposal_id=proposal_id,
                 nu=nu,
                 dt=dt,
                 dx=dx,

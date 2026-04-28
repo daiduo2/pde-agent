@@ -154,6 +154,42 @@ next step is `generate-experiment-config`, which expands bounded candidate
 parameters into explicit candidate experiment records. It does not run candidates;
 `execute-candidate-experiment` is a future hook.
 
+## Burgers Spectral Viscosity Benchmark
+
+The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain
+for the retrieved strategy `burgers_spectral_viscosity_real_hdf5_v0`. It builds
+a persistence baseline from the public Burgers file, runs a bounded DeepONet
+strategy sweep with supervised, physics-residual, and spectral-viscosity proxy
+arms, converts the result into strategy evidence, and routes the next action
+through the existing strategy decision gate.
+
+This is a quantitative agent benchmark, not the final contest model. Failed
+spectral-viscosity evidence is still useful: the report records the negative
+score deltas, failure rate, physics metrics, and router decision instead of
+forcing promotion.
+
+```bash
+uv run --frozen --extra data pde-agent run-burgers-spectral-viscosity-benchmark \
+  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
+  --output-dir runs/burgers_spectral_viscosity_benchmark_001 \
+  --dataset-key tensor \
+  --sample-limit 8 \
+  --min-evaluation-windows 4 \
+  --train-steps 4 \
+  --hidden-width 8 \
+  --latent-dim 4 \
+  --learning-rate 0.01 \
+  --seed 5 \
+  --spectral-weight 0.05 \
+  --spectral-weight 0.1 \
+  --physics-weight 0.005 \
+  --force
+```
+
+The command writes `burgers_spectral_viscosity_benchmark_report.json` plus the
+underlying baseline, DeepONet sweep, operator evidence, and strategy-decision
+artifacts.
+
 ## FNO Backend V0
 
 FNO support is optional and requires the torch extra. V0 can inspect
