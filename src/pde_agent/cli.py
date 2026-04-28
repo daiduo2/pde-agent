@@ -102,6 +102,9 @@ from pde_agent.commands.run_fno_evidence_sweep import (
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
 )
+from pde_agent.commands.run_spectral_residual_evidence_sweep import (
+    run_spectral_residual_evidence_sweep_command,
+)
 from pde_agent.commands.run_deeponet_strategy_sweep import (
     run_deeponet_strategy_sweep_command,
 )
@@ -617,6 +620,49 @@ def run_official_operator_comparison_cmd(
                 dataset_key=dataset_key,
                 fno_checkpoint_path=fno_checkpoint_path,
                 unet_checkpoint_path=unet_checkpoint_path,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                spectral_modes=spectral_modes,
+                spectral_ridge=spectral_ridge,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-spectral-residual-evidence-sweep")
+def run_spectral_residual_evidence_sweep_cmd(
+    source_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    start_indices: list[int] = typer.Option(..., "--start-index"),
+    sample_limit: int = typer.Option(8),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(31),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    spectral_modes: int = typer.Option(16),
+    spectral_ridge: float = typer.Option(1e-3),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_spectral_residual_evidence_sweep_command(
+                source_path=source_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                start_indices=start_indices,
                 sample_limit=sample_limit,
                 context_steps=context_steps,
                 forecast_steps=forecast_steps,

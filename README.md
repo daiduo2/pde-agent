@@ -154,6 +154,39 @@ next step is `generate-experiment-config`, which expands bounded candidate
 parameters into explicit candidate experiment records. It does not run candidates;
 `execute-candidate-experiment` is a future hook.
 
+## Spectral Residual Evidence Sweep
+
+Run the spectral residual ridge baseline across multiple real-HDF5 sample starts
+and write strategy evidence directly:
+
+```bash
+uv run --frozen --extra data pde-agent run-spectral-residual-evidence-sweep \
+  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
+  --output-dir runs/spectral_residual_evidence_sweep_001 \
+  --dataset-key tensor \
+  --start-index 0 \
+  --start-index 8 \
+  --start-index 16 \
+  --start-index 24 \
+  --sample-limit 8 \
+  --context-steps 10 \
+  --forecast-steps 31 \
+  --time-reduction 5 \
+  --space-reduction 4 \
+  --spectral-modes 16 \
+  --spectral-ridge 0.001 \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+The command writes `spectral_residual_evidence_summary.json` with state hint
+`STRATEGY_EVIDENCE_SUMMARY_BUILT`, so it can feed `recommend-strategy-next-action`
+or `evaluate-strategy-promotion` directly. This sweep uses the same windows for
+fitting and scoring; it is a stability gate for a local baseline, not hidden-test
+evidence.
+
 ## Burgers Spectral Viscosity Benchmark
 
 The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain
