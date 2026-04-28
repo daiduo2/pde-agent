@@ -318,7 +318,7 @@ def create_skill_candidate(
             "mechanism": proposal["mechanism"],
         },
         "trigger_conditions": proposal["expected_observables"],
-        "procedure_steps": _procedure_steps(proposal),
+        "procedure_steps": _procedure_steps(proposal, evidence),
         "failure_boundaries": proposal["known_risks"],
         "promotion_reason_codes": promotion["reason_codes"],
         "evidence_sources": {
@@ -552,15 +552,35 @@ def _nonempty_dict(value: object) -> bool:
     return isinstance(value, dict) and bool(value)
 
 
-def _procedure_steps(proposal: dict[str, Any]) -> list[str]:
+def _procedure_steps(proposal: dict[str, Any], evidence: dict[str, Any]) -> list[str]:
     plan = proposal["implementation_plan"]
     commands = plan.get("allowed_commands", [])
     artifacts = plan.get("expected_artifacts", [])
     steps = [proposal["mechanism"]]
+    if (
+        evidence.get("source_state_hint")
+        == "SPECTRAL_RESIDUAL_WINDOW_STRATIFICATION_COMPLETED"
+        and isinstance(commands, list)
+        and "run-spectral-residual-window-stratification" not in commands
+    ):
+        commands = [*commands, "run-spectral-residual-window-stratification"]
     if isinstance(commands, list) and commands:
         steps.append("Run only the approved commands: " + ", ".join(map(str, commands)))
     if isinstance(artifacts, list) and artifacts:
         steps.append("Verify expected artifacts: " + ", ".join(map(str, artifacts)))
+    if evidence.get("source_state_hint") == "SPECTRAL_RESIDUAL_WINDOW_STRATIFICATION_COMPLETED":
+        metrics = evidence.get("source_metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        window_grouping = metrics.get("window_grouping")
+        aggregation_policy = metrics.get("aggregation_policy")
+        if isinstance(window_grouping, str) and isinstance(aggregation_policy, str):
+            steps.append(
+                "Run window-stratified evidence with "
+                "run-spectral-residual-window-stratification using "
+                f"window_grouping={window_grouping} and "
+                f"aggregation_policy={aggregation_policy}."
+            )
     return steps
 
 
