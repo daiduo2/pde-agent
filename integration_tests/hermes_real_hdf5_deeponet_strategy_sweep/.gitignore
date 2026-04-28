@@ -1,0 +1,10 @@
+hermes_home/*
+!hermes_home/
+!hermes_home/.gitkeep
+runs/*
+!runs/
+!runs/.gitkeep
+reports/*
+!reports/
+!reports/.gitkeep
+run_state.yaml
