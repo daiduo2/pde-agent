@@ -257,6 +257,35 @@ The diagnosis writes `unet_prediction.npz`, `unet_score.json`,
 `unet_rollout_error.json`, `unet_burgers_physics.json`, and
 `unet_rollout_summary.json` with state hint `UNET_ROLLOUT_DIAGNOSED`.
 
+## Official Operator Comparison
+
+Compare the provided official FNO and UNet checkpoints against persistence and
+the local spectral residual ridge baseline on the same real-HDF5 Burgers window:
+
+```bash
+uv run --frozen --extra torch pde-agent run-official-operator-comparison \
+  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
+  --output-dir runs/official_operator_comparison_001 \
+  --dataset-key tensor \
+  --fno-checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
+  --unet-checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
+  --sample-limit 8 \
+  --context-steps 10 \
+  --forecast-steps 31 \
+  --time-reduction 5 \
+  --space-reduction 4 \
+  --spectral-modes 16 \
+  --spectral-ridge 0.001 \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+This writes `official_operator_comparison_report.json` with a ranked leaderboard,
+per-model artifact paths, and a narrow recommendation. It does not train or
+finetune the official checkpoints.
+
 ## FNO Backend V0
 
 FNO support is optional and requires the torch extra. V0 can inspect

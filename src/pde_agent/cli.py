@@ -96,6 +96,9 @@ from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
+from pde_agent.commands.run_official_operator_comparison import (
+    run_official_operator_comparison_command,
+)
 from pde_agent.commands.run_deeponet_strategy_sweep import (
     run_deeponet_strategy_sweep_command,
 )
@@ -573,6 +576,51 @@ def run_fno_evidence_sweep_cmd(
                 space_reduction=space_reduction,
                 train_steps=train_steps,
                 learning_rate=learning_rate,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-official-operator-comparison")
+def run_official_operator_comparison_cmd(
+    source_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    fno_checkpoint_path: str = typer.Option(...),
+    unet_checkpoint_path: str = typer.Option(...),
+    sample_limit: int = typer.Option(8),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(31),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    spectral_modes: int = typer.Option(16),
+    spectral_ridge: float = typer.Option(1e-3),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_official_operator_comparison_command(
+                source_path=source_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                fno_checkpoint_path=fno_checkpoint_path,
+                unet_checkpoint_path=unet_checkpoint_path,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                spectral_modes=spectral_modes,
+                spectral_ridge=spectral_ridge,
                 nu=nu,
                 dt=dt,
                 dx=dx,
