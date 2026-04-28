@@ -114,6 +114,9 @@ from pde_agent.commands.run_spectral_residual_evidence_sweep import (
 from pde_agent.commands.run_spectral_residual_convergence_grid import (
     run_spectral_residual_convergence_grid_command,
 )
+from pde_agent.commands.run_spectral_residual_window_stratification import (
+    run_spectral_residual_window_stratification_command,
+)
 from pde_agent.commands.run_deeponet_strategy_sweep import (
     run_deeponet_strategy_sweep_command,
 )
@@ -721,6 +724,25 @@ def run_spectral_residual_convergence_grid_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-spectral-residual-window-stratification")
+def run_spectral_residual_window_stratification_cmd(
+    audit_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_spectral_residual_window_stratification_command(
+                audit_path=audit_path,
+                output_dir=output_dir,
                 force=force,
             )
         )
