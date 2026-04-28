@@ -203,6 +203,38 @@ policy prioritizes zero failure rate and low score-delta variance before mean
 score, allowing the loop to keep converging without waiting for manual next-step
 selection.
 
+Hermes can also run the promoted strategy-growth chain as a state-driven
+autopilot. Starting from a `NEXT_EXPERIMENT_PLANNED` artifact, it generates and
+audits the experiment config, executes supported candidate grids, routes
+strategy decisions, evaluates promotion, appends the ledger, materializes a skill
+draft, installs it into an isolated root, and registers it for later lookup:
+
+```bash
+uv run --frozen pde-agent hermes-strategy-growth-autopilot \
+  --seed-artifact-path runs/spectral_residual_convergence/variance_intervention_plan.json \
+  --workspace-dir runs/hermes_strategy_growth_autopilot/workspace \
+  --proposal-path runs/spectral_residual_evidence_sweep_001/growth/strategy_proposal.json \
+  --rubric-path runs/spectral_residual_evidence_sweep_001/growth/experiment_rubric.json \
+  --skill-name spectral-residual-window-stratified-burgers \
+  --install-root runs/hermes_strategy_growth_autopilot/installed_skills \
+  --registry-path runs/hermes_strategy_growth_autopilot/strategy_registry.json \
+  --force
+```
+
+Afterward, audit and lookup are separate machine-readable gates:
+
+```bash
+uv run --frozen pde-agent audit-hermes-strategy-growth-autopilot \
+  --autopilot-report-path runs/hermes_strategy_growth_autopilot/workspace/hermes_strategy_growth_autopilot_report.json \
+  --output-path runs/hermes_strategy_growth_autopilot/audit.json
+
+uv run --frozen pde-agent lookup-strategy-skill \
+  --registry-path runs/hermes_strategy_growth_autopilot/strategy_registry.json \
+  --applicable-pde "1D Burgers" \
+  --model-family SpectralResidual \
+  --output-path runs/hermes_strategy_growth_autopilot/strategy_lookup.json
+```
+
 ## Burgers Spectral Viscosity Benchmark
 
 The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain

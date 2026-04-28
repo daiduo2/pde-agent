@@ -4,6 +4,9 @@ import typer
 
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
 from pde_agent.commands.append_strategy_ledger import append_strategy_ledger_command
+from pde_agent.commands.audit_hermes_strategy_growth_autopilot import (
+    audit_hermes_strategy_growth_autopilot_command,
+)
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
@@ -59,12 +62,16 @@ from pde_agent.commands.formalize_external_strategy_candidate import (
 )
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
+from pde_agent.commands.hermes_strategy_growth_autopilot import (
+    hermes_strategy_growth_autopilot_command,
+)
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
 from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
+from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_unet_local import predict_unet_local
@@ -147,6 +154,79 @@ def init_run_cmd(
 ) -> None:
     _ = json_flag
     typer.echo(json.dumps(init_run(run_id=run_id, runs_root=runs_root)))
+
+
+@app.command("hermes-strategy-growth-autopilot")
+def hermes_strategy_growth_autopilot_cmd(
+    seed_artifact_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option(...),
+    proposal_path: str = typer.Option(...),
+    rubric_path: str = typer.Option(...),
+    skill_name: str = typer.Option(...),
+    install_root: str = typer.Option(...),
+    registry_path: str = typer.Option(...),
+    reviewer_id: str = typer.Option("hermes-autopilot"),
+    max_steps: int = typer.Option(32),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            hermes_strategy_growth_autopilot_command(
+                seed_artifact_path=seed_artifact_path,
+                workspace_dir=workspace_dir,
+                proposal_path=proposal_path,
+                rubric_path=rubric_path,
+                skill_name=skill_name,
+                install_root=install_root,
+                registry_path=registry_path,
+                reviewer_id=reviewer_id,
+                max_steps=max_steps,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("lookup-strategy-skill")
+def lookup_strategy_skill_cmd(
+    registry_path: str = typer.Option(...),
+    applicable_pde: str = typer.Option(...),
+    model_family: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    max_results: int = typer.Option(3),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            lookup_strategy_skill_command(
+                registry_path=registry_path,
+                applicable_pde=applicable_pde,
+                model_family=model_family,
+                max_results=max_results,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("audit-hermes-strategy-growth-autopilot")
+def audit_hermes_strategy_growth_autopilot_cmd(
+    autopilot_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            audit_hermes_strategy_growth_autopilot_command(
+                autopilot_report_path=autopilot_report_path,
+                output_path=output_path,
+            )
+        )
+    )
 
 
 @app.command("resolve-config")
