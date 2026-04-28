@@ -159,9 +159,9 @@ parameters into explicit candidate experiment records. It does not run candidate
 The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain
 for the retrieved strategy `burgers_spectral_viscosity_real_hdf5_v0`. It builds
 a persistence baseline from the public Burgers file, runs a bounded DeepONet
-strategy sweep with supervised, physics-residual, and spectral-viscosity proxy
-arms, converts the result into strategy evidence, and routes the next action
-through the existing strategy decision gate.
+strategy sweep plus a bounded UNet strategy sweep with supervised,
+physics-residual, and spectral proxy arms, combines the operator evidence, and
+routes the next action through the existing strategy decision gate.
 
 This is a quantitative agent benchmark, not the final contest model. Failed
 spectral-viscosity evidence is still useful: the report records the negative
@@ -178,6 +178,8 @@ uv run --frozen --extra data pde-agent run-burgers-spectral-viscosity-benchmark 
   --train-steps 4 \
   --hidden-width 8 \
   --latent-dim 4 \
+  --unet-base-channels 8 \
+  --unet-depth 2 \
   --learning-rate 0.01 \
   --seed 5 \
   --spectral-weight 0.05 \
@@ -187,8 +189,8 @@ uv run --frozen --extra data pde-agent run-burgers-spectral-viscosity-benchmark 
 ```
 
 The command writes `burgers_spectral_viscosity_benchmark_report.json` plus the
-underlying baseline, DeepONet sweep, operator evidence, and strategy-decision
-artifacts.
+underlying baseline, DeepONet sweep, UNet sweep, combined operator evidence, and
+strategy-decision artifacts.
 
 ## UNet Strategy Sweep
 

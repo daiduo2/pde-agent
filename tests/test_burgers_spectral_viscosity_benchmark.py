@@ -59,6 +59,10 @@ def test_run_burgers_spectral_viscosity_benchmark_writes_quantitative_report(
     assert report["evaluation_window_count"] == 4
     assert report["metrics"]["baseline_score"] > 0.0
     assert report["metrics"]["candidate_record_count"] > 0
+    assert report["metrics"]["combined_family_count"] == 2
+    assert report["metrics"]["deeponet_record_count"] > 0
+    assert report["metrics"]["unet_record_count"] > 0
+    assert report["metrics"]["best_model_family"] in {"DeepONet", "UNet"}
     assert isinstance(report["metrics"]["mean_score_delta"], float)
     assert isinstance(report["metrics"]["long_window_score_delta"], float)
     assert report["decision"]["decision"] in {
@@ -79,6 +83,8 @@ def test_run_burgers_spectral_viscosity_benchmark_writes_quantitative_report(
         "baseline_score_path",
         "deeponet_strategy_sweep_summary_path",
         "deeponet_evidence_summary_path",
+        "unet_strategy_sweep_summary_path",
+        "unet_evidence_summary_path",
         "strategy_evidence_summary_path",
         "strategy_decision_path",
         "benchmark_report_path",
@@ -236,6 +242,7 @@ def test_run_burgers_spectral_viscosity_benchmark_cli_returns_protocol_payload(
         output_dir / "burgers_spectral_viscosity_benchmark_report.json"
     )
     assert payload["metrics"]["evaluation_window_count"] == 4
+    assert payload["metrics"]["best_model_family"] in {"DeepONet", "UNet"}
     assert (
         payload["metrics"]["proposal_id"]
         == "burgers_spectral_viscosity_real_hdf5_v0"
