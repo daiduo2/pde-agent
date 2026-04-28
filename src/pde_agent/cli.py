@@ -27,6 +27,7 @@ from pde_agent.commands.convert_operator_evidence_summary import (
 )
 from pde_agent.commands.create_skill_candidate import create_skill_candidate_command
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
+from pde_agent.commands.diagnose_unet_rollout import diagnose_unet_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.evaluate_burgers_residual import (
@@ -58,10 +59,12 @@ from pde_agent.commands.generate_experiment_config import generate_experiment_co
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
+from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
 from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.predict_fno_local import predict_fno_local
+from pde_agent.commands.predict_unet_local import predict_unet_local
 from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
@@ -382,6 +385,46 @@ def predict_fno_local_cmd(
     )
 
 
+@app.command("inspect-unet-checkpoint")
+def inspect_unet_checkpoint_cmd(
+    checkpoint_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            inspect_unet_checkpoint(
+                checkpoint_path=checkpoint_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("predict-unet-local")
+def predict_unet_local_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    metadata_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_unet_local(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_path=output_path,
+                metadata_path=metadata_path,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("diagnose-fno-rollout")
 def diagnose_fno_rollout_cmd(
     windows_path: str = typer.Option(...),
@@ -397,6 +440,33 @@ def diagnose_fno_rollout_cmd(
     typer.echo(
         json.dumps(
             diagnose_fno_rollout(
+                windows_path=windows_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-unet-rollout")
+def diagnose_unet_rollout_cmd(
+    windows_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_unet_rollout(
                 windows_path=windows_path,
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,

@@ -241,3 +241,25 @@ Final verification must run the targeted UNet tests and the full suite.
 - The implementation adds no Hermes fixture yet, leaving the next step clean:
   integrate UNet into the Burgers real-HDF5 benchmark or create a dedicated Hermes
   UNet canary after local behavior is stable.
+
+## Follow-up: Official PDEBench UNet Adapter V0
+
+The trainable local UNet sweep is useful for strategy search, but the competition
+also provides an official `burgers_Unet.tar` checkpoint archive. That checkpoint
+should be treated like the existing official FNO adapter rather than as a local
+candidate:
+
+- `inspect-unet-checkpoint` loads the tar archive, selects the first `.pt` member
+  by sorted name, detects the official 1D Burgers UNet schema, and records
+  checkpoint metadata with state hint `UNET_CHECKPOINT_INSPECTED`.
+- `predict-unet-local` reconstructs the checkpoint-defined 1D UNet from tensor
+  shapes. The official ConvBlock convolutions are bias-free Conv1d layers followed
+  by BatchNorm1d, with a 10-channel history input and one-step autoregressive
+  output.
+- `diagnose-unet-rollout` runs that adapter through the same score,
+  rollout-error, and Burgers-physics chain as FNO, writing a single
+  `UNET_ROLLOUT_DIAGNOSED` bundle.
+
+This adapter is evaluation infrastructure, not a tuning step. If the official
+UNet underperforms persistence on reduced local windows, the result should still
+be recorded as evidence rather than hidden behind a fallback model.

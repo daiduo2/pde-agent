@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from pde_agent.core.json_output import success_payload
+from pde_agent.core.unet_rollout_diagnosis import (
+    diagnose_unet_rollout as diagnose_core,
+)
+
+
+def diagnose_unet_rollout(
+    *,
+    windows_path: str,
+    checkpoint_path: str,
+    output_dir: str,
+    nu: float,
+    dt: float,
+    dx: float,
+    force: bool,
+) -> dict[str, object]:
+    summary = diagnose_core(
+        windows_path=Path(windows_path),
+        checkpoint_path=Path(checkpoint_path),
+        output_dir=Path(output_dir),
+        nu=nu,
+        dt=dt,
+        dx=dx,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="diagnose-unet-rollout",
+        state_hint="UNET_ROLLOUT_DIAGNOSED",
+        artifacts={
+            "unet_prediction_npz_path": summary["artifacts"]["prediction_npz_path"],
+            "unet_score_json_path": summary["artifacts"]["score_json_path"],
+            "unet_rollout_error_json_path": summary["artifacts"][
+                "rollout_error_json_path"
+            ],
+            "unet_burgers_physics_json_path": summary["artifacts"][
+                "burgers_physics_json_path"
+            ],
+            "unet_rollout_summary_json_path": summary["summary_path"],
+        },
+        metrics={
+            "adapter_type": summary["model"]["adapter_type"],
+            "competition_like_score_short": summary["score"][
+                "competition_like_score_short"
+            ],
+            "rel_mse": summary["score"]["rel_mse"],
+            "rmse": summary["score"]["rmse"],
+            "dominant_error_pattern": summary["error_diagnosis"][
+                "dominant_error_pattern"
+            ],
+            "physics_issue": summary["physics"]["physics_issue"],
+            "residual_ratio": summary["physics"]["residual_ratio"],
+            "total_variation_ratio": summary["physics"]["total_variation_ratio"],
+        },
+        next_hint="select-pde-hypothesis",
+    )

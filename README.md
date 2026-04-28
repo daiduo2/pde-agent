@@ -219,6 +219,44 @@ uv run --frozen --extra torch pde-agent run-unet-strategy-sweep \
 The command writes `unet_strategy_sweep_summary.json`, a CSV summary, candidate
 artifacts, evaluation reports, and `unet_evidence/evidence_summary.json`.
 
+## Official UNet Backend V0
+
+The official UNet adapter is separate from the trainable local UNet sweep. It
+loads the PDEBench 1D Burgers checkpoint archive `burgers_Unet.tar`, reconstructs
+the checkpoint-defined 1D encoder-decoder UNet, and performs autoregressive
+rollout from the same local window NPZ contract used by FNO and persistence.
+
+```bash
+uv run --frozen --extra torch pde-agent inspect-unet-checkpoint \
+  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
+  --output-path runs/unet_checkpoint_metadata.json
+
+uv run --frozen --extra torch pde-agent predict-unet-local \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
+  --metadata-path runs/unet_checkpoint_metadata.json \
+  --output-path data/derived/local_unet_prediction_task1_smoke.npz \
+  --force
+```
+
+Run the official UNet through the bundled score, rollout-error, and Burgers
+physics diagnostics:
+
+```bash
+uv run --frozen --extra torch pde-agent diagnose-unet-rollout \
+  --windows-path data/derived/local_windows_task1_smoke.npz \
+  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
+  --output-dir runs/unet_rollout_diagnosis \
+  --nu 0.001 \
+  --dt 1.0 \
+  --dx 1.0 \
+  --force
+```
+
+The diagnosis writes `unet_prediction.npz`, `unet_score.json`,
+`unet_rollout_error.json`, `unet_burgers_physics.json`, and
+`unet_rollout_summary.json` with state hint `UNET_ROLLOUT_DIAGNOSED`.
+
 ## FNO Backend V0
 
 FNO support is optional and requires the torch extra. V0 can inspect
