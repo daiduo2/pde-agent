@@ -371,3 +371,123 @@ def test_convert_operator_evidence_summary_normalizes_fno_records_without_strate
     ]
     assert evidence["strategy_ranking"][0]["strategy_id"] == "scheduled_sampling"
     assert evidence["strategy_ranking"][0]["win_count"] == 1
+
+
+def test_convert_operator_evidence_summary_preserves_pi_physics_metrics(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.operator_strategy_evidence import (
+        convert_operator_evidence_summary,
+    )
+
+    records: list[dict[str, object]] = [
+        {
+            "start_index": 0,
+            "train_steps": 4,
+            "experiment_id": "deeponet_physics_a",
+            "training_strategy": "branch_trunk_physics_residual",
+            "strategy_label": "physics_residual_h8",
+            "score": 43.0,
+            "score_delta": 3.0,
+            "rel_mse": 0.12,
+            "rmse": 0.22,
+            "dominant_error_pattern": "long_horizon_drift",
+            "physics_issue": "residual_mismatch",
+            "residual_rmse": 0.08,
+            "mass_drift": 0.01,
+            "energy_growth_ratio": 1.02,
+            "high_frequency_energy_ratio": 0.14,
+        },
+        {
+            "start_index": 1,
+            "train_steps": 4,
+            "experiment_id": "deeponet_physics_b",
+            "training_strategy": "branch_trunk_physics_residual",
+            "strategy_label": "physics_residual_h8",
+            "score": 44.0,
+            "score_delta": 2.0,
+            "rel_mse": 0.1,
+            "rmse": 0.2,
+            "dominant_error_pattern": "long_horizon_drift",
+            "physics_issue": "stable_low_residual",
+            "residual_rmse": 0.04,
+            "mass_drift": 0.02,
+            "energy_growth_ratio": 1.01,
+            "high_frequency_energy_ratio": 0.2,
+        },
+    ]
+    sweep_path = _write_operator_sweep_summary(
+        tmp_path / "deeponet_evidence_summary.json",
+        winner_deltas=[3.0, 2.0],
+        records=records,
+    )
+
+    evidence = convert_operator_evidence_summary(
+        sweep_summary_path=sweep_path,
+        output_path=tmp_path / "strategy_evidence_summary.json",
+        model_family="DeepONet",
+        source_state_hint="DEEPONET_EVIDENCE_SWEEP_COMPLETED",
+        long_window_threshold=31,
+    )
+
+    assert evidence["candidate_records"][0]["physics_metrics"] == {
+        "energy_growth_ratio": 1.02,
+        "high_frequency_energy_ratio": 0.14,
+        "mass_drift": 0.01,
+        "residual_rmse": 0.08,
+    }
+    assert "residual_rmse" not in evidence["candidate_records"][0]["hyperparameters"]
+    assert evidence["physics_metric_summary"] == {
+        "record_count": 2,
+        "mean_residual_rmse": 0.06,
+        "max_high_frequency_energy_ratio": 0.2,
+        "max_mass_drift": 0.02,
+        "max_energy_growth_ratio": 1.02,
+    }
+    assert evidence["strategy_ranking"][0]["mean_residual_rmse"] == 0.06
+    assert evidence["strategy_ranking"][0]["max_high_frequency_energy_ratio"] == 0.2
+
+
+def test_convert_operator_evidence_summary_tolerates_partial_pi_metrics(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.operator_strategy_evidence import (
+        convert_operator_evidence_summary,
+    )
+
+    records: list[dict[str, object]] = [
+        {
+            "start_index": 0,
+            "train_steps": 4,
+            "experiment_id": "deeponet_partial_physics",
+            "training_strategy": "branch_trunk_physics_residual",
+            "score": 43.0,
+            "score_delta": 3.0,
+            "rel_mse": 0.12,
+            "rmse": 0.22,
+            "dominant_error_pattern": "long_horizon_drift",
+            "physics_issue": "residual_mismatch",
+            "residual_rmse": 0.08,
+        }
+    ]
+    sweep_path = _write_operator_sweep_summary(
+        tmp_path / "deeponet_evidence_summary.json",
+        winner_deltas=[3.0],
+        records=records,
+    )
+
+    evidence = convert_operator_evidence_summary(
+        sweep_summary_path=sweep_path,
+        output_path=tmp_path / "strategy_evidence_summary.json",
+        model_family="DeepONet",
+        source_state_hint="DEEPONET_EVIDENCE_SWEEP_COMPLETED",
+        long_window_threshold=31,
+    )
+
+    assert evidence["physics_metric_summary"] == {
+        "record_count": 1,
+        "mean_residual_rmse": 0.08,
+        "max_high_frequency_energy_ratio": None,
+        "max_mass_drift": None,
+        "max_energy_growth_ratio": None,
+    }

@@ -81,6 +81,7 @@ def test_evaluate_fno_candidate_writes_diagnostic_bundle(tmp_path: Path) -> None
         "candidate_score.json",
         "candidate_rollout_error.json",
         "candidate_burgers_physics.json",
+        "candidate_burgers_residual.json",
         "candidate_selected_pde_hypothesis.json",
         "candidate_evaluation_report.json",
     }
@@ -90,6 +91,11 @@ def test_evaluate_fno_candidate_writes_diagnostic_bundle(tmp_path: Path) -> None
         "use_scheduled_sampling_rollout_finetune_001"
     )
     assert report["score"]["competition_like_score_short"] > 0
+    assert report["artifacts"]["burgers_residual_path"] == str(
+        output_dir / "candidate_burgers_residual.json"
+    )
+    assert report["physics_residual"]["residual_rmse"] >= 0.0
+    assert report["physics_residual"]["physics_issue"]
     assert report["baseline_comparison"]["baseline_score"] == 40.0
     assert report["baseline_comparison"]["score_delta"] == (
         report["score"]["competition_like_score_short"] - 40.0
@@ -161,6 +167,8 @@ def test_evaluate_fno_candidate_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["metrics"]["experiment_id"] == (
         "use_scheduled_sampling_rollout_finetune_001"
     )
+    assert payload["metrics"]["residual_rmse"] >= 0.0
+    assert payload["artifacts"]["candidate_burgers_residual_path"]
     assert payload["metrics"]["score_delta"] == (
         payload["metrics"]["competition_like_score_short"] - 40.0
     )

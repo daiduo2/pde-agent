@@ -26,6 +26,10 @@ _CSV_FIELDS = [
     "rmse",
     "dominant_error_pattern",
     "physics_issue",
+    "residual_rmse",
+    "mass_drift",
+    "energy_growth_ratio",
+    "high_frequency_energy_ratio",
 ]
 
 
@@ -104,7 +108,7 @@ def _load_evaluation_report(path: Path) -> dict[str, Any]:
     if not isinstance(inputs, dict):
         raise DeepONetEvidenceSweepError("inputs must be an object when present")
 
-    return {
+    record = {
         "start_index": _require_int(candidate, "start_index", "candidate"),
         "train_steps": _require_int(candidate, "train_steps", "candidate"),
         "experiment_id": _require_string(candidate, "experiment_id", "candidate"),
@@ -135,6 +139,10 @@ def _load_evaluation_report(path: Path) -> dict[str, Any]:
         "physics_issue": _require_string(physics, "physics_issue", "physics"),
         "evaluation_report_path": str(report_file),
     }
+    physics_residual = report.get("physics_residual")
+    if isinstance(physics_residual, dict):
+        record.update(_physics_residual_metrics(physics_residual))
+    return record
 
 
 def _comparison_winners(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -213,7 +221,7 @@ def _write_csv(path: Path, records: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=_CSV_FIELDS)
         writer.writeheader()
         for record in records:
-            writer.writerow({field: record[field] for field in _CSV_FIELDS})
+            writer.writerow({field: record.get(field) for field in _CSV_FIELDS})
 
 
 def _reject_duplicate_experiment_ids(records: list[dict[str, Any]]) -> None:
@@ -284,3 +292,24 @@ def _require_number(report: dict[str, Any], key: str, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise DeepONetEvidenceSweepError(f"{label}.{key} must be numeric")
     return float(value)
+
+
+def _physics_residual_metrics(report: dict[str, Any]) -> dict[str, float]:
+    return {
+        "residual_rmse": _require_number(
+            report,
+            "residual_rmse",
+            "physics_residual",
+        ),
+        "mass_drift": _require_number(report, "mass_drift", "physics_residual"),
+        "energy_growth_ratio": _require_number(
+            report,
+            "energy_growth_ratio",
+            "physics_residual",
+        ),
+        "high_frequency_energy_ratio": _require_number(
+            report,
+            "high_frequency_energy_ratio",
+            "physics_residual",
+        ),
+    }

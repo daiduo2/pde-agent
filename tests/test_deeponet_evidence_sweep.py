@@ -11,38 +11,43 @@ def _write_deeponet_eval(
     score: float,
     score_delta: float,
     strategy: str = "branch_trunk_rollout",
+    residual_rmse: float | None = None,
 ) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "state_hint": "DEEPONET_CANDIDATE_EVALUATED",
-                "inputs": {"forecast_steps": 31},
-                "candidate": {
-                    "experiment_id": experiment_id,
-                    "start_index": start_index,
-                    "train_steps": train_steps,
-                    "training_strategy": strategy,
-                },
-                "baseline_comparison": {
-                    "baseline_score": score - score_delta,
-                    "score_delta": score_delta,
-                    "improved": score_delta > 0,
-                },
-                "score": {
-                    "competition_like_score_short": score,
-                    "rel_mse": 0.2,
-                    "rmse": 0.3,
-                },
-                "error_diagnosis": {
-                    "dominant_error_pattern": "long_horizon_drift"
-                },
-                "physics": {"physics_issue": "inconclusive"},
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "schema_version": 1,
+        "state_hint": "DEEPONET_CANDIDATE_EVALUATED",
+        "inputs": {"forecast_steps": 31},
+        "candidate": {
+            "experiment_id": experiment_id,
+            "start_index": start_index,
+            "train_steps": train_steps,
+            "training_strategy": strategy,
+        },
+        "baseline_comparison": {
+            "baseline_score": score - score_delta,
+            "score_delta": score_delta,
+            "improved": score_delta > 0,
+        },
+        "score": {
+            "competition_like_score_short": score,
+            "rel_mse": 0.2,
+            "rmse": 0.3,
+        },
+        "error_diagnosis": {
+            "dominant_error_pattern": "long_horizon_drift"
+        },
+        "physics": {"physics_issue": "inconclusive"},
+    }
+    if residual_rmse is not None:
+        payload["physics_residual"] = {
+            "physics_issue": "stable_low_residual",
+            "residual_rmse": residual_rmse,
+            "mass_drift": 0.01,
+            "energy_growth_ratio": 1.02,
+            "high_frequency_energy_ratio": 0.12,
+        }
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
@@ -117,6 +122,34 @@ def test_build_deeponet_evidence_sweep_groups_and_selects_winners(
     assert Path(summary["artifacts"]["summary_json_path"]).exists()
     assert Path(summary["artifacts"]["summary_csv_path"]).exists()
     assert json.loads((output_dir / "evidence_summary.json").read_text()) == summary
+
+
+def test_build_deeponet_evidence_sweep_preserves_physics_residual_metrics(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.deeponet_evidence_sweep import build_deeponet_evidence_sweep
+
+    reports = [
+        _write_deeponet_eval(
+            tmp_path / "evals" / "start0_a.json",
+            experiment_id="deeponet_a",
+            start_index=0,
+            train_steps=1,
+            score=43.0,
+            score_delta=3.0,
+            residual_rmse=0.04,
+        )
+    ]
+
+    summary = build_deeponet_evidence_sweep(
+        evaluation_report_paths=reports,
+        output_dir=tmp_path / "deeponet_evidence",
+    )
+
+    assert summary["records"][0]["residual_rmse"] == 0.04
+    assert summary["records"][0]["mass_drift"] == 0.01
+    assert summary["records"][0]["energy_growth_ratio"] == 1.02
+    assert summary["records"][0]["high_frequency_energy_ratio"] == 0.12
 
 
 def test_build_deeponet_evidence_sweep_cli_writes_payload(

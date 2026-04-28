@@ -26,6 +26,9 @@ from pde_agent.commands.create_skill_candidate import create_skill_candidate_com
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.eval_rollout import eval_rollout
+from pde_agent.commands.evaluate_burgers_residual import (
+    evaluate_burgers_residual_command,
+)
 from pde_agent.commands.evaluate_strategy_promotion import (
     evaluate_strategy_promotion_command,
 )
@@ -607,6 +610,31 @@ def check_burgers_physics_local_cmd(
                 prediction_path=prediction_path,
                 target_path=target_path,
                 output_path=output_path,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+            )
+        )
+    )
+
+
+@app.command("evaluate-burgers-residual")
+def evaluate_burgers_residual_cmd(
+    trajectory_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    array_key: str = typer.Option("trajectory"),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            evaluate_burgers_residual_command(
+                trajectory_path=trajectory_path,
+                output_path=output_path,
+                array_key=array_key,
                 nu=nu,
                 dt=dt,
                 dx=dx,

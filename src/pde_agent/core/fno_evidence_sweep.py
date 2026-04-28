@@ -35,6 +35,10 @@ _CSV_FIELDS = [
     "rmse",
     "dominant_error_pattern",
     "physics_issue",
+    "residual_rmse",
+    "mass_drift",
+    "energy_growth_ratio",
+    "high_frequency_energy_ratio",
     "initial_loss",
     "final_loss",
 ]
@@ -275,7 +279,7 @@ def _record(
 ) -> dict[str, Any]:
     parameters = plan["candidate"]["parameters"]
     loss_trace = execution["train"]["loss_trace"]
-    return {
+    record = {
         "start_index": start_index,
         "train_steps": train_steps,
         "experiment_id": plan["candidate"]["experiment_id"],
@@ -294,6 +298,19 @@ def _record(
         "initial_loss": loss_trace[0] if loss_trace else None,
         "final_loss": loss_trace[-1] if loss_trace else None,
     }
+    physics_residual = evaluation.get("physics_residual")
+    if isinstance(physics_residual, dict):
+        record.update(
+            {
+                "residual_rmse": physics_residual["residual_rmse"],
+                "mass_drift": physics_residual["mass_drift"],
+                "energy_growth_ratio": physics_residual["energy_growth_ratio"],
+                "high_frequency_energy_ratio": physics_residual[
+                    "high_frequency_energy_ratio"
+                ],
+            }
+        )
+    return record
 
 
 def _recommendation(
@@ -365,7 +382,8 @@ def _write_csv(path: Path, records: list[dict[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=_CSV_FIELDS)
         writer.writeheader()
-        writer.writerows(records)
+        for record in records:
+            writer.writerow({field: record.get(field) for field in _CSV_FIELDS})
 
 
 def _validate_unique_positive_ints(

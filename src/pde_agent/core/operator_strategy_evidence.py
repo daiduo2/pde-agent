@@ -45,6 +45,16 @@ _RECORD_KEYS_TO_EXCLUDE_FROM_HYPERPARAMETERS = _CANONICAL_RECORD_KEYS | {
     "strategy_label",
 }
 
+_PHYSICS_METRIC_KEYS = (
+    "residual_rmse",
+    "mass_drift",
+    "energy_growth_ratio",
+    "high_frequency_energy_ratio",
+)
+_RECORD_KEYS_TO_EXCLUDE_FROM_HYPERPARAMETERS = (
+    _RECORD_KEYS_TO_EXCLUDE_FROM_HYPERPARAMETERS | set(_PHYSICS_METRIC_KEYS)
+)
+
 
 class OperatorStrategyEvidenceError(ValueError):
     """Raised when an operator sweep summary cannot become strategy-growth evidence."""
@@ -140,6 +150,7 @@ def convert_operator_evidence_summary(
         "operator_evidence_schema": _NORMALIZED_RECORD_SCHEMA,
         "candidate_records": candidate_records,
         "strategy_ranking": strategy_ranking,
+        "physics_metric_summary": _physics_metric_summary(candidate_records),
         "best_strategy_id": (
             strategy_ranking[0]["strategy_id"] if strategy_ranking else None
         ),
@@ -229,6 +240,9 @@ def _candidate_record(
         ),
         "hyperparameters": _hyperparameters(record),
     }
+    physics_metrics = _physics_metrics(record)
+    if physics_metrics:
+        normalized["physics_metrics"] = physics_metrics
     return normalized
 
 
@@ -273,30 +287,37 @@ def _strategy_ranking(
     for strategy_id, items in groups.items():
         win_count = sum(item["experiment_id"] in winner_ids for item in items)
         training_strategies = sorted({item["training_strategy"] for item in items})
-        ranking.append(
-            {
-                "strategy_id": strategy_id,
-                "training_strategy": (
-                    training_strategies[0]
-                    if len(training_strategies) == 1
-                    else "mixed"
-                ),
-                "record_count": len(items),
-                "win_count": win_count,
-                "win_rate": win_count / len(items),
-                "mean_score": float(mean(item["score"] for item in items)),
-                "mean_score_delta": float(
-                    mean(item["score_delta"] for item in items)
-                ),
-                "best_score": max(item["score"] for item in items),
-                "failure_rate": sum(item["score_delta"] < 0 for item in items)
-                / len(items),
-                "dominant_error_patterns": sorted(
-                    {item["dominant_error_pattern"] for item in items}
-                ),
-                "physics_issues": sorted({item["physics_issue"] for item in items}),
-            }
-        )
+        row = {
+            "strategy_id": strategy_id,
+            "training_strategy": (
+                training_strategies[0]
+                if len(training_strategies) == 1
+                else "mixed"
+            ),
+            "record_count": len(items),
+            "win_count": win_count,
+            "win_rate": win_count / len(items),
+            "mean_score": float(mean(item["score"] for item in items)),
+            "mean_score_delta": float(mean(item["score_delta"] for item in items)),
+            "best_score": max(item["score"] for item in items),
+            "failure_rate": sum(item["score_delta"] < 0 for item in items)
+            / len(items),
+            "dominant_error_patterns": sorted(
+                {item["dominant_error_pattern"] for item in items}
+            ),
+            "physics_issues": sorted({item["physics_issue"] for item in items}),
+        }
+        metric_summary = _physics_metric_summary(items)
+        if metric_summary["record_count"]:
+            row.update(
+                {
+                    "mean_residual_rmse": metric_summary["mean_residual_rmse"],
+                    "max_high_frequency_energy_ratio": metric_summary[
+                        "max_high_frequency_energy_ratio"
+                    ],
+                }
+            )
+        ranking.append(row)
     ranking.sort(
         key=lambda item: (
             -item["win_count"],
@@ -337,6 +358,47 @@ def _optional_numeric(
     if not math.isfinite(number):
         raise OperatorStrategyEvidenceError(f"{key} must be finite")
     return number
+
+
+def _physics_metrics(record: dict[str, Any]) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for key in _PHYSICS_METRIC_KEYS:
+        if key in record:
+            metrics[key] = _numeric(record, key)
+    return metrics
+
+
+def _physics_metric_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = [
+        record["physics_metrics"]
+        for record in records
+        if isinstance(record.get("physics_metrics"), dict)
+    ]
+    if not metrics:
+        return {
+            "record_count": 0,
+            "mean_residual_rmse": None,
+            "max_high_frequency_energy_ratio": None,
+            "max_mass_drift": None,
+            "max_energy_growth_ratio": None,
+        }
+    residual_rmse = _metric_values(metrics, "residual_rmse")
+    high_frequency = _metric_values(metrics, "high_frequency_energy_ratio")
+    mass_drift = _metric_values(metrics, "mass_drift")
+    energy_growth = _metric_values(metrics, "energy_growth_ratio")
+    return {
+        "record_count": len(metrics),
+        "mean_residual_rmse": float(mean(residual_rmse)) if residual_rmse else None,
+        "max_high_frequency_energy_ratio": max(high_frequency)
+        if high_frequency
+        else None,
+        "max_mass_drift": max(mass_drift) if mass_drift else None,
+        "max_energy_growth_ratio": max(energy_growth) if energy_growth else None,
+    }
+
+
+def _metric_values(metrics: list[dict[str, float]], key: str) -> list[float]:
+    return [item[key] for item in metrics if key in item]
 
 
 def _nonempty_text(value: str, name: str) -> str:

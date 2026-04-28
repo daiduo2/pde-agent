@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pde_agent.core.burgers_physics_local import check_burgers_physics_npz
+from pde_agent.core.burgers_residual_evaluator import evaluate_burgers_residual_file
 from pde_agent.core.local_scoring import score_prediction_npz
 from pde_agent.core.pde_hypothesis import select_pde_hypothesis_from_files
 from pde_agent.core.rollout_error_diagnosis import diagnose_rollout_error_npz
@@ -69,6 +70,14 @@ def evaluate_deeponet_candidate(
             dt=dt,
             dx=dx,
         )
+        physics_residual = evaluate_burgers_residual_file(
+            trajectory_path=prediction_file,
+            output_path=paths["burgers_residual_path"],
+            array_key="prediction",
+            nu=nu,
+            dt=dt,
+            dx=dx,
+        )
         hypothesis = select_pde_hypothesis_from_files(
             score_path=paths["score_path"],
             error_diagnosis_path=paths["rollout_error_path"],
@@ -85,6 +94,7 @@ def evaluate_deeponet_candidate(
             score=score,
             error=error,
             physics=physics,
+            physics_residual=physics_residual,
             hypothesis=hypothesis,
             baseline_score_file=baseline_score_file,
         )
@@ -103,6 +113,7 @@ def _artifact_paths(output_dir: Path) -> dict[str, Path]:
         "score_path": output_dir / "candidate_score.json",
         "rollout_error_path": output_dir / "candidate_rollout_error.json",
         "burgers_physics_path": output_dir / "candidate_burgers_physics.json",
+        "burgers_residual_path": output_dir / "candidate_burgers_residual.json",
         "selected_hypothesis_path": output_dir
         / "candidate_selected_pde_hypothesis.json",
         "evaluation_report_path": output_dir / "candidate_evaluation_report.json",
@@ -144,6 +155,7 @@ def _build_report(
     score: dict[str, Any],
     error: dict[str, Any],
     physics: dict[str, Any],
+    physics_residual: dict[str, Any],
     hypothesis: dict[str, Any],
     baseline_score_file: Path | None,
 ) -> dict[str, Any]:
@@ -182,6 +194,15 @@ def _build_report(
             "residual_ratio": physics["residual_ratio"],
             "total_variation_ratio": physics["total_variation_ratio"],
             "gradient_error_ratio": physics["gradient_error_ratio"],
+        },
+        "physics_residual": {
+            "physics_issue": physics_residual["physics_issue"],
+            "residual_rmse": physics_residual["residual_rmse"],
+            "mass_drift": physics_residual["mass_drift"],
+            "energy_growth_ratio": physics_residual["energy_growth_ratio"],
+            "high_frequency_energy_ratio": physics_residual[
+                "high_frequency_energy_ratio"
+            ],
         },
         "selected_hypothesis": {
             "state_hint": hypothesis["state_hint"],

@@ -40,6 +40,9 @@ def evaluate_deeponet_candidate_command(
             "candidate_burgers_physics_path": report["artifacts"][
                 "burgers_physics_path"
             ],
+            "candidate_burgers_residual_path": report["artifacts"][
+                "burgers_residual_path"
+            ],
             "candidate_selected_hypothesis_path": report["artifacts"][
                 "selected_hypothesis_path"
             ],
@@ -61,6 +64,10 @@ def evaluate_deeponet_candidate_command(
                 "dominant_error_pattern"
             ],
             "physics_issue": report["physics"]["physics_issue"],
+            "residual_rmse": report["physics_residual"]["residual_rmse"],
+            "high_frequency_energy_ratio": report["physics_residual"][
+                "high_frequency_energy_ratio"
+            ],
             "selected_hypothesis": report["selected_hypothesis"][
                 "selected_hypothesis"
             ],

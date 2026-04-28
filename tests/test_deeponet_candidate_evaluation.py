@@ -86,6 +86,7 @@ def test_evaluate_deeponet_candidate_writes_evidence_ready_report(
         "candidate_score.json",
         "candidate_rollout_error.json",
         "candidate_burgers_physics.json",
+        "candidate_burgers_residual.json",
         "candidate_selected_pde_hypothesis.json",
         "candidate_evaluation_report.json",
     }
@@ -99,6 +100,11 @@ def test_evaluate_deeponet_candidate_writes_evidence_ready_report(
     }
     assert report["inputs"]["forecast_steps"] == 4
     assert report["score"]["competition_like_score_short"] > 0
+    assert report["artifacts"]["burgers_residual_path"] == str(
+        output_dir / "candidate_burgers_residual.json"
+    )
+    assert report["physics_residual"]["residual_rmse"] >= 0.0
+    assert report["physics_residual"]["physics_issue"]
     assert report["baseline_comparison"]["baseline_score"] == 40.0
     assert report["baseline_comparison"]["score_delta"] == (
         report["score"]["competition_like_score_short"] - 40.0
@@ -149,6 +155,8 @@ def test_evaluate_deeponet_candidate_cli_writes_payload(tmp_path: Path) -> None:
     assert payload["state_hint"] == "DEEPONET_CANDIDATE_EVALUATED"
     assert payload["metrics"]["experiment_id"] == "deeponet_branch_trunk_rollout_001"
     assert payload["metrics"]["training_strategy"] == "branch_trunk_rollout"
+    assert payload["metrics"]["residual_rmse"] >= 0.0
+    assert payload["artifacts"]["candidate_burgers_residual_path"]
     assert payload["metrics"]["score_delta"] == (
         payload["metrics"]["competition_like_score_short"] - 40.0
     )
