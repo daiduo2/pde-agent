@@ -50,6 +50,7 @@ from pde_agent.commands.generate_experiment_config import generate_experiment_co
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
+from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.predict_fno_local import predict_fno_local
@@ -71,6 +72,7 @@ from pde_agent.commands.recommend_strategy_next_action import (
     recommend_strategy_next_action_command,
 )
 from pde_agent.commands.review_skill_candidate import review_skill_candidate_command
+from pde_agent.commands.review_skill_draft import review_skill_draft_command
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
 from pde_agent.commands.run_fno_iteration_dryrun import (
@@ -853,6 +855,50 @@ def materialize_skill_draft_cmd(
                 skill_candidate_path=skill_candidate_path,
                 skill_review_path=skill_review_path,
                 draft_root=draft_root,
+            )
+        )
+    )
+
+
+@app.command("review-skill-draft")
+def review_skill_draft_cmd(
+    skill_draft_manifest_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    reviewer_id: str = typer.Option(...),
+    decision: str = typer.Option(...),
+    review_notes: str = typer.Option(...),
+    reason_codes: list[str] = typer.Option(..., "--reason-code"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            review_skill_draft_command(
+                skill_draft_manifest_path=skill_draft_manifest_path,
+                output_path=output_path,
+                reviewer_id=reviewer_id,
+                decision=decision,
+                review_notes=review_notes,
+                reason_codes=reason_codes,
+            )
+        )
+    )
+
+
+@app.command("install-skill-draft")
+def install_skill_draft_cmd(
+    skill_draft_manifest_path: str = typer.Option(...),
+    skill_draft_review_path: str = typer.Option(...),
+    install_root: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            install_skill_draft_command(
+                skill_draft_manifest_path=skill_draft_manifest_path,
+                skill_draft_review_path=skill_draft_review_path,
+                install_root=install_root,
             )
         )
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,10 @@ LEDGER_STATE_HINT = "STRATEGY_LEDGER_APPENDED"
 SKILL_CANDIDATE_STATE_HINT = "SKILL_CANDIDATE_CREATED"
 SKILL_REVIEW_STATE_HINT = "SKILL_CANDIDATE_REVIEWED"
 SKILL_DRAFT_STATE_HINT = "SKILL_DRAFT_MATERIALIZED"
+SKILL_DRAFT_REVIEW_STATE_HINT = "SKILL_DRAFT_REVIEWED"
+SKILL_INSTALL_STATE_HINT = "SKILL_INSTALLED"
 VALID_SOURCE_TYPES = {"local_library", "external_retrieval", "agent_hypothesis"}
+VALID_SKILL_DRAFT_DECISIONS = {"install", "reject", "revise"}
 REQUIRED_PROMOTION_METRICS = [
     "evaluation_window_count",
     "mean_score_delta",
@@ -432,6 +436,99 @@ def materialize_skill_draft(
     }
     _write_json(manifest_path, manifest)
     return manifest
+
+
+def review_skill_draft(
+    *,
+    skill_draft_manifest_path: Path,
+    output_path: Path,
+    reviewer_id: str,
+    decision: str,
+    review_notes: str,
+    reason_codes: list[str],
+) -> dict[str, Any]:
+    manifest_file = Path(skill_draft_manifest_path)
+    output_file = Path(output_path)
+    manifest = _read_json(manifest_file)
+    if manifest.get("state_hint") != SKILL_DRAFT_STATE_HINT:
+        raise StrategyGrowthError("skill draft manifest has invalid state_hint")
+    _require_nonempty("reviewer_id", reviewer_id)
+    _require_nonempty("review_notes", review_notes)
+    _require_nonempty_list("reason_codes", reason_codes)
+    if decision not in VALID_SKILL_DRAFT_DECISIONS:
+        raise StrategyGrowthError(f"unsupported skill draft decision: {decision}")
+    if output_file.exists():
+        raise StrategyGrowthError(f"output file already exists: {output_file}")
+
+    approved = decision == "install"
+    review: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": SKILL_DRAFT_REVIEW_STATE_HINT,
+        "strategy_id": manifest["strategy_id"],
+        "skill_name": manifest["skill_name"],
+        "skill_draft_manifest_path": str(manifest_file),
+        "skill_draft_review_path": str(output_file),
+        "reviewer_id": reviewer_id,
+        "decision": decision,
+        "approved_for_install": approved,
+        "review_notes": review_notes,
+        "reason_codes": reason_codes,
+        "next_command": "install-skill-draft"
+        if approved
+        else f"{decision}-skill-draft",
+    }
+    _write_json(output_file, review)
+    return review
+
+
+def install_skill_draft(
+    *,
+    skill_draft_manifest_path: Path,
+    skill_draft_review_path: Path,
+    install_root: Path,
+) -> dict[str, Any]:
+    manifest_file = Path(skill_draft_manifest_path)
+    review_file = Path(skill_draft_review_path)
+    root = Path(install_root)
+    manifest = _read_json(manifest_file)
+    review = _read_json(review_file)
+    if manifest.get("state_hint") != SKILL_DRAFT_STATE_HINT:
+        raise StrategyGrowthError("skill draft manifest has invalid state_hint")
+    if review.get("state_hint") != SKILL_DRAFT_REVIEW_STATE_HINT:
+        raise StrategyGrowthError("skill draft review has invalid state_hint")
+    if manifest.get("strategy_id") != review.get("strategy_id"):
+        raise StrategyGrowthError("strategy_id mismatch across skill draft artifacts")
+    if manifest.get("skill_name") != review.get("skill_name"):
+        raise StrategyGrowthError("skill_name mismatch across skill draft artifacts")
+    if not review.get("approved_for_install"):
+        raise StrategyGrowthError("skill draft review is not approved for installation")
+
+    source_skill_md = Path(manifest["skill_md_path"])
+    if not source_skill_md.is_file():
+        raise StrategyGrowthError(f"skill draft markdown not found: {source_skill_md}")
+    install_dir = root / manifest["skill_name"]
+    installed_skill_md = install_dir / "SKILL.md"
+    install_manifest_path = install_dir / "skill_install_manifest.json"
+    if installed_skill_md.exists() or install_manifest_path.exists():
+        raise StrategyGrowthError(f"installed skill already exists: {install_dir}")
+
+    install_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_skill_md, installed_skill_md)
+    install_manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "state_hint": SKILL_INSTALL_STATE_HINT,
+        "strategy_id": manifest["strategy_id"],
+        "skill_name": manifest["skill_name"],
+        "installed_skill_dir": str(install_dir),
+        "installed_skill_md_path": str(installed_skill_md),
+        "skill_install_manifest_path": str(install_manifest_path),
+        "skill_draft_manifest_path": str(manifest_file),
+        "skill_draft_review_path": str(review_file),
+        "review_decision": review["decision"],
+        "next_command": "skill-installed",
+    }
+    _write_json(install_manifest_path, install_manifest)
+    return install_manifest
 
 
 def _require_nonempty(name: str, value: str) -> None:

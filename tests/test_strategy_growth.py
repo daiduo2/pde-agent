@@ -724,3 +724,204 @@ def test_materialize_skill_draft_cli_returns_protocol_payload(tmp_path: Path) ->
     assert payload["metrics"]["skill_name"] == "pde-fno-spectral-filter"
     assert Path(payload["artifacts"]["skill_md_path"]).exists()
     assert payload["next_hint"] == "human-review-skill-draft"
+
+
+def _write_skill_draft(tmp_path: Path) -> Path:
+    from pde_agent.core.strategy_growth import (
+        materialize_skill_draft,
+        review_skill_candidate,
+    )
+
+    candidate_path = _write_skill_candidate(tmp_path)
+    candidate_review_path = tmp_path / "skill_review.json"
+    review_skill_candidate(
+        skill_candidate_path=candidate_path,
+        output_path=candidate_review_path,
+        reviewer_id="codex-local-reviewer",
+    )
+    manifest = materialize_skill_draft(
+        skill_candidate_path=candidate_path,
+        skill_review_path=candidate_review_path,
+        draft_root=tmp_path / "generated_skills",
+    )
+    return Path(manifest["skill_draft_manifest_path"])
+
+
+def test_review_skill_draft_allows_install_decision(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import review_skill_draft
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+    draft_review_path = tmp_path / "skill_draft_review.json"
+
+    review = review_skill_draft(
+        skill_draft_manifest_path=draft_manifest_path,
+        output_path=draft_review_path,
+        reviewer_id="codex-human-gate",
+        decision="install",
+        review_notes="Draft is scoped, evidence-linked, and safe to install.",
+        reason_codes=["draft_review_passed"],
+    )
+
+    assert draft_review_path.exists()
+    assert review == json.loads(draft_review_path.read_text(encoding="utf-8"))
+    assert review["schema_version"] == 1
+    assert review["state_hint"] == "SKILL_DRAFT_REVIEWED"
+    assert review["strategy_id"] == "fno_spectral_filter_v0"
+    assert review["skill_name"] == "pde-fno-spectral-filter"
+    assert review["decision"] == "install"
+    assert review["approved_for_install"] is True
+    assert review["reason_codes"] == ["draft_review_passed"]
+    assert review["next_command"] == "install-skill-draft"
+
+
+def test_review_skill_draft_rejects_invalid_decision(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import StrategyGrowthError, review_skill_draft
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+
+    with pytest.raises(StrategyGrowthError, match="unsupported skill draft decision"):
+        review_skill_draft(
+            skill_draft_manifest_path=draft_manifest_path,
+            output_path=tmp_path / "skill_draft_review.json",
+            reviewer_id="codex-human-gate",
+            decision="auto_install",
+            review_notes="Invalid decision should be rejected.",
+            reason_codes=["invalid"],
+        )
+
+
+def test_review_skill_draft_cli_returns_protocol_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+    draft_review_path = tmp_path / "skill_draft_review.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "review-skill-draft",
+            "--skill-draft-manifest-path",
+            str(draft_manifest_path),
+            "--output-path",
+            str(draft_review_path),
+            "--reviewer-id",
+            "codex-human-gate",
+            "--decision",
+            "install",
+            "--review-notes",
+            "Draft is scoped, evidence-linked, and safe to install.",
+            "--reason-code",
+            "draft_review_passed",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "review-skill-draft"
+    assert payload["state_hint"] == "SKILL_DRAFT_REVIEWED"
+    assert payload["artifacts"]["skill_draft_review_path"] == str(draft_review_path)
+    assert payload["metrics"]["decision"] == "install"
+    assert payload["metrics"]["approved_for_install"] is True
+    assert payload["next_hint"] == "install-skill-draft"
+
+
+def test_install_skill_draft_copies_skill_and_writes_manifest(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import install_skill_draft, review_skill_draft
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+    draft_review_path = tmp_path / "skill_draft_review.json"
+    review_skill_draft(
+        skill_draft_manifest_path=draft_manifest_path,
+        output_path=draft_review_path,
+        reviewer_id="codex-human-gate",
+        decision="install",
+        review_notes="Draft is scoped, evidence-linked, and safe to install.",
+        reason_codes=["draft_review_passed"],
+    )
+
+    install_manifest = install_skill_draft(
+        skill_draft_manifest_path=draft_manifest_path,
+        skill_draft_review_path=draft_review_path,
+        install_root=tmp_path / "installed_skills",
+    )
+
+    installed_skill_md = Path(install_manifest["installed_skill_md_path"])
+    install_manifest_path = Path(install_manifest["skill_install_manifest_path"])
+    assert installed_skill_md.exists()
+    assert install_manifest_path.exists()
+    assert install_manifest == json.loads(
+        install_manifest_path.read_text(encoding="utf-8")
+    )
+    assert install_manifest["state_hint"] == "SKILL_INSTALLED"
+    assert install_manifest["skill_name"] == "pde-fno-spectral-filter"
+    assert install_manifest["review_decision"] == "install"
+    assert "name: pde-fno-spectral-filter" in installed_skill_md.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_install_skill_draft_rejects_revise_review(tmp_path: Path) -> None:
+    from pde_agent.core.strategy_growth import (
+        StrategyGrowthError,
+        install_skill_draft,
+        review_skill_draft,
+    )
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+    draft_review_path = tmp_path / "skill_draft_review.json"
+    review_skill_draft(
+        skill_draft_manifest_path=draft_manifest_path,
+        output_path=draft_review_path,
+        reviewer_id="codex-human-gate",
+        decision="revise",
+        review_notes="Procedure is too broad; revise before install.",
+        reason_codes=["procedure_too_broad"],
+    )
+
+    with pytest.raises(StrategyGrowthError, match="not approved for installation"):
+        install_skill_draft(
+            skill_draft_manifest_path=draft_manifest_path,
+            skill_draft_review_path=draft_review_path,
+            install_root=tmp_path / "installed_skills",
+        )
+
+
+def test_install_skill_draft_cli_returns_protocol_payload(tmp_path: Path) -> None:
+    from pde_agent.cli import app
+    from pde_agent.core.strategy_growth import review_skill_draft
+    from typer.testing import CliRunner
+
+    draft_manifest_path = _write_skill_draft(tmp_path)
+    draft_review_path = tmp_path / "skill_draft_review.json"
+    review_skill_draft(
+        skill_draft_manifest_path=draft_manifest_path,
+        output_path=draft_review_path,
+        reviewer_id="codex-human-gate",
+        decision="install",
+        review_notes="Draft is scoped, evidence-linked, and safe to install.",
+        reason_codes=["draft_review_passed"],
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "install-skill-draft",
+            "--skill-draft-manifest-path",
+            str(draft_manifest_path),
+            "--skill-draft-review-path",
+            str(draft_review_path),
+            "--install-root",
+            str(tmp_path / "installed_skills"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["command"] == "install-skill-draft"
+    assert payload["state_hint"] == "SKILL_INSTALLED"
+    assert payload["metrics"]["skill_name"] == "pde-fno-spectral-filter"
+    assert Path(payload["artifacts"]["installed_skill_md_path"]).exists()
+    assert payload["next_hint"] == "skill-installed"
