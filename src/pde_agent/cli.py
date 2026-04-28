@@ -78,6 +78,9 @@ from pde_agent.commands.review_skill_candidate import review_skill_candidate_com
 from pde_agent.commands.review_skill_draft import review_skill_draft_command
 from pde_agent.commands.record_timing import record_timing
 from pde_agent.commands.resolve_config import resolve_config
+from pde_agent.commands.run_real_hdf5_baseline_smoke import (
+    run_real_hdf5_baseline_smoke_command,
+)
 from pde_agent.commands.run_fno_iteration_dryrun import (
     run_fno_iteration_dryrun_command,
 )
@@ -638,6 +641,45 @@ def evaluate_burgers_residual_cmd(
                 nu=nu,
                 dt=dt,
                 dx=dx,
+            )
+        )
+    )
+
+
+@app.command("run-real-hdf5-baseline-smoke")
+def run_real_hdf5_baseline_smoke_cmd(
+    source_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    start_index: int = typer.Option(0),
+    sample_limit: int = typer.Option(1),
+    context_steps: int = typer.Option(10),
+    forecast_steps: int = typer.Option(31),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    nu: float = typer.Option(0.001),
+    dt: float = typer.Option(1.0),
+    dx: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_real_hdf5_baseline_smoke_command(
+                source_path=source_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                start_index=start_index,
+                sample_limit=sample_limit,
+                context_steps=context_steps,
+                forecast_steps=forecast_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                nu=nu,
+                dt=dt,
+                dx=dx,
+                force=force,
             )
         )
     )
