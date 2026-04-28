@@ -1,0 +1,50 @@
+run_id: {{RUN_ID}}
+run_root: {{OUTPUT_DIR}}
+working_directory: {{FIXTURE_ROOT}}
+command_prefix: cd {{REPO_ROOT}} && uv run --frozen --extra data pde-agent
+
+current_state: TASK_PARSED
+min_evaluation_windows: {{MIN_EVALUATION_WINDOWS}}
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - run_burgers_spectral_viscosity_benchmark
+
+forbidden_actions:
+  - patch_code
+  - patch_input_data
+  - implicit_download
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+  - manually_inspect_generated_artifacts
+  - cleanup_artifacts
+  - move_artifacts
+  - retry_failed_command_with_unlisted_command
+  - call_run_real_hdf5_baseline_smoke
+  - call_run_deeponet_strategy_sweep
+  - call_convert_operator_evidence_summary
+  - call_recommend_strategy_next_action
+
+required_reads:
+  - {{FIXTURE_ROOT}}/run_state.yaml
+  - {{FIXTURE_ROOT}}/bootstrap_prompt.md
+  - {{FIXTURE_ROOT}}/task_spec.json
+
+required_artifacts:
+  - {{OUTPUT_DIR}}/burgers_spectral_viscosity_benchmark_report.json
+  - {{OUTPUT_DIR}}/strategy_decision.json
+  - {{OUTPUT_DIR}}/strategy_evidence_summary.json
+  - {{OUTPUT_DIR}}/baseline/real_hdf5_baseline_smoke_summary.json
+  - {{OUTPUT_DIR}}/strategy_sweep/deeponet_strategy_sweep_summary.json
+
+allowed_commands:
+  - name: run_burgers_spectral_viscosity_benchmark
+    command: cd {{REPO_ROOT}} && uv run --frozen --extra data pde-agent run-burgers-spectral-viscosity-benchmark --source-path {{SOURCE_PATH}} --output-dir {{OUTPUT_DIR}} --dataset-key {{DATASET_KEY}} --sample-limit {{SAMPLE_LIMIT}} --min-evaluation-windows {{MIN_EVALUATION_WINDOWS}} --context-steps 10 --forecast-steps {{FORECAST_STEPS}} --time-reduction 5 --space-reduction 4 --train-steps 2 --hidden-width 8 --latent-dim 4 --learning-rate 0.01 --seed 5 --spectral-weight 0.05 --spectral-weight 0.1 --physics-weight 0.005 --proposal-id burgers_spectral_viscosity_real_hdf5_v0 --nu 0.001 --dt 1.0 --dx 1.0 --force
+
+success_transition:
+  on_complete: BURGERS_SPECTRAL_VISCOSITY_BENCHMARK_COMPLETED

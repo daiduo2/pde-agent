@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "task_id": "hermes_burgers_spectral_viscosity_benchmark",
+  "title": "Hermes Burgers Spectral Viscosity Benchmark",
+  "purpose": "Run the real-HDF5 Burgers spectral-viscosity benchmark through a constrained one-command protocol.",
+  "success_state_hint": "BURGERS_SPECTRAL_VISCOSITY_BENCHMARK_COMPLETED",
+  "notes": [
+    "Negative spectral-viscosity evidence is accepted when the benchmark report and strategy decision are valid.",
+    "Hermes must not inspect generated artifacts manually; the audit reads artifacts after the run."
+  ]
+}
