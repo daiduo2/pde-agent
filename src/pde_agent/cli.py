@@ -73,6 +73,9 @@ from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
     plan_next_experiment_from_fno_summary_command,
 )
+from pde_agent.commands.plan_next_spectral_residual_experiment import (
+    plan_next_spectral_residual_experiment_command,
+)
 from pde_agent.commands.prepare_candidate_execution import (
     prepare_candidate_execution,
 )
@@ -1471,6 +1474,27 @@ def audit_experiment_config_cmd(
                 config_path=config_path,
                 output_path=output_path,
                 plan_path=plan_path,
+            )
+        )
+    )
+
+
+@app.command("plan-next-spectral-residual-experiment")
+def plan_next_spectral_residual_experiment_cmd(
+    evidence_summary_path: str = typer.Option(...),
+    promotion_report_path: str = typer.Option(...),
+    ledger_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            plan_next_spectral_residual_experiment_command(
+                evidence_summary_path=evidence_summary_path,
+                promotion_report_path=promotion_report_path,
+                ledger_path=ledger_path,
+                output_path=output_path,
             )
         )
     )

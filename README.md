@@ -187,6 +187,22 @@ or `evaluate-strategy-promotion` directly. This sweep uses the same windows for
 fitting and scoring; it is a stability gate for a local baseline, not hidden-test
 evidence.
 
+When promotion returns `revise`, let the agent plan the next bounded sweep from
+the evidence, promotion report, and ledger row:
+
+```bash
+uv run --frozen pde-agent plan-next-spectral-residual-experiment \
+  --evidence-summary-path runs/spectral_residual_evidence_sweep_001/spectral_residual_evidence_summary.json \
+  --promotion-report-path runs/spectral_residual_evidence_sweep_001/growth/promotion_report.json \
+  --ledger-path runs/spectral_residual_evidence_sweep_001/growth/strategy_ledger.jsonl \
+  --output-path runs/spectral_residual_evidence_sweep_001/growth/next_spectral_residual_experiment_plan.json
+```
+
+The plan expands start indices and proposes a `modes`/`ridge` grid. Its ranking
+policy prioritizes zero failure rate and low score-delta variance before mean
+score, allowing the loop to keep converging without waiting for manual next-step
+selection.
+
 ## Burgers Spectral Viscosity Benchmark
 
 The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain

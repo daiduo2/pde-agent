@@ -83,6 +83,7 @@ def audit_experiment_config(
     requires_training = budget.get("requires_training")
     max_experiment_count = budget.get("max_experiment_count")
     candidate_grid = intervention_plan.get("candidate_parameters")
+    fixed_parameters = intervention_plan.get("fixed_parameters")
     forbidden_actions = intervention_plan.get("forbidden_actions")
     required_next_artifacts = plan.get("required_next_artifacts")
 
@@ -156,6 +157,7 @@ def audit_experiment_config(
             change_scope=change_scope,
             requires_training=requires_training,
             candidate_grid=candidate_grid,
+            fixed_parameters=fixed_parameters,
             forbidden_actions=forbidden_actions,
             required_next_artifacts=required_next_artifacts,
         )
@@ -187,6 +189,7 @@ def _audit_candidate(
     change_scope: Any,
     requires_training: Any,
     candidate_grid: dict[Any, Any],
+    fixed_parameters: Any,
     forbidden_actions: list[Any],
     required_next_artifacts: list[Any],
 ) -> None:
@@ -229,6 +232,14 @@ def _audit_candidate(
         actual=candidate.get("forbidden_actions"),
         expected=forbidden_actions,
     )
+    if fixed_parameters is not None:
+        _check_equal(
+            issues,
+            code="candidate_fixed_parameters_mismatch",
+            path=f"{path}.fixed_parameters",
+            actual=candidate.get("fixed_parameters"),
+            expected=fixed_parameters,
+        )
 
     parameters = candidate.get("parameters")
     if not isinstance(parameters, dict):

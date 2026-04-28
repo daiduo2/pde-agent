@@ -58,6 +58,11 @@ def generate_experiment_config(
         "candidate_parameters",
         "intervention_plan",
     )
+    fixed_parameters = _optional_object(
+        intervention_plan,
+        "fixed_parameters",
+        "intervention_plan",
+    )
     budget = _require_object(plan, "budget", "next experiment plan")
     max_experiment_count = _require_positive_int(
         budget, "max_experiment_count", "budget"
@@ -81,6 +86,7 @@ def generate_experiment_config(
         change_scope=change_scope,
         requires_training=requires_training,
         candidate_parameters=candidate_parameters,
+        fixed_parameters=fixed_parameters,
         max_experiment_count=max_experiment_count,
         required_next_artifacts=required_next_artifacts,
         forbidden_actions=forbidden_actions,
@@ -114,6 +120,7 @@ def _expand_candidates(
     change_scope: str,
     requires_training: bool,
     candidate_parameters: dict[str, Any],
+    fixed_parameters: dict[str, Any] | None,
     max_experiment_count: int,
     required_next_artifacts: list[Any],
     forbidden_actions: list[Any],
@@ -126,17 +133,18 @@ def _expand_candidates(
         if len(candidates) >= max_experiment_count:
             break
         parameters = dict(zip(keys, values, strict=True))
-        candidates.append(
-            {
-                "experiment_id": f"{selected_intervention}_{index:03d}",
-                "intervention": selected_intervention,
-                "change_scope": change_scope,
-                "requires_training": requires_training,
-                "parameters": parameters,
-                "expected_artifacts": deepcopy(required_next_artifacts),
-                "forbidden_actions": deepcopy(forbidden_actions),
-            }
-        )
+        candidate = {
+            "experiment_id": f"{selected_intervention}_{index:03d}",
+            "intervention": selected_intervention,
+            "change_scope": change_scope,
+            "requires_training": requires_training,
+            "parameters": parameters,
+            "expected_artifacts": deepcopy(required_next_artifacts),
+            "forbidden_actions": deepcopy(forbidden_actions),
+        }
+        if fixed_parameters is not None:
+            candidate["fixed_parameters"] = deepcopy(fixed_parameters)
+        candidates.append(candidate)
     return candidates
 
 
@@ -191,6 +199,17 @@ def _require_object(data: dict[str, Any], field: str, label: str) -> dict[str, A
     value = data.get(field)
     if not isinstance(value, dict):
         raise ExperimentConfigError(f"{label} must include object field '{field}'")
+    return value
+
+
+def _optional_object(
+    data: dict[str, Any], field: str, label: str
+) -> dict[str, Any] | None:
+    if field not in data:
+        return None
+    value = data[field]
+    if not isinstance(value, dict):
+        raise ExperimentConfigError(f"{label} field '{field}' must be an object")
     return value
 
 
