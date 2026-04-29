@@ -13,6 +13,9 @@ from pde_agent.commands.build_local_window_suite import build_local_window_suite
 from pde_agent.commands.build_deeponet_evidence_sweep import (
     build_deeponet_evidence_sweep_command,
 )
+from pde_agent.commands.build_competition_submission import (
+    build_competition_submission_command,
+)
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.build_strategy_rubric import build_strategy_rubric_command
 from pde_agent.commands.build_unet_evidence_sweep import (
@@ -1983,3 +1986,32 @@ def build_submission_cmd(
 ) -> None:
     _ = json_flag
     typer.echo(json.dumps(build_submission(run_id=run_id, run_root=run_root)))
+
+
+@app.command("build-competition-submission")
+def build_competition_submission_cmd(
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    method: str = typer.Option("persistence"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_competition_submission_command(
+                task_id=task_id,
+                test_path=test_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                method=method,
+                force=force,
+            )
+        )
+    )
