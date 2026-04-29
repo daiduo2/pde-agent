@@ -24,6 +24,7 @@ def run_hermes_heartbeat_command(
     task1_target_path: str | None,
     task2_test_path: str | None,
     task2_target_path: str | None,
+    unet_checkpoint_path: str | None,
     dataset_key: str,
     prediction_dataset_key: str,
     candidate_generator: str,
@@ -54,6 +55,9 @@ def run_hermes_heartbeat_command(
         task2_test_path=Path(task2_test_path) if task2_test_path is not None else None,
         task2_target_path=Path(task2_target_path)
         if task2_target_path is not None
+        else None,
+        unet_checkpoint_path=Path(unet_checkpoint_path)
+        if unet_checkpoint_path is not None
         else None,
         dataset_key=dataset_key,
         prediction_dataset_key=prediction_dataset_key,

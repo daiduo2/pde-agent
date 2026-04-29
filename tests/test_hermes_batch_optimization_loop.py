@@ -613,6 +613,219 @@ def test_hermes_batch_optimization_loop_auto_objective_learns_runtime_when_timeo
     assert report["trajectory"][2]["score"] == 0.0
 
 
+def test_hermes_batch_optimization_loop_runtime_config_search_generates_unet_configs(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    predicted_configs: list[tuple[int | None, int | None]] = []
+
+    def fake_predictor(**kwargs: Any) -> dict[str, Any]:
+        predicted_configs.append(
+            (kwargs["inference_batch_size"], kwargs["torch_num_threads"])
+        )
+        report_path = Path(kwargs["output_dir"]) / "candidate_execution_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "artifacts": {"candidate_execution_report_path": str(report_path)},
+            "inference": {"elapsed_seconds": 100.0},
+        }
+
+    def fake_materializer(**kwargs: Any) -> dict[str, Any]:
+        submission_dir = Path(kwargs["output_dir"]) / "submission_package" / "submission"
+        submission_dir.mkdir(parents=True)
+        return {
+            "artifacts": {"submission_dir": str(submission_dir)},
+            "submission": {"metrics": {"inference_time": 100.0}},
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 0.0 if Path(kwargs["submission_dir"]).name == "initial" else 80.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "tasks": {
+                "1": {
+                    "timing": {"train_time": 0.0, "inference_time": 100.0},
+                    "score": {"task_total_score": score},
+                }
+            },
+        }
+
+    monkeypatch.setattr(loop_module, "predict_unet_competition", fake_predictor)
+    monkeypatch.setattr(loop_module, "materialize_competition_candidate", fake_materializer)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=2,
+        patience=2,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        learning_objective="runtime",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="runtime_config_search",
+        unet_checkpoint_path=tmp_path / "checkpoint.pt",
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert predicted_configs == [(8, 1), (8, 2)]
+    assert report["trajectory"][1]["metadata"]["source"] == "runtime_config_search"
+    assert report["trajectory"][1]["metadata"]["inference_batch_size"] == 8
+    assert report["trajectory"][2]["metadata"]["torch_num_threads"] == 2
+
+
+def test_hermes_batch_optimization_loop_fast_baseline_family_generates_persistence(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    generated_methods: list[str] = []
+
+    def fake_builder(**kwargs: Any) -> dict[str, Any]:
+        generated_methods.append(str(kwargs["method"]))
+        submission_dir = Path(kwargs["output_dir"]) / "submission"
+        submission_dir.mkdir(parents=True)
+        return {"artifacts": {"submission_dir": str(submission_dir)}}
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 0.0 if Path(kwargs["submission_dir"]).name == "initial" else 70.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "tasks": {
+                "1": {
+                    "timing": {"train_time": 0.0, "inference_time": 0.01},
+                    "score": {"task_total_score": score},
+                }
+            },
+        }
+
+    monkeypatch.setattr(loop_module, "build_competition_submission", fake_builder)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=1,
+        patience=1,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        learning_objective="auto",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="fast_baseline_family",
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert generated_methods == ["persistence"]
+    assert report["best_candidate"]["metadata"]["source"] == "fast_baseline_family"
+    assert report["best_candidate"]["metadata"]["baseline_method"] == "persistence"
+
+
+def test_hermes_batch_optimization_loop_hybrid_gate_tries_runtime_then_fast_baseline(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    events: list[str] = []
+
+    def fake_predictor(**kwargs: Any) -> dict[str, Any]:
+        events.append("runtime")
+        report_path = Path(kwargs["output_dir"]) / "candidate_execution_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {"artifacts": {"candidate_execution_report_path": str(report_path)}}
+
+    def fake_materializer(**kwargs: Any) -> dict[str, Any]:
+        submission_dir = Path(kwargs["output_dir"]) / "submission_package" / "submission"
+        submission_dir.mkdir(parents=True)
+        return {"artifacts": {"submission_dir": str(submission_dir)}}
+
+    def fake_builder(**kwargs: Any) -> dict[str, Any]:
+        events.append("fast")
+        submission_dir = Path(kwargs["output_dir"]) / "submission"
+        submission_dir.mkdir(parents=True)
+        return {"artifacts": {"submission_dir": str(submission_dir)}}
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        parent = Path(kwargs["submission_dir"]).parent.name
+        score = 0.0
+        inference_time = 157.0
+        if parent == "round_002":
+            score = 70.0
+            inference_time = 0.01
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "tasks": {
+                "1": {
+                    "timing": {"train_time": 0.0, "inference_time": inference_time},
+                    "score": {
+                        "task_total_score": score,
+                        "timeout_zeroed": inference_time > 120.0,
+                    },
+                }
+            },
+        }
+
+    monkeypatch.setattr(loop_module, "predict_unet_competition", fake_predictor)
+    monkeypatch.setattr(loop_module, "materialize_competition_candidate", fake_materializer)
+    monkeypatch.setattr(loop_module, "build_competition_submission", fake_builder)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=2,
+        patience=2,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        learning_objective="auto",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="hybrid_gate",
+        unet_checkpoint_path=tmp_path / "checkpoint.pt",
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert events == ["runtime", "fast"]
+    assert report["best_candidate"]["metadata"]["source"] == "fast_baseline_family"
+
+
 def test_hermes_batch_optimization_loop_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,
@@ -661,6 +874,8 @@ def test_hermes_batch_optimization_loop_cli_returns_payload(
             "2",
             "--learning-objective",
             "auto",
+            "--unet-checkpoint-path",
+            str(tmp_path / "checkpoint.pt"),
         ],
     )
 

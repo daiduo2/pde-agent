@@ -13,6 +13,11 @@ from pde_agent.core.hermes_local_judge import judge_hermes_submission
 from pde_agent.core.hermes_postprocess_candidate import (
     generate_hermes_postprocess_candidate,
 )
+from pde_agent.core.competition_candidate_materialization import (
+    materialize_competition_candidate,
+)
+from pde_agent.core.competition_submission import build_competition_submission
+from pde_agent.core.unet_competition_prediction import predict_unet_competition
 
 
 STATE_HINT = "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
@@ -46,6 +51,7 @@ def run_hermes_batch_optimization_loop(
     task1_target_path: str | Path | None = None,
     task2_test_path: str | Path | None = None,
     task2_target_path: str | Path | None = None,
+    unet_checkpoint_path: str | Path | None = None,
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
     candidate_submission_dirs: Sequence[str | Path] | None = None,
@@ -99,6 +105,7 @@ def run_hermes_batch_optimization_loop(
         initial_submission_dir=Path(initial_submission_dir),
         task1_test_path=task1_test_path,
         task2_test_path=task2_test_path,
+        unet_checkpoint_path=unet_checkpoint_path,
         dataset_key=dataset_key,
         prediction_dataset_key=prediction_dataset_key,
         postprocess_strategies=postprocess_strategies,
@@ -242,6 +249,9 @@ def run_hermes_batch_optimization_loop(
             "submit_score_threshold": submit_score_threshold,
             "learning_objective": learning_objective,
             "candidate_generator": candidate_generator,
+            "unet_checkpoint_path": str(unet_checkpoint_path)
+            if unet_checkpoint_path is not None
+            else None,
             "postprocess_search_mode": postprocess_search_mode,
             "postprocess_adaptive_step": postprocess_adaptive_step,
             "checkpoint_every": checkpoint_every,
@@ -311,6 +321,7 @@ def _build_candidate_runner(
     initial_submission_dir: Path,
     task1_test_path: str | Path | None,
     task2_test_path: str | Path | None,
+    unet_checkpoint_path: str | Path | None,
     dataset_key: str,
     prediction_dataset_key: str,
     postprocess_strategies: Sequence[str] | None,
@@ -337,6 +348,35 @@ def _build_candidate_runner(
             adaptive_step=postprocess_adaptive_step,
             avoid_set=avoid_set,
             skipped_candidates=skipped_candidates,
+            submission_id=submission_id,
+            force=force,
+        )
+    if candidate_generator == "runtime_config_search":
+        return _runtime_config_runner(
+            unet_checkpoint_path=unet_checkpoint_path,
+            task1_test_path=task1_test_path,
+            task2_test_path=task2_test_path,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            submission_id=submission_id,
+            force=force,
+        )
+    if candidate_generator == "fast_baseline_family":
+        return _fast_baseline_runner(
+            task1_test_path=task1_test_path,
+            task2_test_path=task2_test_path,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            submission_id=submission_id,
+            force=force,
+        )
+    if candidate_generator == "hybrid_gate":
+        return _hybrid_gate_runner(
+            unet_checkpoint_path=unet_checkpoint_path,
+            task1_test_path=task1_test_path,
+            task2_test_path=task2_test_path,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
             submission_id=submission_id,
             force=force,
         )
@@ -441,6 +481,156 @@ def _postprocess_candidate_runner(
             "blend_weight": candidate.get("blend_weight"),
             "candidate_report_path": candidate.get("candidate_report_path"),
         }
+
+    return run_candidate
+
+
+def _runtime_config_runner(
+    *,
+    unet_checkpoint_path: str | Path | None,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    submission_id: str,
+    force: bool,
+    configs: Sequence[tuple[int, int]] | None = None,
+) -> CandidateRunner:
+    if unet_checkpoint_path is None:
+        raise HermesBatchOptimizationLoopError(
+            "runtime_config_search requires unet_checkpoint_path"
+        )
+    task_id, test_path = _single_task_context(
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+    )
+    schedule = list(configs or [(8, 1), (8, 2), (16, 1), (16, 2), (32, 2), (32, 4)])
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        round_index = int(kwargs["round_index"])
+        if round_index > len(schedule):
+            return None
+        inference_batch_size, torch_num_threads = schedule[round_index - 1]
+        output_dir = Path(kwargs["output_dir"])
+        prediction = predict_unet_competition(
+            task_id=task_id,
+            test_path=Path(test_path),
+            checkpoint_path=Path(unet_checkpoint_path),
+            output_dir=output_dir / "prediction",
+            dataset_key=dataset_key,
+            inference_batch_size=inference_batch_size,
+            torch_num_threads=torch_num_threads,
+            force=force,
+        )
+        materialized = materialize_competition_candidate(
+            task_id=task_id,
+            candidate_report_path=prediction["artifacts"][
+                "candidate_execution_report_path"
+            ],
+            test_path=Path(test_path),
+            output_dir=output_dir,
+            submission_id=submission_id,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            source_prediction_key="prediction",
+            force=force,
+        )
+        candidate_id = (
+            f"runtime_config_b{inference_batch_size}_t{torch_num_threads}"
+        )
+        return {
+            "candidate_id": candidate_id,
+            "submission_dir": materialized["artifacts"]["submission_dir"],
+            "source": "runtime_config_search",
+            "inference_batch_size": inference_batch_size,
+            "torch_num_threads": torch_num_threads,
+            "candidate_report_path": prediction["artifacts"][
+                "candidate_execution_report_path"
+            ],
+        }
+
+    return run_candidate
+
+
+def _fast_baseline_runner(
+    *,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    submission_id: str,
+    force: bool,
+    methods: Sequence[str] | None = None,
+) -> CandidateRunner:
+    task_id, test_path = _single_task_context(
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+    )
+    schedule = list(methods or ["persistence"])
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        round_index = int(kwargs["round_index"])
+        if round_index > len(schedule):
+            return None
+        method = schedule[round_index - 1]
+        output_dir = Path(kwargs["output_dir"])
+        submission = build_competition_submission(
+            task_id=task_id,
+            test_path=Path(test_path),
+            output_dir=output_dir,
+            submission_id=submission_id,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            method=method,
+            train_time=0.0,
+            force=force,
+        )
+        return {
+            "candidate_id": f"fast_baseline_{method}",
+            "submission_dir": submission["artifacts"]["submission_dir"],
+            "source": "fast_baseline_family",
+            "baseline_method": method,
+        }
+
+    return run_candidate
+
+
+def _hybrid_gate_runner(
+    *,
+    unet_checkpoint_path: str | Path | None,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    submission_id: str,
+    force: bool,
+) -> CandidateRunner:
+    runtime_runner = _runtime_config_runner(
+        unet_checkpoint_path=unet_checkpoint_path,
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+        dataset_key=dataset_key,
+        prediction_dataset_key=prediction_dataset_key,
+        submission_id=submission_id,
+        force=force,
+        configs=[(8, 1)],
+    )
+    fast_runner = _fast_baseline_runner(
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+        dataset_key=dataset_key,
+        prediction_dataset_key=prediction_dataset_key,
+        submission_id=submission_id,
+        force=force,
+    )
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        round_index = int(kwargs["round_index"])
+        if round_index == 1:
+            return runtime_runner(**kwargs)
+        shifted = dict(kwargs)
+        shifted["round_index"] = round_index - 1
+        return fast_runner(**shifted)
 
     return run_candidate
 

@@ -61,6 +61,7 @@ def test_hermes_heartbeat_runs_batches_and_carries_best_and_memory(
         checkpoint_every=2,
         max_stagnant_batches=2,
         learning_objective="auto",
+        unet_checkpoint_path="checkpoint.pt",
         task1_test_path="task1_test.hdf5",
         task1_target_path="task1_val.hdf5",
         batch_runner=fake_batch_runner,
@@ -71,6 +72,7 @@ def test_hermes_heartbeat_runs_batches_and_carries_best_and_memory(
     assert len(batch_calls) == 2
     assert batch_calls[0]["initial_submission_dir"] == initial_dir
     assert batch_calls[0]["learning_objective"] == "auto"
+    assert batch_calls[0]["unet_checkpoint_path"] == Path("checkpoint.pt")
     assert batch_calls[1]["initial_submission_dir"] == tmp_path / "best_1"
     assert batch_calls[1]["memory_json_path"] == Path(
         report["batches"][0]["memory_json_path"]
