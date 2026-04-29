@@ -135,6 +135,9 @@ from pde_agent.commands.run_burgers_spectral_viscosity_benchmark import (
 )
 from pde_agent.commands.run_unet_strategy_sweep import run_unet_strategy_sweep_command
 from pde_agent.commands.score_local_rollout import score_local_rollout
+from pde_agent.commands.score_competition_submission import (
+    score_competition_submission_command,
+)
 from pde_agent.commands.select_hypothesis import select_hypothesis
 from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
 from pde_agent.commands.select_pde_hypothesis_from_fno_summary import (
@@ -2012,6 +2015,31 @@ def build_competition_submission_cmd(
                 prediction_dataset_key=prediction_dataset_key,
                 method=method,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("score-competition-submission")
+def score_competition_submission_cmd(
+    task_id: int = typer.Option(...),
+    prediction_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    target_dataset_key: str = typer.Option("tensor"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            score_competition_submission_command(
+                task_id=task_id,
+                prediction_path=prediction_path,
+                target_path=target_path,
+                output_path=output_path,
+                prediction_dataset_key=prediction_dataset_key,
+                target_dataset_key=target_dataset_key,
             )
         )
     )
