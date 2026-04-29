@@ -163,6 +163,9 @@ from pde_agent.commands.run_fno_evidence_sweep import (
 from pde_agent.commands.run_hermes_local_strategy_loop import (
     run_hermes_local_strategy_loop_command,
 )
+from pde_agent.commands.run_hermes_operator_tuning_loop import (
+    run_hermes_operator_tuning_loop_command,
+)
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
 )
@@ -489,6 +492,43 @@ def run_hermes_local_strategy_loop_cmd(
                 dataset_key=dataset_key,
                 baseline_score=baseline_score,
                 dry_run=dry_run,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-operator-tuning-loop")
+def run_hermes_operator_tuning_loop_cmd(
+    output_dir: str = typer.Option(...),
+    operator_family: str = typer.Option(...),
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    shard_sizes: list[int] = typer.Option(..., "--shard-size"),
+    inference_batch_sizes: list[int] = typer.Option(..., "--inference-batch-size"),
+    torch_num_threads_values: list[int] = typer.Option(..., "--torch-num-threads"),
+    dataset_key: str = typer.Option("tensor"),
+    timeout_seconds: float = typer.Option(120.0),
+    full_sample_count: int = typer.Option(1000),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_operator_tuning_loop_command(
+                output_dir=output_dir,
+                operator_family=operator_family,
+                task_id=task_id,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                shard_sizes=shard_sizes,
+                inference_batch_sizes=inference_batch_sizes,
+                torch_num_threads_values=torch_num_threads_values,
+                dataset_key=dataset_key,
+                timeout_seconds=timeout_seconds,
+                full_sample_count=full_sample_count,
                 force=force,
             )
         )

@@ -72,6 +72,32 @@ def test_lookup_local_strategies_ranks_fno_burgers_long_horizon(
     assert result["next_command"] == "schedule-local-strategy-evaluation"
 
 
+def test_lookup_local_strategies_prioritizes_unet_runtime_tuning(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="1D Burgers",
+        model_family="UNet",
+        failure_modes=["inference_timeout", "runtime_degradation"],
+        max_results=2,
+        output_path=None,
+    )
+
+    assert result["matches"][0]["strategy_id"] == "unet_runtime_chunk_thread_tuning_v0"
+    assert "run-hermes-operator-tuning-loop" in result["matches"][0][
+        "implementation_hooks"
+    ]
+
+
 def test_local_strategy_library_cli_build_and_lookup(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner

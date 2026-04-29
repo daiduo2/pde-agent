@@ -292,6 +292,42 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=30,
         ),
         _entry(
+            strategy_id="unet_runtime_chunk_thread_tuning_v0",
+            title="UNet chunk and thread runtime tuning",
+            model_families=["UNet"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=["inference_timeout", "runtime_degradation"],
+            hypothesis=(
+                "Official UNet inference can fit the competition time budget when "
+                "Hermes tunes chunk size and CPU thread count before full submission."
+            ),
+            mechanism=(
+                "Run shard-level runtime profiles over batch/thread configurations, "
+                "select the fastest feasible execution config, and preserve model "
+                "weights and scientific prediction logic."
+            ),
+            implementation_hooks=[
+                "run-hermes-operator-tuning-loop",
+                "profile-unet-runtime",
+                "predict-unet-competition",
+            ],
+            expected_observables=[
+                "phase timings identify rollout as the bottleneck",
+                "full-sample projected inference under 120 seconds",
+                "selected config is recorded for competition prediction",
+            ],
+            known_risks=[
+                "small shards can misestimate full 1000-sample throughput",
+                "hardware-specific CPU threading can change the best config",
+            ],
+            acceptance_criteria=[
+                "1000-sample inference or validated projection stays under 120 seconds",
+                "prediction shape and initial-condition audit remain valid",
+                "no model weights or scientific correction logic are modified",
+            ],
+            priority=5,
+        ),
+        _entry(
             strategy_id="unet_autoregressive_residual_correction_v0",
             title="UNet autoregressive residual correction",
             model_families=["UNet"],
