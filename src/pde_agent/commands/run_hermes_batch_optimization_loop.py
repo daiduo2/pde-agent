@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from pde_agent.core.hermes_batch_optimization_loop import (
+    STATE_HINT,
+    run_hermes_batch_optimization_loop,
+)
+from pde_agent.core.json_output import success_payload
+
+
+def run_hermes_batch_optimization_loop_command(
+    *,
+    output_dir: str,
+    initial_submission_dir: str,
+    max_rounds: int,
+    patience: int,
+    min_score_improvement: float,
+    submit_score_threshold: float,
+    task1_test_path: str | None,
+    task1_target_path: str | None,
+    task2_test_path: str | None,
+    task2_target_path: str | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    candidate_submission_dirs: list[str],
+    force: bool,
+) -> dict[str, object]:
+    report = run_hermes_batch_optimization_loop(
+        output_dir=Path(output_dir),
+        initial_submission_dir=Path(initial_submission_dir),
+        max_rounds=max_rounds,
+        patience=patience,
+        min_score_improvement=min_score_improvement,
+        submit_score_threshold=submit_score_threshold,
+        task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
+        task1_target_path=Path(task1_target_path)
+        if task1_target_path is not None
+        else None,
+        task2_test_path=Path(task2_test_path) if task2_test_path is not None else None,
+        task2_target_path=Path(task2_target_path)
+        if task2_target_path is not None
+        else None,
+        dataset_key=dataset_key,
+        prediction_dataset_key=prediction_dataset_key,
+        candidate_submission_dirs=[Path(path) for path in candidate_submission_dirs],
+        force=force,
+    )
+    best = report["best_candidate"]
+    return success_payload(
+        run_id="local",
+        command="run-hermes-batch-optimization-loop",
+        state_hint=STATE_HINT,
+        artifacts={"loop_report_path": report["loop_report_path"]},
+        metrics={
+            "round_count": report["round_count"],
+            "best_candidate_id": best["candidate_id"],
+            "best_score": best["score"],
+            "stop_reason": report["stop_reason"],
+            "decision": report["decision"],
+        },
+        next_hint=report["next_command"],
+    )

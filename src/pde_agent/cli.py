@@ -166,6 +166,9 @@ from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
+from pde_agent.commands.run_hermes_batch_optimization_loop import (
+    run_hermes_batch_optimization_loop_command,
+)
 from pde_agent.commands.run_hermes_local_strategy_loop import (
     run_hermes_local_strategy_loop_command,
 )
@@ -684,6 +687,50 @@ def judge_hermes_submission_cmd(
                 task2_target_path=task2_target_path,
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-batch-optimization-loop")
+def run_hermes_batch_optimization_loop_cmd(
+    output_dir: str = typer.Option(...),
+    initial_submission_dir: str = typer.Option(...),
+    max_rounds: int = typer.Option(3),
+    patience: int = typer.Option(1),
+    min_score_improvement: float = typer.Option(1.0),
+    submit_score_threshold: float = typer.Option(120.0),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
+    task2_test_path: str | None = typer.Option(None),
+    task2_target_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    candidate_submission_dirs: list[str] = typer.Option(
+        [],
+        "--candidate-submission-dir",
+    ),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_batch_optimization_loop_command(
+                output_dir=output_dir,
+                initial_submission_dir=initial_submission_dir,
+                max_rounds=max_rounds,
+                patience=patience,
+                min_score_improvement=min_score_improvement,
+                submit_score_threshold=submit_score_threshold,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
+                task2_test_path=task2_test_path,
+                task2_target_path=task2_target_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                candidate_submission_dirs=candidate_submission_dirs,
+                force=force,
             )
         )
     )
