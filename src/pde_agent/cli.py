@@ -97,6 +97,7 @@ from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
 from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
+from pde_agent.commands.judge_hermes_submission import judge_hermes_submission_command
 from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
 from pde_agent.commands.local_strategy_scheduler import (
     claim_next_scheduled_experiment_command,
@@ -654,6 +655,35 @@ def run_hermes_model_iteration_loop_cmd(
                 max_late_rmse=max_late_rmse,
                 max_inference_seconds=max_inference_seconds,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("judge-hermes-submission")
+def judge_hermes_submission_cmd(
+    submission_dir: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
+    task2_test_path: str | None = typer.Option(None),
+    task2_target_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            judge_hermes_submission_command(
+                submission_dir=submission_dir,
+                output_path=output_path,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
+                task2_test_path=task2_test_path,
+                task2_target_path=task2_target_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
             )
         )
     )
