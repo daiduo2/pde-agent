@@ -191,6 +191,9 @@ from pde_agent.commands.run_hermes_convergence_loop import (
     run_hermes_convergence_loop_command,
 )
 from pde_agent.commands.run_hermes_heartbeat import run_hermes_heartbeat_command
+from pde_agent.commands.run_hermes_three_stage_policy import (
+    run_hermes_three_stage_policy_command,
+)
 from pde_agent.commands.run_hermes_submission_candidate import (
     run_hermes_submission_candidate_command,
 )
@@ -896,6 +899,43 @@ def run_hermes_heartbeat_cmd(
                 postprocess_blend_weights=postprocess_blend_weights,
                 postprocess_adaptive_step=postprocess_adaptive_step,
                 submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-three-stage-policy")
+def run_hermes_three_stage_policy_cmd(
+    output_dir: str = typer.Option(...),
+    initial_submission_dir: str = typer.Option(...),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
+    task2_test_path: str | None = typer.Option(None),
+    task2_target_path: str | None = typer.Option(None),
+    unet_checkpoint_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    submission_id: str = typer.Option("team_hermes"),
+    stage_deadline_seconds: float = typer.Option(600.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_three_stage_policy_command(
+                output_dir=output_dir,
+                initial_submission_dir=initial_submission_dir,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
+                task2_test_path=task2_test_path,
+                task2_target_path=task2_target_path,
+                unet_checkpoint_path=unet_checkpoint_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                submission_id=submission_id,
+                stage_deadline_seconds=stage_deadline_seconds,
                 force=force,
             )
         )
