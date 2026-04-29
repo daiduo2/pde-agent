@@ -132,3 +132,81 @@ def test_run_competition_task_pipeline_cli_returns_payload(tmp_path: Path) -> No
     assert payload["command"] == "run-competition-task-pipeline"
     assert payload["state_hint"] == "COMPETITION_TASK_PIPELINE_COMPLETED"
     assert payload["metrics"]["audit_decision"] == "passed"
+
+
+def test_run_competition_task_pipeline_command_can_record_local_strategy_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pde_agent.commands.run_competition_task_pipeline as command_module
+
+    schedule_path = tmp_path / "schedule.json"
+    leaderboard_path = tmp_path / "leaderboard.json"
+    score_path = tmp_path / "score.json"
+    schedule_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "LOCAL_STRATEGY_EVALUATION_SCHEDULED",
+                "experiments": [
+                    {
+                        "experiment_id": "fno_spectral_viscosity_filter_v0_001",
+                        "strategy_id": "fno_spectral_viscosity_filter_v0",
+                        "title": "FNO spectral viscosity filter",
+                        "priority_rank": 1,
+                        "selection_score": 12,
+                        "acceptance_criteria": [],
+                        "evaluation_protocol": {},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    score_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "COMPETITION_PREDICTION_SCORED",
+                "segment_score": 82.5,
+                "baseline_score": 80.0,
+                "inference_time": 59.7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_pipeline(**kwargs: object) -> dict[str, object]:
+        return {
+            "state_hint": "COMPETITION_TASK_PIPELINE_COMPLETED",
+            "task_id": 1,
+            "model_family": "fno",
+            "audit": {"decision": "passed", "issue_count": 0},
+            "materialized": {"score": {"segment_score": 82.5}},
+            "artifacts": {
+                "pipeline_report_path": str(tmp_path / "pipeline.json"),
+                "score_json_path": str(score_path),
+            },
+            "next_command": "submit-if-audit-passed",
+        }
+
+    monkeypatch.setattr(command_module, "run_competition_task_pipeline", fake_pipeline)
+
+    payload = command_module.run_competition_task_pipeline_command(
+        task_id=1,
+        model_family="fno",
+        test_path=str(tmp_path / "test.hdf5"),
+        checkpoint_path=str(tmp_path / "checkpoint.pt"),
+        output_dir=str(tmp_path / "pipeline"),
+        submission_id="team_hermes",
+        target_path=None,
+        dataset_key="tensor",
+        force=False,
+        local_strategy_schedule_path=str(schedule_path),
+        local_strategy_experiment_id="fno_spectral_viscosity_filter_v0_001",
+        local_strategy_leaderboard_path=str(leaderboard_path),
+        local_strategy_baseline_score=None,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["metrics"]["local_strategy_decision"] == "accept_best_strategy"
+    assert payload["next_hint"] == "record-strategy-proposal"
+    assert leaderboard_path.exists()

@@ -153,6 +153,9 @@ from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
+from pde_agent.commands.run_hermes_local_strategy_loop import (
+    run_hermes_local_strategy_loop_command,
+)
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
 )
@@ -433,6 +436,37 @@ def ingest_local_strategy_result_cmd(
                 baseline_score=baseline_score,
                 result_status=result_status,
                 failure_reason=failure_reason,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-local-strategy-loop")
+def run_hermes_local_strategy_loop_cmd(
+    output_dir: str = typer.Option(...),
+    applicable_pde: str = typer.Option(...),
+    model_family: str = typer.Option(...),
+    failure_modes: list[str] = typer.Option(..., "--failure-mode"),
+    max_experiments: int = typer.Option(3),
+    min_score_delta: float = typer.Option(1.0),
+    max_inference_seconds: float = typer.Option(120.0),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_local_strategy_loop_command(
+                output_dir=output_dir,
+                applicable_pde=applicable_pde,
+                model_family=model_family,
+                failure_modes=failure_modes,
+                max_experiments=max_experiments,
+                min_score_delta=min_score_delta,
+                max_inference_seconds=max_inference_seconds,
+                dry_run=dry_run,
+                force=force,
             )
         )
     )
@@ -2415,6 +2449,10 @@ def run_competition_task_pipeline_cmd(
     target_path: str | None = typer.Option(None),
     dataset_key: str = typer.Option("tensor"),
     force: bool = typer.Option(False, "--force"),
+    local_strategy_schedule_path: str | None = typer.Option(None),
+    local_strategy_experiment_id: str | None = typer.Option(None),
+    local_strategy_leaderboard_path: str | None = typer.Option(None),
+    local_strategy_baseline_score: float | None = typer.Option(None),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
     _ = json_flag
@@ -2430,6 +2468,10 @@ def run_competition_task_pipeline_cmd(
                 target_path=target_path,
                 dataset_key=dataset_key,
                 force=force,
+                local_strategy_schedule_path=local_strategy_schedule_path,
+                local_strategy_experiment_id=local_strategy_experiment_id,
+                local_strategy_leaderboard_path=local_strategy_leaderboard_path,
+                local_strategy_baseline_score=local_strategy_baseline_score,
             )
         )
     )

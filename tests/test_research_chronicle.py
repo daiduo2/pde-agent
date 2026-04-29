@@ -122,3 +122,68 @@ def test_build_research_chronicle_cli_returns_payload(tmp_path: Path) -> None:
     assert payload["command"] == "build-research-chronicle"
     assert payload["state_hint"] == "RESEARCH_CHRONICLE_BUILT"
     assert payload["metrics"]["artifact_count"] == 1
+
+
+def test_build_research_chronicle_summarizes_local_strategy_loop(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.research_chronicle import build_research_chronicle
+
+    loop_report = _write_json(
+        tmp_path / "local_loop.json",
+        {
+            "state_hint": "HERMES_LOCAL_STRATEGY_LOOP_RAN",
+            "iteration_count": 2,
+            "iterations": [
+                {
+                    "iteration": 1,
+                    "strategy_id": "fno_spectral_viscosity_filter_v0",
+                    "leaderboard_decision": "continue_scheduled_experiments",
+                    "route_command": "claim-next-scheduled-experiment",
+                },
+                {
+                    "iteration": 2,
+                    "strategy_id": "fno_rollout_consistency_finetune_v0",
+                    "leaderboard_decision": "accept_best_strategy",
+                    "route_command": "record-strategy-proposal",
+                },
+            ],
+            "decision": {
+                "decision": "accept_best_strategy",
+                "next_command": "record-strategy-proposal",
+                "reason_codes": ["score_delta_meets_threshold"],
+            },
+        },
+    )
+    leaderboard = _write_json(
+        tmp_path / "leaderboard.json",
+        {
+            "state_hint": "LOCAL_STRATEGY_LEADERBOARD_UPDATED",
+            "result_count": 2,
+            "best_result": {
+                "strategy_id": "fno_rollout_consistency_finetune_v0",
+                "score_delta": 3.0,
+            },
+            "decision": {
+                "decision": "accept_best_strategy",
+                "next_command": "record-strategy-proposal",
+                "reason_codes": ["score_delta_meets_threshold"],
+            },
+        },
+    )
+
+    report = build_research_chronicle(
+        artifact_paths=[loop_report, leaderboard],
+        output_path=tmp_path / "chronicle.md",
+        force=True,
+    )
+
+    chronicle = Path(report["artifacts"]["chronicle_path"]).read_text(
+        encoding="utf-8"
+    )
+    assert "Local Strategy Loop:" in chronicle
+    assert "iteration_count=2" in chronicle
+    assert "fno_spectral_viscosity_filter_v0" in chronicle
+    assert "fno_rollout_consistency_finetune_v0" in chronicle
+    assert "best_strategy=fno_rollout_consistency_finetune_v0" in chronicle
+    assert "score_delta=3.0" in chronicle

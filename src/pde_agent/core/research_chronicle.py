@@ -89,6 +89,9 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
     lines.extend(["", "Strategy Decisions:"])
     decision_lines = _decision_lines(records)
     lines.extend(decision_lines or ["- No explicit strategy decision artifact was provided."])
+    lines.extend(["", "Local Strategy Loop:"])
+    loop_lines = _local_strategy_loop_lines(records)
+    lines.extend(loop_lines or ["- No local strategy loop artifact was provided."])
     lines.extend(["", "Submission Decision:"])
     submission_lines = _submission_lines(records)
     lines.extend(submission_lines or ["- No competition submission pipeline artifact was provided."])
@@ -138,7 +141,25 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + " model_family="
             + str(payload.get("model_family", "unknown"))
             + " audit="
-            + str(_nested(payload, ["audit", "decision"], "unknown"))
+                + str(_nested(payload, ["audit", "decision"], "unknown"))
+        ]
+    if kind == "local_strategy_loop":
+        return [
+            "- Hermes local strategy loop ran iteration_count="
+            + str(payload.get("iteration_count", "unknown"))
+            + " decision="
+            + str(_nested(payload, ["decision", "decision"], "unknown"))
+            + " next="
+            + str(_nested(payload, ["decision", "next_command"], "unknown"))
+        ]
+    if kind == "local_strategy_leaderboard":
+        return [
+            "- Local strategy leaderboard result_count="
+            + str(payload.get("result_count", "unknown"))
+            + " best_strategy="
+            + str(_nested(payload, ["best_result", "strategy_id"], "unknown"))
+            + " score_delta="
+            + str(_nested(payload, ["best_result", "score_delta"], "unknown"))
         ]
     return ["- Recorded artifact state=" + _state(payload)]
 
@@ -222,6 +243,52 @@ def _submission_lines(records: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _local_strategy_loop_lines(records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        payload = record["payload"]
+        if record["kind"] == "local_strategy_loop":
+            lines.append(
+                "- loop path="
+                + record["path"]
+                + " iteration_count="
+                + str(payload.get("iteration_count", "unknown"))
+                + " decision="
+                + str(_nested(payload, ["decision", "decision"], "unknown"))
+                + " next="
+                + str(_nested(payload, ["decision", "next_command"], "unknown"))
+            )
+            iterations = payload.get("iterations")
+            if isinstance(iterations, list):
+                for item in iterations:
+                    if not isinstance(item, dict):
+                        continue
+                    lines.append(
+                        "- iteration="
+                        + str(item.get("iteration", "unknown"))
+                        + " strategy="
+                        + str(item.get("strategy_id", "unknown"))
+                        + " leaderboard_decision="
+                        + str(item.get("leaderboard_decision", "unknown"))
+                        + " route_command="
+                        + str(item.get("route_command", "unknown"))
+                    )
+        if record["kind"] == "local_strategy_leaderboard":
+            lines.append(
+                "- leaderboard path="
+                + record["path"]
+                + " result_count="
+                + str(payload.get("result_count", "unknown"))
+                + " best_strategy="
+                + str(_nested(payload, ["best_result", "strategy_id"], "unknown"))
+                + " score_delta="
+                + str(_nested(payload, ["best_result", "score_delta"], "unknown"))
+                + " decision="
+                + str(_nested(payload, ["decision", "decision"], "unknown"))
+            )
+    return lines
+
+
 def _artifact_kind(payload: dict[str, Any]) -> str:
     state = _state(payload)
     if "session_id" in payload and "tool_call_summary" in payload:
@@ -230,6 +297,10 @@ def _artifact_kind(payload: dict[str, Any]) -> str:
         return "strategy_benchmark"
     if state == "COMPETITION_TASK_PIPELINE_COMPLETED":
         return "competition_pipeline"
+    if state == "HERMES_LOCAL_STRATEGY_LOOP_RAN":
+        return "local_strategy_loop"
+    if state == "LOCAL_STRATEGY_LEADERBOARD_UPDATED":
+        return "local_strategy_leaderboard"
     return "generic"
 
 
