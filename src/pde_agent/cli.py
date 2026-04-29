@@ -19,6 +19,9 @@ from pde_agent.commands.build_deeponet_evidence_sweep import (
 from pde_agent.commands.build_competition_submission import (
     build_competition_submission_command,
 )
+from pde_agent.commands.build_research_chronicle import (
+    build_research_chronicle_command,
+)
 from pde_agent.commands.build_submission import build_submission
 from pde_agent.commands.build_strategy_rubric import build_strategy_rubric_command
 from pde_agent.commands.build_unet_evidence_sweep import (
@@ -2227,6 +2230,29 @@ def run_competition_task_pipeline_cmd(
                 submission_id=submission_id,
                 target_path=target_path,
                 dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-research-chronicle")
+def build_research_chronicle_cmd(
+    artifact_paths: list[str] = typer.Option(..., "--artifact-path"),
+    output_path: str = typer.Option(...),
+    submission_dir: str | None = typer.Option(None),
+    task_ids: list[int] | None = typer.Option(None, "--task-id"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_research_chronicle_command(
+                artifact_paths=artifact_paths,
+                output_path=output_path,
+                submission_dir=submission_dir,
+                task_ids=task_ids,
                 force=force,
             )
         )
