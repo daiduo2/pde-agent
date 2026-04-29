@@ -8,6 +8,9 @@ from pde_agent.commands.audit_hermes_strategy_growth_autopilot import (
     audit_hermes_strategy_growth_autopilot_command,
 )
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
+from pde_agent.commands.audit_competition_submission import (
+    audit_competition_submission_command,
+)
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
 from pde_agent.commands.build_deeponet_evidence_sweep import (
@@ -2084,6 +2087,29 @@ def materialize_competition_candidate_cmd(
                 source_prediction_key=source_prediction_key,
                 train_time=train_time,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("audit-competition-submission")
+def audit_competition_submission_cmd(
+    task_id: int = typer.Option(...),
+    submission_dir: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            audit_competition_submission_command(
+                task_id=task_id,
+                submission_dir=submission_dir,
+                test_path=test_path,
+                output_path=output_path,
+                dataset_key=dataset_key,
             )
         )
     )
