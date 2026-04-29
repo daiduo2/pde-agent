@@ -54,6 +54,7 @@ from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.diagnose_task2_nu_shift import (
     diagnose_task2_nu_shift_command,
 )
+from pde_agent.commands.diagnose_hermes_result import diagnose_hermes_result_command
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.evaluate_burgers_residual import (
     evaluate_burgers_residual_command,
@@ -119,6 +120,7 @@ from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
     plan_next_experiment_from_fno_summary_command,
 )
+from pde_agent.commands.plan_hermes_next_action import plan_hermes_next_action_command
 from pde_agent.commands.plan_next_spectral_residual_experiment import (
     plan_next_spectral_residual_experiment_command,
 )
@@ -165,6 +167,9 @@ from pde_agent.commands.run_hermes_local_strategy_loop import (
 )
 from pde_agent.commands.run_hermes_operator_tuning_loop import (
     run_hermes_operator_tuning_loop_command,
+)
+from pde_agent.commands.run_hermes_convergence_loop import (
+    run_hermes_convergence_loop_command,
 )
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
@@ -529,6 +534,69 @@ def run_hermes_operator_tuning_loop_cmd(
                 dataset_key=dataset_key,
                 timeout_seconds=timeout_seconds,
                 full_sample_count=full_sample_count,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-hermes-result")
+def diagnose_hermes_result_cmd(
+    artifact_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    max_inference_seconds: float = typer.Option(120.0),
+    min_score_delta: float = typer.Option(1.0),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_hermes_result_command(
+                artifact_path=artifact_path,
+                output_path=output_path,
+                max_inference_seconds=max_inference_seconds,
+                min_score_delta=min_score_delta,
+            )
+        )
+    )
+
+
+@app.command("plan-hermes-next-action")
+def plan_hermes_next_action_cmd(
+    diagnosis_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            plan_hermes_next_action_command(
+                diagnosis_path=diagnosis_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-convergence-loop")
+def run_hermes_convergence_loop_cmd(
+    initial_artifact_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    max_steps: int = typer.Option(3),
+    max_inference_seconds: float = typer.Option(120.0),
+    min_score_delta: float = typer.Option(1.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_convergence_loop_command(
+                initial_artifact_path=initial_artifact_path,
+                output_dir=output_dir,
+                max_steps=max_steps,
+                max_inference_seconds=max_inference_seconds,
+                min_score_delta=min_score_delta,
                 force=force,
             )
         )
