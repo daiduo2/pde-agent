@@ -2021,6 +2021,7 @@ def build_competition_submission_cmd(
     source_prediction_path: str | None = typer.Option(None),
     source_prediction_key: str = typer.Option("prediction"),
     train_time: float = typer.Option(0.0),
+    inference_time: float | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2038,6 +2039,7 @@ def build_competition_submission_cmd(
                 source_prediction_path=source_prediction_path,
                 source_prediction_key=source_prediction_key,
                 train_time=train_time,
+                inference_time=inference_time,
                 force=force,
             )
         )

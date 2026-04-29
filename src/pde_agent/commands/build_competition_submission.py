@@ -21,6 +21,7 @@ def build_competition_submission_command(
     source_prediction_path: str | None,
     source_prediction_key: str,
     train_time: float,
+    inference_time: float | None,
     force: bool,
 ) -> dict[str, object]:
     report = build_competition_submission(
@@ -34,6 +35,7 @@ def build_competition_submission_command(
         source_prediction_path=source_prediction_path,
         source_prediction_key=source_prediction_key,
         train_time=train_time,
+        inference_time=inference_time,
         force=force,
     )
     return success_payload(

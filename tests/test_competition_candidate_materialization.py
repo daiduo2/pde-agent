@@ -19,6 +19,7 @@ def _write_candidate_report(root: Path, prediction_path: Path) -> Path:
         "candidate": {"experiment_id": "unet_competition_ready"},
         "artifacts": {"candidate_prediction_path": str(prediction_path)},
         "train": {"elapsed_seconds": 12.5},
+        "inference": {"elapsed_seconds": 4.25},
     }
     path = root / "candidate_execution_report.json"
     path.write_text(json.dumps(report), encoding="utf-8")
@@ -57,6 +58,7 @@ def test_materialize_competition_candidate_builds_submission_and_score(
     assert Path(report["artifacts"]["score_json_path"]).exists()
     assert report["score"]["segment_score"] == pytest.approx(100.0)
     assert report["submission"]["metrics"]["train_time"] == pytest.approx(12.5)
+    assert report["submission"]["metrics"]["inference_time"] == pytest.approx(4.25)
     assert report["next_command"] == "review-or-submit-competition-package"
 
 

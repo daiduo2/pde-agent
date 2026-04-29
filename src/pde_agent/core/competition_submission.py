@@ -35,6 +35,7 @@ def build_competition_submission(
     source_prediction_path: str | Path | None = None,
     source_prediction_key: str = "prediction",
     train_time: float = 0.0,
+    inference_time: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     if task_id not in {1, 2}:
@@ -45,6 +46,8 @@ def build_competition_submission(
         )
     if train_time < 0.0:
         raise CompetitionSubmissionError("train_time must be non-negative")
+    if inference_time is not None and inference_time < 0.0:
+        raise CompetitionSubmissionError("inference_time must be non-negative")
 
     output_root = Path(output_dir)
     submission_dir = output_root / "submission"
@@ -90,7 +93,10 @@ def build_competition_submission(
             path=Path(source_prediction_path),
             key=source_prediction_key,
         )
-    inference_time = time.perf_counter() - start
+    measured_inference_time = time.perf_counter() - start
+    reported_inference_time = (
+        measured_inference_time if inference_time is None else inference_time
+    )
     _validate_prediction(prediction=prediction, context=context)
 
     submission_dir.mkdir(parents=True, exist_ok=True)
@@ -103,7 +109,7 @@ def build_competition_submission(
     _write_time_csv(
         path=time_path,
         train_time=train_time,
-        inference_time=inference_time,
+        inference_time=reported_inference_time,
     )
     _write_submission_json(path=submission_json_path, submission_id=submission_id)
     _write_log(
@@ -117,7 +123,7 @@ def build_competition_submission(
         source_prediction_path=Path(source_prediction_path)
         if source_prediction_path is not None
         else None,
-        inference_time=inference_time,
+        inference_time=reported_inference_time,
         train_time=train_time,
     )
     _write_code_stubs(model_path=model_py_path, train_path=train_py_path)
@@ -146,7 +152,8 @@ def build_competition_submission(
             "prediction_shape": list(prediction.shape),
             "method": method,
             "train_time": train_time,
-            "inference_time": inference_time,
+            "inference_time": reported_inference_time,
+            "packaging_inference_time": measured_inference_time,
         },
         "next_command": "submit-zip-to-competition",
     }

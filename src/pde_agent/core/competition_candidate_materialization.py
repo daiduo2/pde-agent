@@ -35,6 +35,7 @@ def materialize_competition_candidate(
     candidate_report = _load_json_object(candidate_file)
     candidate_prediction_path = _candidate_prediction_path(candidate_report)
     elapsed = _train_time(candidate_report) if train_time is None else train_time
+    inference_elapsed = _inference_time(candidate_report)
     output_root = Path(output_dir)
     submission = build_competition_submission(
         task_id=task_id,
@@ -47,6 +48,7 @@ def materialize_competition_candidate(
         source_prediction_path=candidate_prediction_path,
         source_prediction_key=source_prediction_key,
         train_time=elapsed,
+        inference_time=inference_elapsed,
         force=force,
     )
     score = None
@@ -127,3 +129,12 @@ def _train_time(report: dict[str, Any]) -> float:
         if isinstance(value, int | float):
             return max(0.0, float(value))
     return 0.0
+
+
+def _inference_time(report: dict[str, Any]) -> float | None:
+    inference = report.get("inference")
+    if isinstance(inference, dict):
+        value = inference.get("elapsed_seconds")
+        if isinstance(value, int | float):
+            return max(0.0, float(value))
+    return None
