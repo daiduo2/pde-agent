@@ -85,6 +85,10 @@ from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
 from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
+from pde_agent.commands.local_strategy_scheduler import (
+    claim_next_scheduled_experiment_command,
+    schedule_local_strategy_evaluation_command,
+)
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
     materialize_competition_candidate_command,
@@ -279,6 +283,55 @@ def lookup_local_strategy_cmd(
                 model_family=model_family,
                 failure_modes=failure_modes,
                 max_results=max_results,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("schedule-local-strategy-evaluation")
+def schedule_local_strategy_evaluation_cmd(
+    lookup_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    workspace_root: str = typer.Option(...),
+    max_experiments: int = typer.Option(3),
+    max_train_seconds: float = typer.Option(3600.0),
+    max_inference_seconds: float = typer.Option(120.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            schedule_local_strategy_evaluation_command(
+                lookup_report_path=lookup_report_path,
+                output_path=output_path,
+                workspace_root=workspace_root,
+                max_experiments=max_experiments,
+                max_train_seconds=max_train_seconds,
+                max_inference_seconds=max_inference_seconds,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("claim-next-scheduled-experiment")
+def claim_next_scheduled_experiment_cmd(
+    schedule_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    completed_experiment_ids: list[str] | None = typer.Option(
+        None,
+        "--completed-experiment-id",
+    ),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            claim_next_scheduled_experiment_command(
+                schedule_path=schedule_path,
+                completed_experiment_ids=completed_experiment_ids or [],
                 output_path=output_path,
             )
         )
