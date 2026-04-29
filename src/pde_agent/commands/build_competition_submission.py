@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import zipfile
 
 from pde_agent.core.competition_submission import (
     STATE_HINT,
@@ -23,6 +24,7 @@ def build_competition_submission_command(
     train_time: float,
     inference_time: float | None,
     force: bool,
+    local_loop_chronicle_path: str | None = None,
 ) -> dict[str, object]:
     report = build_competition_submission(
         task_id=task_id,
@@ -38,6 +40,16 @@ def build_competition_submission_command(
         inference_time=inference_time,
         force=force,
     )
+    if local_loop_chronicle_path is not None:
+        _append_local_loop_chronicle(
+            log_path=Path(report["artifacts"]["log_path"]),
+            chronicle_path=Path(local_loop_chronicle_path),
+            submission_dir=Path(report["artifacts"]["submission_dir"]),
+            zip_path=Path(report["artifacts"]["submission_zip_path"]),
+        )
+        report["metrics"]["local_loop_chronicle_appended"] = True
+    else:
+        report["metrics"]["local_loop_chronicle_appended"] = False
     return success_payload(
         run_id="local",
         command="build-competition-submission",
@@ -46,3 +58,24 @@ def build_competition_submission_command(
         metrics=report["metrics"],
         next_hint=str(report["next_command"]),
     )
+
+
+def _append_local_loop_chronicle(
+    *,
+    log_path: Path,
+    chronicle_path: Path,
+    submission_dir: Path,
+    zip_path: Path,
+) -> None:
+    if not chronicle_path.is_file():
+        raise FileNotFoundError(f"local-loop chronicle not found: {chronicle_path}")
+    chronicle = chronicle_path.read_text(encoding="utf-8").strip()
+    original = log_path.read_text(encoding="utf-8")
+    marker = "\nHermes Research Chronicle\n"
+    if marker in original:
+        original = original.split(marker, maxsplit=1)[0].rstrip() + "\n"
+    log_path.write_text(original.rstrip() + "\n\n" + chronicle + "\n", encoding="utf-8")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(submission_dir.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(submission_dir.parent))

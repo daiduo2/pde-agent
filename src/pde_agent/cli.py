@@ -51,6 +51,9 @@ from pde_agent.commands.create_skill_candidate import create_skill_candidate_com
 from pde_agent.commands.diagnose_fno_rollout import diagnose_fno_rollout
 from pde_agent.commands.diagnose_unet_rollout import diagnose_unet_rollout
 from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
+from pde_agent.commands.diagnose_task2_nu_shift import (
+    diagnose_task2_nu_shift_command,
+)
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.evaluate_burgers_residual import (
     evaluate_burgers_residual_command,
@@ -129,6 +132,9 @@ from pde_agent.commands.prepare_competition_windows import (
 )
 from pde_agent.commands.record_autonomy_decision import (
     record_autonomy_decision_command,
+)
+from pde_agent.commands.record_unet_timeout_evidence import (
+    record_unet_timeout_evidence_command,
 )
 from pde_agent.commands.route_local_strategy_next_action import (
     route_local_strategy_next_action_command,
@@ -483,6 +489,56 @@ def run_hermes_local_strategy_loop_cmd(
                 baseline_score=baseline_score,
                 dry_run=dry_run,
                 force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-task2-nu-shift")
+def diagnose_task2_nu_shift_cmd(
+    target_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    reference_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    nu_key: str = typer.Option("nu"),
+    context_steps: int = typer.Option(10),
+    sample_limit: int | None = typer.Option(None),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_task2_nu_shift_command(
+                target_path=target_path,
+                output_path=output_path,
+                reference_path=reference_path,
+                dataset_key=dataset_key,
+                nu_key=nu_key,
+                context_steps=context_steps,
+                sample_limit=sample_limit,
+            )
+        )
+    )
+
+
+@app.command("record-unet-timeout-evidence")
+def record_unet_timeout_evidence_cmd(
+    output_path: str = typer.Option(...),
+    elapsed_seconds: float = typer.Option(...),
+    timeout_seconds: float = typer.Option(120.0),
+    attempted_command: str = typer.Option("predict-unet-competition"),
+    checkpoint_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_unet_timeout_evidence_command(
+                output_path=output_path,
+                elapsed_seconds=elapsed_seconds,
+                timeout_seconds=timeout_seconds,
+                attempted_command=attempted_command,
+                checkpoint_path=checkpoint_path,
             )
         )
     )
@@ -2274,6 +2330,7 @@ def build_competition_submission_cmd(
     source_prediction_key: str = typer.Option("prediction"),
     train_time: float = typer.Option(0.0),
     inference_time: float | None = typer.Option(None),
+    local_loop_chronicle_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2292,6 +2349,7 @@ def build_competition_submission_cmd(
                 source_prediction_key=source_prediction_key,
                 train_time=train_time,
                 inference_time=inference_time,
+                local_loop_chronicle_path=local_loop_chronicle_path,
                 force=force,
             )
         )

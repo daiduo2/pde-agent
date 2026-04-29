@@ -215,3 +215,41 @@ def test_build_competition_submission_cli_accepts_external_prediction(
     payload = json.loads(result.stdout)
     assert payload["metrics"]["method"] == "external_prediction"
     assert payload["metrics"]["train_time"] == pytest.approx(12.5)
+
+
+def test_build_competition_submission_cli_appends_local_loop_chronicle(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    test_path = _write_test_hdf5(tmp_path / "task1_test.hdf5")
+    chronicle_path = tmp_path / "chronicle.md"
+    chronicle_path.write_text(
+        "Hermes Research Chronicle\n\nLocal Strategy Loop:\n- loop evidence\n",
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-competition-submission",
+            "--task-id",
+            "1",
+            "--test-path",
+            str(test_path),
+            "--output-dir",
+            str(tmp_path / "submission_out"),
+            "--submission-id",
+            "team_hermes",
+            "--local-loop-chronicle-path",
+            str(chronicle_path),
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["metrics"]["local_loop_chronicle_appended"] is True
+    log_text = Path(payload["artifacts"]["log_path"]).read_text(encoding="utf-8")
+    assert "Local Strategy Loop:" in log_text
+    assert "loop evidence" in log_text
