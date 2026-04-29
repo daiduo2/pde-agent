@@ -83,6 +83,9 @@ from pde_agent.commands.materialize_competition_candidate import (
     materialize_competition_candidate_command,
 )
 from pde_agent.commands.predict_fno_local import predict_fno_local
+from pde_agent.commands.predict_fno_competition import (
+    predict_fno_competition_command,
+)
 from pde_agent.commands.predict_unet_local import predict_unet_local
 from pde_agent.commands.predict_unet_competition import (
     predict_unet_competition_command,
@@ -2158,6 +2161,31 @@ def predict_unet_competition_cmd(
     typer.echo(
         json.dumps(
             predict_unet_competition_command(
+                task_id=task_id,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("predict-fno-competition")
+def predict_fno_competition_cmd(
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_fno_competition_command(
                 task_id=task_id,
                 test_path=test_path,
                 checkpoint_path=checkpoint_path,
