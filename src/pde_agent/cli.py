@@ -728,6 +728,10 @@ def run_hermes_batch_optimization_loop_cmd(
     ),
     postprocess_adaptive_step: float = typer.Option(0.125),
     submission_id: str = typer.Option("team_hermes"),
+    deadline_seconds: float | None = typer.Option(None),
+    checkpoint_every: int = typer.Option(0),
+    memory_json_path: str | None = typer.Option(None),
+    avoid_repeating: bool = typer.Option(False, "--avoid-repeating"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -754,6 +758,10 @@ def run_hermes_batch_optimization_loop_cmd(
                 postprocess_blend_weights=postprocess_blend_weights,
                 postprocess_adaptive_step=postprocess_adaptive_step,
                 submission_id=submission_id,
+                deadline_seconds=deadline_seconds,
+                checkpoint_every=checkpoint_every,
+                memory_json_path=memory_json_path,
+                avoid_repeating=avoid_repeating,
                 force=force,
             )
         )

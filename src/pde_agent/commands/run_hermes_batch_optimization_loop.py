@@ -30,6 +30,10 @@ def run_hermes_batch_optimization_loop_command(
     postprocess_blend_weights: list[float],
     postprocess_adaptive_step: float,
     submission_id: str,
+    deadline_seconds: float | None,
+    checkpoint_every: int,
+    memory_json_path: str | None,
+    avoid_repeating: bool,
     force: bool,
 ) -> dict[str, object]:
     report = run_hermes_batch_optimization_loop(
@@ -56,6 +60,10 @@ def run_hermes_batch_optimization_loop_command(
         postprocess_blend_weights=postprocess_blend_weights,
         postprocess_adaptive_step=postprocess_adaptive_step,
         submission_id=submission_id,
+        deadline_seconds=deadline_seconds,
+        checkpoint_every=checkpoint_every,
+        memory_json_path=Path(memory_json_path) if memory_json_path is not None else None,
+        avoid_repeating=avoid_repeating,
         force=force,
     )
     best = report["best_candidate"]
@@ -70,6 +78,8 @@ def run_hermes_batch_optimization_loop_command(
             "best_score": best["score"],
             "stop_reason": report["stop_reason"],
             "decision": report["decision"],
+            "memory_checkpoint_count": len(report.get("memory_checkpoints", [])),
+            "skipped_candidate_count": len(report.get("skipped_candidates", [])),
         },
         next_hint=report["next_command"],
     )

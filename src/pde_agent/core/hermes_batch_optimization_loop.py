@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from pde_agent.core.hermes_iteration_memory import build_hermes_iteration_memory
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
 from pde_agent.core.hermes_postprocess_candidate import (
     generate_hermes_postprocess_candidate,
@@ -16,6 +18,8 @@ from pde_agent.core.hermes_postprocess_candidate import (
 STATE_HINT = "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
 CandidateRunner = Callable[..., dict[str, Any] | None]
 Judge = Callable[..., dict[str, Any]]
+Clock = Callable[[], float]
+MemoryBuilder = Callable[..., dict[str, Any]]
 
 
 class HermesBatchOptimizationLoopError(RuntimeError):
@@ -43,8 +47,14 @@ def run_hermes_batch_optimization_loop(
     postprocess_blend_weights: Sequence[float] | None = None,
     postprocess_adaptive_step: float = 0.125,
     submission_id: str = "team_hermes",
+    deadline_seconds: float | None = None,
+    checkpoint_every: int = 0,
+    memory_json_path: str | Path | None = None,
+    avoid_repeating: bool = False,
     candidate_runner: CandidateRunner | None = None,
     judge: Judge | None = None,
+    memory_builder: MemoryBuilder | None = None,
+    clock: Clock | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     if max_rounds < 1:
@@ -53,6 +63,10 @@ def run_hermes_batch_optimization_loop(
         raise HermesBatchOptimizationLoopError("patience must be non-negative")
     if min_score_improvement < 0.0:
         raise HermesBatchOptimizationLoopError("min_score_improvement must be non-negative")
+    if deadline_seconds is not None and deadline_seconds <= 0.0:
+        raise HermesBatchOptimizationLoopError("deadline_seconds must be positive")
+    if checkpoint_every < 0:
+        raise HermesBatchOptimizationLoopError("checkpoint_every must be non-negative")
     root = Path(output_dir)
     report_path = root / "hermes_batch_optimization_loop.json"
     if report_path.exists() and not force:
@@ -62,6 +76,11 @@ def run_hermes_batch_optimization_loop(
     root.mkdir(parents=True, exist_ok=True)
 
     run_judge = judge or judge_hermes_submission
+    run_memory_builder = memory_builder or build_hermes_iteration_memory
+    now = clock or time.monotonic
+    started_at = now()
+    avoid_set = _load_avoid_set(memory_json_path) if avoid_repeating else set()
+    skipped_candidates: list[dict[str, Any]] = []
     run_candidate = candidate_runner or _build_candidate_runner(
         candidate_submission_dirs=candidate_submission_dirs,
         candidate_generator=candidate_generator,
@@ -74,12 +93,16 @@ def run_hermes_batch_optimization_loop(
         postprocess_blend_weights=postprocess_blend_weights,
         postprocess_search_mode=postprocess_search_mode,
         postprocess_adaptive_step=postprocess_adaptive_step,
+        avoid_set=avoid_set,
+        skipped_candidates=skipped_candidates,
         submission_id=submission_id,
         force=force,
     )
     trajectory: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     no_improvement_count = 0
+    memory_checkpoints: list[dict[str, Any]] = []
+    elapsed_seconds = 0.0
     stop_reason = "max_rounds_exhausted"
 
     initial = _evaluate_candidate(
@@ -102,6 +125,14 @@ def run_hermes_batch_optimization_loop(
         stop_reason = "submit_threshold_met"
     else:
         for round_index in range(1, max_rounds + 1):
+            if _deadline_reached(
+                started_at=started_at,
+                now=now,
+                deadline_seconds=deadline_seconds,
+            ):
+                elapsed_seconds = float(deadline_seconds)
+                stop_reason = "deadline_exceeded"
+                break
             candidate = run_candidate(
                 round_index=round_index,
                 output_dir=root / "candidates" / f"round_{round_index:03d}",
@@ -142,6 +173,18 @@ def run_hermes_batch_optimization_loop(
                     "score_delta_vs_best": delta,
                 }
             )
+            if checkpoint_every and round_index % checkpoint_every == 0:
+                memory_checkpoints.append(
+                    _checkpoint_memory(
+                        root=root,
+                        report_path=report_path,
+                        run_memory_builder=run_memory_builder,
+                        round_index=round_index,
+                        trajectory=trajectory,
+                        best=best,
+                        stop_reason="checkpoint",
+                    )
+                )
             if _meets_submit_threshold(best, submit_score_threshold):
                 stop_reason = "submit_threshold_met"
                 break
@@ -151,6 +194,20 @@ def run_hermes_batch_optimization_loop(
 
     if best is None:
         raise HermesBatchOptimizationLoopError("batch optimization produced no score")
+    if checkpoint_every:
+        final_round = len(trajectory) - 1
+        if not memory_checkpoints or memory_checkpoints[-1]["round_index"] != final_round:
+            memory_checkpoints.append(
+                _checkpoint_memory(
+                    root=root,
+                    report_path=report_path,
+                    run_memory_builder=run_memory_builder,
+                    round_index=final_round,
+                    trajectory=trajectory,
+                    best=best,
+                    stop_reason=stop_reason,
+                )
+            )
     decision = _decision(best=best, stop_reason=stop_reason)
     report = {
         "schema_version": 1,
@@ -164,10 +221,18 @@ def run_hermes_batch_optimization_loop(
             "candidate_generator": candidate_generator,
             "postprocess_search_mode": postprocess_search_mode,
             "postprocess_adaptive_step": postprocess_adaptive_step,
+            "checkpoint_every": checkpoint_every,
+            "avoid_repeating": avoid_repeating,
+        },
+        "budget": {
+            "deadline_seconds": deadline_seconds,
+            "elapsed_seconds": elapsed_seconds,
         },
         "round_count": len(trajectory),
         "trajectory": trajectory,
         "best_candidate": best,
+        "skipped_candidates": skipped_candidates,
+        "memory_checkpoints": memory_checkpoints,
         "stop_reason": stop_reason,
         "decision": decision["decision"],
         "next_command": decision["next_command"],
@@ -228,6 +293,8 @@ def _build_candidate_runner(
     postprocess_blend_weights: Sequence[float] | None,
     postprocess_search_mode: str,
     postprocess_adaptive_step: float,
+    avoid_set: set[tuple[str, float]],
+    skipped_candidates: list[dict[str, Any]],
     submission_id: str,
     force: bool,
 ) -> CandidateRunner:
@@ -244,6 +311,8 @@ def _build_candidate_runner(
             blend_weights=postprocess_blend_weights,
             search_mode=postprocess_search_mode,
             adaptive_step=postprocess_adaptive_step,
+            avoid_set=avoid_set,
+            skipped_candidates=skipped_candidates,
             submission_id=submission_id,
             force=force,
         )
@@ -282,6 +351,8 @@ def _postprocess_candidate_runner(
     blend_weights: Sequence[float] | None,
     search_mode: str,
     adaptive_step: float,
+    avoid_set: set[tuple[str, float]],
+    skipped_candidates: list[dict[str, Any]],
     submission_id: str,
     force: bool,
 ) -> CandidateRunner:
@@ -311,6 +382,8 @@ def _postprocess_candidate_runner(
             schedule=schedule,
             search_mode=search_mode,
             tried=tried,
+            avoid_set=avoid_set,
+            skipped_candidates=skipped_candidates,
             best_candidate=kwargs.get("best_candidate"),
             adaptive_step=adaptive_step,
         )
@@ -370,11 +443,21 @@ def _next_postprocess_pair(
     schedule: list[tuple[str, float]],
     search_mode: str,
     tried: set[tuple[str, float]],
+    avoid_set: set[tuple[str, float]],
+    skipped_candidates: list[dict[str, Any]],
     best_candidate: object,
     adaptive_step: float,
 ) -> tuple[str, float] | None:
     if round_index <= len(schedule):
-        return schedule[round_index - 1]
+        for pair in schedule[round_index - 1 :]:
+            if pair in tried:
+                continue
+            if pair in avoid_set:
+                _record_skip(pair=pair, skipped_candidates=skipped_candidates)
+                tried.add(pair)
+                continue
+            return pair
+        return None
     if search_mode != "adaptive":
         return None
     best = _best_postprocess_metadata(best_candidate)
@@ -386,9 +469,33 @@ def _next_postprocess_pair(
         step=adaptive_step,
     ):
         pair = (strategy, candidate_weight)
+        if pair in avoid_set:
+            _record_skip(pair=pair, skipped_candidates=skipped_candidates)
+            tried.add(pair)
+            continue
         if pair not in tried:
             return pair
     return None
+
+
+def _record_skip(
+    *,
+    pair: tuple[str, float],
+    skipped_candidates: list[dict[str, Any]],
+) -> None:
+    strategy, weight = pair
+    if any(
+        item.get("strategy") == strategy and item.get("blend_weight") == weight
+        for item in skipped_candidates
+    ):
+        return
+    skipped_candidates.append(
+        {
+            "strategy": strategy,
+            "blend_weight": weight,
+            "reason": "memory_avoid_repeating",
+        }
+    )
 
 
 def _best_postprocess_metadata(candidate: object) -> tuple[str, float] | None:
@@ -464,6 +571,79 @@ def _score(judge_report: dict[str, Any]) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise HermesBatchOptimizationLoopError("judge report missing total_score_proxy")
     return float(value)
+
+
+def _deadline_reached(
+    *,
+    started_at: float,
+    now: Clock,
+    deadline_seconds: float | None,
+) -> bool:
+    return deadline_seconds is not None and now() - started_at >= deadline_seconds
+
+
+def _checkpoint_memory(
+    *,
+    root: Path,
+    report_path: Path,
+    run_memory_builder: MemoryBuilder,
+    round_index: int,
+    trajectory: list[dict[str, Any]],
+    best: dict[str, Any],
+    stop_reason: str,
+) -> dict[str, Any]:
+    checkpoint_report = {
+        "schema_version": 1,
+        "state_hint": STATE_HINT,
+        "loop_report_path": str(report_path),
+        "round_count": len(trajectory),
+        "trajectory": trajectory,
+        "best_candidate": best,
+        "stop_reason": stop_reason,
+        "decision": "checkpoint",
+    }
+    partial_path = root / "checkpoints" / f"round_{round_index:03d}_loop.json"
+    _write_json(partial_path, checkpoint_report)
+    memory = run_memory_builder(
+        batch_loop_report_path=partial_path,
+        output_path=root / "memory" / f"round_{round_index:03d}_memory.md",
+        memory_json_path=root / "memory" / f"round_{round_index:03d}_memory.json",
+        submission_dir=best.get("submission_dir") if isinstance(best, dict) else None,
+        task_ids=None,
+        force=True,
+    )
+    return {
+        "round_index": round_index,
+        "partial_loop_report_path": str(partial_path),
+        "memory_markdown_path": memory["artifacts"]["memory_markdown_path"],
+        "memory_json_path": memory["artifacts"]["memory_json_path"],
+    }
+
+
+def _load_avoid_set(path: str | Path | None) -> set[tuple[str, float]]:
+    if path is None:
+        return set()
+    memory_file = Path(path)
+    if not memory_file.exists():
+        raise HermesBatchOptimizationLoopError(f"memory_json_path not found: {path}")
+    try:
+        payload = json.loads(memory_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HermesBatchOptimizationLoopError(f"invalid memory JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise HermesBatchOptimizationLoopError("memory JSON must be an object")
+    avoid = payload.get("avoid_repeating")
+    if not isinstance(avoid, list):
+        return set()
+    result: set[tuple[str, float]] = set()
+    for item in avoid:
+        if not isinstance(item, dict):
+            continue
+        strategy = item.get("strategy")
+        weight = item.get("blend_weight")
+        if isinstance(strategy, str) and isinstance(weight, int | float):
+            result.add((strategy, _normalize_weight(float(weight))))
+    return result
 
 
 def _meets_submit_threshold(

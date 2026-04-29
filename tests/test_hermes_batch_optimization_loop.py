@@ -331,6 +331,216 @@ def test_hermes_batch_optimization_loop_postprocess_adaptive_refines_best_weight
     assert report["best_candidate"]["score"] == 96.0
 
 
+def test_hermes_batch_optimization_loop_stops_before_deadline(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+
+    candidate_calls: list[int] = []
+    times = iter([0.0, 4.8, 6.1])
+
+    def fake_time() -> float:
+        return next(times)
+
+    def fake_candidate_runner(**kwargs: Any) -> dict[str, Any]:
+        round_index = int(kwargs["round_index"])
+        candidate_calls.append(round_index)
+        submission_dir = tmp_path / f"candidate_{round_index}"
+        submission_dir.mkdir()
+        return {
+            "candidate_id": f"candidate_{round_index}",
+            "submission_dir": str(submission_dir),
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 80.0 if Path(kwargs["submission_dir"]).name == "initial" else 81.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_LOCAL_JUDGE_SCORED",
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "decision": "submit_candidate",
+            "tasks": {"1": {"score": {"task_total_score": score}}},
+        }
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=10,
+        patience=10,
+        min_score_improvement=5.0,
+        submit_score_threshold=120.0,
+        deadline_seconds=5.0,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_runner=fake_candidate_runner,
+        judge=fake_judge,
+        clock=fake_time,
+        force=False,
+    )
+
+    assert candidate_calls == [1]
+    assert report["stop_reason"] == "deadline_exceeded"
+    assert report["budget"]["deadline_seconds"] == 5.0
+
+
+def test_hermes_batch_optimization_loop_checkpoints_iteration_memory(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+
+    checkpoint_calls: list[Path] = []
+
+    def fake_candidate_runner(**kwargs: Any) -> dict[str, Any]:
+        round_index = int(kwargs["round_index"])
+        submission_dir = tmp_path / f"candidate_{round_index}"
+        submission_dir.mkdir()
+        return {
+            "candidate_id": f"candidate_{round_index}",
+            "submission_dir": str(submission_dir),
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 80.0 if Path(kwargs["submission_dir"]).name == "initial" else 80.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_LOCAL_JUDGE_SCORED",
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "decision": "submit_candidate",
+            "tasks": {"1": {"score": {"task_total_score": score}}},
+        }
+
+    def fake_memory_builder(**kwargs: Any) -> dict[str, Any]:
+        checkpoint_calls.append(Path(kwargs["batch_loop_report_path"]))
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_text("memory", encoding="utf-8")
+        Path(kwargs["memory_json_path"]).write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_ITERATION_MEMORY_BUILT",
+            "artifacts": {
+                "memory_markdown_path": str(kwargs["output_path"]),
+                "memory_json_path": str(kwargs["memory_json_path"]),
+                "updated_log_paths": [],
+            },
+            "metrics": {"trajectory_count": 0, "avoid_count": 0, "updated_log_count": 0},
+        }
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=3,
+        patience=10,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        checkpoint_every=2,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_runner=fake_candidate_runner,
+        judge=fake_judge,
+        memory_builder=fake_memory_builder,
+        force=False,
+    )
+
+    assert len(checkpoint_calls) == 2
+    assert report["memory_checkpoints"][0]["round_index"] == 2
+    assert report["memory_checkpoints"][-1]["round_index"] == 3
+
+
+def test_hermes_batch_optimization_loop_skips_memory_avoid_entries(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    memory_path = tmp_path / "memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "avoid_repeating": [
+                    {
+                        "strategy": "spectral_smooth",
+                        "blend_weight": 0.25,
+                        "reason": "below_min_effective_improvement",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    generated: list[tuple[str, float]] = []
+
+    def fake_generator(**kwargs: Any) -> dict[str, Any]:
+        strategy = str(kwargs["strategy"])
+        weight = float(kwargs["blend_weight"])
+        generated.append((strategy, weight))
+        submission_dir = Path(kwargs["output_dir"]) / "submission"
+        submission_dir.mkdir(parents=True)
+        return {
+            "candidate_id": f"{strategy}_{weight}",
+            "strategy": strategy,
+            "blend_weight": weight,
+            "submission_dir": str(submission_dir),
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 80.0 if Path(kwargs["submission_dir"]).name == "initial" else 81.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_LOCAL_JUDGE_SCORED",
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "decision": "submit_candidate",
+            "tasks": {"1": {"score": {"task_total_score": score}}},
+        }
+
+    monkeypatch.setattr(loop_module, "generate_hermes_postprocess_candidate", fake_generator)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=2,
+        patience=10,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        memory_json_path=memory_path,
+        avoid_repeating=True,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="postprocess",
+        postprocess_search_mode="grid",
+        postprocess_strategies=["spectral_smooth"],
+        postprocess_blend_weights=[0.25, 0.5],
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert generated == [("spectral_smooth", 0.5)]
+    assert report["skipped_candidates"][0]["strategy"] == "spectral_smooth"
+    assert report["skipped_candidates"][0]["blend_weight"] == 0.25
+
+
 def test_hermes_batch_optimization_loop_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,
