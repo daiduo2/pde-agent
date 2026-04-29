@@ -84,6 +84,9 @@ from pde_agent.commands.materialize_competition_candidate import (
 )
 from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_unet_local import predict_unet_local
+from pde_agent.commands.predict_unet_competition import (
+    predict_unet_competition_command,
+)
 from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
@@ -97,6 +100,9 @@ from pde_agent.commands.plan_spectral_residual_variance_intervention import (
 )
 from pde_agent.commands.prepare_candidate_execution import (
     prepare_candidate_execution,
+)
+from pde_agent.commands.prepare_competition_windows import (
+    prepare_competition_windows_command,
 )
 from pde_agent.commands.record_autonomy_decision import (
     record_autonomy_decision_command,
@@ -2110,6 +2116,54 @@ def audit_competition_submission_cmd(
                 test_path=test_path,
                 output_path=output_path,
                 dataset_key=dataset_key,
+            )
+        )
+    )
+
+
+@app.command("prepare-competition-windows")
+def prepare_competition_windows_cmd(
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            prepare_competition_windows_command(
+                task_id=task_id,
+                test_path=test_path,
+                output_path=output_path,
+                dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("predict-unet-competition")
+def predict_unet_competition_cmd(
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_unet_competition_command(
+                task_id=task_id,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                force=force,
             )
         )
     )
