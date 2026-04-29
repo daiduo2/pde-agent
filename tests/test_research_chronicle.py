@@ -187,3 +187,78 @@ def test_build_research_chronicle_summarizes_local_strategy_loop(
     assert "fno_rollout_consistency_finetune_v0" in chronicle
     assert "best_strategy=fno_rollout_consistency_finetune_v0" in chronicle
     assert "score_delta=3.0" in chronicle
+
+
+def test_build_research_chronicle_summarizes_operator_tuning_and_submission_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.research_chronicle import build_research_chronicle
+
+    tuning = _write_json(
+        tmp_path / "operator_tuning.json",
+        {
+            "state_hint": "HERMES_OPERATOR_TUNING_LOOP_RAN",
+            "operator_family": "UNet",
+            "selected_config": {
+                "inference_batch_size": 8,
+                "torch_num_threads": 1,
+            },
+            "best_projected_full_inference_seconds": 99.0,
+            "decision": {
+                "action": "accept_execution_config",
+                "reason_codes": ["projected_inference_under_timeout"],
+            },
+        },
+    )
+    prediction = _write_json(
+        tmp_path / "candidate_execution_report.json",
+        {
+            "state_hint": "UNET_COMPETITION_PREDICTION_READY",
+            "candidate": {"model_family": "UNet", "task_id": 1},
+            "inputs": {"sample_count": 1000, "forecast_steps": 190},
+            "inference": {
+                "elapsed_seconds": 94.7,
+                "inference_batch_size": 8,
+                "torch_num_threads": 1,
+                "phase_timings": {"rollout_seconds": 94.0},
+            },
+        },
+    )
+    submission_candidate = _write_json(
+        tmp_path / "hermes_submission_candidate.json",
+        {
+            "state_hint": "HERMES_SUBMISSION_CANDIDATE_READY",
+            "operator_family": "UNet",
+            "selected_config": {
+                "inference_batch_size": 8,
+                "torch_num_threads": 1,
+            },
+            "materialized": {
+                "submission": {
+                    "metrics": {
+                        "prediction_shape": [1000, 200, 256],
+                        "inference_time": 94.7,
+                    }
+                }
+            },
+            "audit": {"decision": "passed", "issue_count": 0},
+        },
+    )
+
+    report = build_research_chronicle(
+        artifact_paths=[tuning, prediction, submission_candidate],
+        output_path=tmp_path / "chronicle.md",
+        force=True,
+    )
+
+    chronicle = Path(report["artifacts"]["chronicle_path"]).read_text(
+        encoding="utf-8"
+    )
+    assert "Operator Runtime Tuning:" in chronicle
+    assert "operator=UNet" in chronicle
+    assert "inference_batch_size=8" in chronicle
+    assert "torch_num_threads=1" in chronicle
+    assert "UNet Competition Prediction:" in chronicle
+    assert "rollout_seconds=94.0" in chronicle
+    assert "Hermes Submission Candidate:" in chronicle
+    assert "audit_decision=passed" in chronicle

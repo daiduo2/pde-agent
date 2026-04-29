@@ -92,6 +92,15 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
     lines.extend(["", "Local Strategy Loop:"])
     loop_lines = _local_strategy_loop_lines(records)
     lines.extend(loop_lines or ["- No local strategy loop artifact was provided."])
+    lines.extend(["", "Operator Runtime Tuning:"])
+    tuning_lines = _operator_tuning_lines(records)
+    lines.extend(tuning_lines or ["- No operator runtime tuning artifact was provided."])
+    lines.extend(["", "UNet Competition Prediction:"])
+    unet_lines = _unet_prediction_lines(records)
+    lines.extend(unet_lines or ["- No UNet competition prediction artifact was provided."])
+    lines.extend(["", "Hermes Submission Candidate:"])
+    candidate_lines = _hermes_submission_candidate_lines(records)
+    lines.extend(candidate_lines or ["- No Hermes submission candidate artifact was provided."])
     lines.extend(["", "Submission Decision:"])
     submission_lines = _submission_lines(records)
     lines.extend(submission_lines or ["- No competition submission pipeline artifact was provided."])
@@ -160,6 +169,38 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + str(_nested(payload, ["best_result", "strategy_id"], "unknown"))
             + " score_delta="
             + str(_nested(payload, ["best_result", "score_delta"], "unknown"))
+        ]
+    if kind == "operator_tuning":
+        selected = payload.get("selected_config")
+        if not isinstance(selected, dict):
+            selected = {}
+        return [
+            "- Hermes tuned operator="
+            + str(payload.get("operator_family", "unknown"))
+            + " selected inference_batch_size="
+            + str(selected.get("inference_batch_size", "unknown"))
+            + " torch_num_threads="
+            + str(selected.get("torch_num_threads", "unknown"))
+            + " projected_full_inference_seconds="
+            + str(payload.get("best_projected_full_inference_seconds", "unknown"))
+        ]
+    if kind == "unet_prediction":
+        return [
+            "- Hermes executed UNet competition prediction samples="
+            + str(_nested(payload, ["inputs", "sample_count"], "unknown"))
+            + " inference_time="
+            + str(_nested(payload, ["inference", "elapsed_seconds"], "unknown"))
+            + " rollout_seconds="
+            + str(_nested(payload, ["inference", "phase_timings", "rollout_seconds"], "unknown"))
+        ]
+    if kind == "hermes_submission_candidate":
+        return [
+            "- Hermes materialized submission candidate audit="
+            + str(_nested(payload, ["audit", "decision"], "unknown"))
+            + " issue_count="
+            + str(_nested(payload, ["audit", "issue_count"], "unknown"))
+            + " next="
+            + str(payload.get("next_command", "unknown"))
         ]
     return ["- Recorded artifact state=" + _state(payload)]
 
@@ -289,6 +330,82 @@ def _local_strategy_loop_lines(records: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _operator_tuning_lines(records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        if record["kind"] != "operator_tuning":
+            continue
+        payload = record["payload"]
+        selected = payload.get("selected_config")
+        if not isinstance(selected, dict):
+            selected = {}
+        lines.append(
+            "- operator="
+            + str(payload.get("operator_family", "unknown"))
+            + " inference_batch_size="
+            + str(selected.get("inference_batch_size", "unknown"))
+            + " torch_num_threads="
+            + str(selected.get("torch_num_threads", "unknown"))
+            + " projected_full_inference_seconds="
+            + str(payload.get("best_projected_full_inference_seconds", "unknown"))
+            + " decision="
+            + str(_nested(payload, ["decision", "action"], "unknown"))
+        )
+    return lines
+
+
+def _unet_prediction_lines(records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        if record["kind"] != "unet_prediction":
+            continue
+        payload = record["payload"]
+        phase = _nested(payload, ["inference", "phase_timings"], {})
+        if not isinstance(phase, dict):
+            phase = {}
+        lines.append(
+            "- task="
+            + str(_nested(payload, ["candidate", "task_id"], "unknown"))
+            + " samples="
+            + str(_nested(payload, ["inputs", "sample_count"], "unknown"))
+            + " forecast_steps="
+            + str(_nested(payload, ["inputs", "forecast_steps"], "unknown"))
+            + " inference_time="
+            + str(_nested(payload, ["inference", "elapsed_seconds"], "unknown"))
+            + " rollout_seconds="
+            + str(phase.get("rollout_seconds", "unknown"))
+            + " inference_batch_size="
+            + str(_nested(payload, ["inference", "inference_batch_size"], "unknown"))
+            + " torch_num_threads="
+            + str(_nested(payload, ["inference", "torch_num_threads"], "unknown"))
+        )
+    return lines
+
+
+def _hermes_submission_candidate_lines(records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        if record["kind"] != "hermes_submission_candidate":
+            continue
+        payload = record["payload"]
+        metrics = _nested(payload, ["materialized", "submission", "metrics"], {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        lines.append(
+            "- operator="
+            + str(payload.get("operator_family", "unknown"))
+            + " audit_decision="
+            + str(_nested(payload, ["audit", "decision"], "unknown"))
+            + " issue_count="
+            + str(_nested(payload, ["audit", "issue_count"], "unknown"))
+            + " prediction_shape="
+            + str(metrics.get("prediction_shape", "unknown"))
+            + " inference_time="
+            + str(metrics.get("inference_time", "unknown"))
+        )
+    return lines
+
+
 def _artifact_kind(payload: dict[str, Any]) -> str:
     state = _state(payload)
     if "session_id" in payload and "tool_call_summary" in payload:
@@ -301,6 +418,12 @@ def _artifact_kind(payload: dict[str, Any]) -> str:
         return "local_strategy_loop"
     if state == "LOCAL_STRATEGY_LEADERBOARD_UPDATED":
         return "local_strategy_leaderboard"
+    if state == "HERMES_OPERATOR_TUNING_LOOP_RAN":
+        return "operator_tuning"
+    if state == "UNET_COMPETITION_PREDICTION_READY":
+        return "unet_prediction"
+    if state == "HERMES_SUBMISSION_CANDIDATE_READY":
+        return "hermes_submission_candidate"
     return "generic"
 
 
