@@ -11,6 +11,9 @@ from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.audit_competition_submission import (
     audit_competition_submission_command,
 )
+from pde_agent.commands.audit_local_strategy_loop import (
+    audit_local_strategy_loop_command,
+)
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
 from pde_agent.commands.build_local_strategy_library import (
@@ -79,6 +82,9 @@ from pde_agent.commands.hermes_strategy_growth_autopilot import (
     hermes_strategy_growth_autopilot_command,
 )
 from pde_agent.commands.init_run import init_run
+from pde_agent.commands.ingest_local_strategy_result import (
+    ingest_local_strategy_result_command,
+)
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
@@ -123,6 +129,9 @@ from pde_agent.commands.prepare_competition_windows import (
 )
 from pde_agent.commands.record_autonomy_decision import (
     record_autonomy_decision_command,
+)
+from pde_agent.commands.route_local_strategy_next_action import (
+    route_local_strategy_next_action_command,
 )
 from pde_agent.commands.record_strategy_proposal import (
     record_strategy_proposal_command,
@@ -364,6 +373,65 @@ def record_local_strategy_result_cmd(
                 result_status=result_status,
                 min_score_delta=min_score_delta,
                 max_inference_seconds=max_inference_seconds,
+                failure_reason=failure_reason,
+            )
+        )
+    )
+
+
+@app.command("audit-local-strategy-loop")
+def audit_local_strategy_loop_cmd(
+    output_dir: str = typer.Option(...),
+    report_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            audit_local_strategy_loop_command(
+                output_dir=output_dir,
+                report_path=report_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("route-local-strategy-next-action")
+def route_local_strategy_next_action_cmd(
+    artifact_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            route_local_strategy_next_action_command(
+                artifact_path=artifact_path,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("ingest-local-strategy-result")
+def ingest_local_strategy_result_cmd(
+    source_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    baseline_score: float | None = typer.Option(None),
+    result_status: str = typer.Option("completed"),
+    failure_reason: str | None = typer.Option(None),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            ingest_local_strategy_result_command(
+                source_path=source_path,
+                output_path=output_path,
+                baseline_score=baseline_score,
+                result_status=result_status,
                 failure_reason=failure_reason,
             )
         )
