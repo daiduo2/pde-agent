@@ -79,6 +79,17 @@ def test_run_competition_task_pipeline_builds_audited_submission(tmp_path: Path)
     assert report["audit"]["decision"] == "passed"
     assert Path(report["artifacts"]["submission_zip_path"]).exists()
     assert Path(report["artifacts"]["pipeline_report_path"]).exists()
+    log_text = (
+        Path(report["artifacts"]["submission_dir"]) / "task1_logs.log"
+    ).read_text(encoding="utf-8")
+    assert "Agent Trace" in log_text
+    assert "Experiment Tracking" in log_text
+    assert "Inference Log" in log_text
+    assert "Validation/Audit" in log_text
+    assert "Limitations" in log_text
+    assert "model_family: fno" in log_text
+    assert str(checkpoint_path) in log_text
+    assert "audit_decision: passed" in log_text
     assert report["next_command"] == "submit-if-audit-passed"
 
 
