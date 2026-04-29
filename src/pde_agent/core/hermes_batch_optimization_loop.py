@@ -16,6 +16,13 @@ from pde_agent.core.hermes_postprocess_candidate import (
 
 
 STATE_HINT = "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
+SUPPORTED_LEARNING_OBJECTIVES = {
+    "auto",
+    "score",
+    "accuracy",
+    "runtime",
+    "feasibility",
+}
 CandidateRunner = Callable[..., dict[str, Any] | None]
 Judge = Callable[..., dict[str, Any]]
 Clock = Callable[[], float]
@@ -34,6 +41,7 @@ def run_hermes_batch_optimization_loop(
     patience: int,
     min_score_improvement: float,
     submit_score_threshold: float,
+    learning_objective: str = "score",
     task1_test_path: str | Path | None = None,
     task1_target_path: str | Path | None = None,
     task2_test_path: str | Path | None = None,
@@ -63,6 +71,10 @@ def run_hermes_batch_optimization_loop(
         raise HermesBatchOptimizationLoopError("patience must be non-negative")
     if min_score_improvement < 0.0:
         raise HermesBatchOptimizationLoopError("min_score_improvement must be non-negative")
+    if learning_objective not in SUPPORTED_LEARNING_OBJECTIVES:
+        raise HermesBatchOptimizationLoopError(
+            f"unsupported learning_objective: {learning_objective}"
+        )
     if deadline_seconds is not None and deadline_seconds <= 0.0:
         raise HermesBatchOptimizationLoopError("deadline_seconds must be positive")
     if checkpoint_every < 0:
@@ -119,6 +131,11 @@ def run_hermes_batch_optimization_loop(
         prediction_dataset_key=prediction_dataset_key,
         metadata={"source": "initial_submission"},
     )
+    initial = _with_objective(
+        candidate=initial,
+        requested_objective=learning_objective,
+        reference_candidate=initial,
+    )
     best = initial
     trajectory.append({**initial, "improved": True, "score_delta_vs_best": 0.0})
     if _meets_submit_threshold(best, submit_score_threshold):
@@ -158,7 +175,12 @@ def run_hermes_batch_optimization_loop(
                 prediction_dataset_key=prediction_dataset_key,
                 metadata=_candidate_metadata(candidate),
             )
-            delta = evaluated["score"] - best["score"]
+            evaluated = _with_objective(
+                candidate=evaluated,
+                requested_objective=learning_objective,
+                reference_candidate=best,
+            )
+            delta = _objective_score(evaluated) - _objective_score(best)
             improved = delta >= min_score_improvement
             if delta > 0.0:
                 best = evaluated
@@ -218,6 +240,7 @@ def run_hermes_batch_optimization_loop(
             "patience": patience,
             "min_score_improvement": min_score_improvement,
             "submit_score_threshold": submit_score_threshold,
+            "learning_objective": learning_objective,
             "candidate_generator": candidate_generator,
             "postprocess_search_mode": postprocess_search_mode,
             "postprocess_adaptive_step": postprocess_adaptive_step,
@@ -275,6 +298,7 @@ def _evaluate_candidate(
         "judge_report_path": judge_report.get("judge_report_path", str(judge_path)),
         "rules_passed": bool(judge_report.get("rules_passed")),
         "score": score,
+        "objective_signals": _objective_signals(judge_report),
         "judge_decision": judge_report.get("decision"),
         "metadata": metadata,
     }
@@ -571,6 +595,169 @@ def _score(judge_report: dict[str, Any]) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise HermesBatchOptimizationLoopError("judge report missing total_score_proxy")
     return float(value)
+
+
+def _with_objective(
+    *,
+    candidate: dict[str, Any],
+    requested_objective: str,
+    reference_candidate: dict[str, Any],
+) -> dict[str, Any]:
+    selected = _select_objective(
+        requested_objective=requested_objective,
+        reference_candidate=reference_candidate,
+    )
+    signals = _candidate_signals(candidate)
+    candidate["objective"] = {
+        "requested_objective": requested_objective,
+        "selected_objective": selected,
+        "objective_score": _compute_objective_score(
+            selected_objective=selected,
+            candidate=candidate,
+            signals=signals,
+        ),
+        "objective_reason": _objective_reason(
+            requested_objective=requested_objective,
+            selected_objective=selected,
+            reference_candidate=reference_candidate,
+        ),
+        **signals,
+    }
+    return candidate
+
+
+def _select_objective(
+    *,
+    requested_objective: str,
+    reference_candidate: dict[str, Any],
+) -> str:
+    if requested_objective != "auto":
+        return requested_objective
+    signals = _candidate_signals(reference_candidate)
+    if not signals["rules_passed"]:
+        return "feasibility"
+    if signals["timeout_zeroed"] or signals["inference_time"] > 120.0:
+        return "runtime"
+    if signals["prediction_accuracy_score"] is not None or signals["segment_score"] is not None:
+        return "accuracy"
+    return "score"
+
+
+def _candidate_signals(candidate: dict[str, Any]) -> dict[str, Any]:
+    signals = candidate.get("objective_signals")
+    if isinstance(signals, dict):
+        return signals
+    return {
+        "rules_passed": bool(candidate.get("rules_passed")),
+        "timeout_zeroed": False,
+        "train_time": None,
+        "inference_time": None,
+        "segment_score": None,
+        "prediction_accuracy_score": None,
+    }
+
+
+def _objective_signals(judge_report: dict[str, Any]) -> dict[str, Any]:
+    tasks = judge_report.get("tasks")
+    task_values = [task for task in tasks.values()] if isinstance(tasks, dict) else []
+    train_times: list[float] = []
+    inference_times: list[float] = []
+    segment_scores: list[float] = []
+    prediction_scores: list[float] = []
+    timeout_zeroed = False
+    for task in task_values:
+        if not isinstance(task, dict):
+            continue
+        timing = task.get("timing")
+        if isinstance(timing, dict):
+            _append_number(train_times, timing.get("train_time"))
+            _append_number(inference_times, timing.get("inference_time"))
+        score = task.get("score")
+        if isinstance(score, dict):
+            timeout_zeroed = timeout_zeroed or bool(score.get("timeout_zeroed"))
+            _append_number(segment_scores, score.get("segment_score"))
+            _append_number(prediction_scores, score.get("prediction_accuracy_score"))
+        validation = task.get("validation_score")
+        if isinstance(validation, dict) and not segment_scores:
+            _append_number(segment_scores, validation.get("segment_score"))
+            _append_number(prediction_scores, validation.get("task_prediction_score"))
+    inference_time = max(inference_times) if inference_times else None
+    if inference_time is not None and inference_time > 120.0:
+        timeout_zeroed = True
+    return {
+        "rules_passed": bool(judge_report.get("rules_passed")),
+        "timeout_zeroed": timeout_zeroed,
+        "train_time": sum(train_times) if train_times else None,
+        "inference_time": inference_time,
+        "segment_score": sum(segment_scores) if segment_scores else None,
+        "prediction_accuracy_score": sum(prediction_scores)
+        if prediction_scores
+        else None,
+    }
+
+
+def _append_number(values: list[float], value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return
+    values.append(float(value))
+
+
+def _compute_objective_score(
+    *,
+    selected_objective: str,
+    candidate: dict[str, Any],
+    signals: dict[str, Any],
+) -> float:
+    if selected_objective == "score":
+        return float(candidate["score"])
+    if selected_objective == "accuracy":
+        for key in ("prediction_accuracy_score", "segment_score"):
+            value = signals.get(key)
+            if isinstance(value, int | float):
+                return float(value)
+        return float(candidate["score"])
+    if selected_objective == "runtime":
+        value = signals.get("inference_time")
+        if isinstance(value, int | float):
+            return -float(value)
+        return float("-inf")
+    if selected_objective == "feasibility":
+        value = signals.get("inference_time")
+        runtime = float(value) if isinstance(value, int | float) else float("inf")
+        feasible_bonus = 10000.0 if runtime <= 120.0 else 0.0
+        rules_bonus = 100000.0 if signals.get("rules_passed") else 0.0
+        return rules_bonus + feasible_bonus - runtime
+    raise HermesBatchOptimizationLoopError(
+        f"unsupported selected objective: {selected_objective}"
+    )
+
+
+def _objective_score(candidate: dict[str, Any]) -> float:
+    objective = candidate.get("objective")
+    if not isinstance(objective, dict):
+        raise HermesBatchOptimizationLoopError("candidate missing objective")
+    value = objective.get("objective_score")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise HermesBatchOptimizationLoopError("candidate missing objective_score")
+    return float(value)
+
+
+def _objective_reason(
+    *,
+    requested_objective: str,
+    selected_objective: str,
+    reference_candidate: dict[str, Any],
+) -> str:
+    if requested_objective != "auto":
+        return f"explicit_{selected_objective}_objective"
+    signals = _candidate_signals(reference_candidate)
+    if selected_objective == "runtime":
+        return "auto_runtime_because_reference_candidate_exceeds_inference_limit"
+    if selected_objective == "feasibility":
+        return "auto_feasibility_because_reference_candidate_fails_rules"
+    if selected_objective == "accuracy":
+        return "auto_accuracy_because_reference_candidate_is_within_runtime_gate"
+    return "auto_score_fallback"
 
 
 def _deadline_reached(

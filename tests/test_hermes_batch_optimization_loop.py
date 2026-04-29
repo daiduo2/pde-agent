@@ -541,6 +541,78 @@ def test_hermes_batch_optimization_loop_skips_memory_avoid_entries(
     assert report["skipped_candidates"][0]["blend_weight"] == 0.25
 
 
+def test_hermes_batch_optimization_loop_auto_objective_learns_runtime_when_timeout(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+
+    timings = {
+        "initial": 157.0,
+        "candidate_1": 145.0,
+        "candidate_2": 130.0,
+    }
+
+    def fake_candidate_runner(**kwargs: Any) -> dict[str, Any]:
+        round_index = int(kwargs["round_index"])
+        submission_dir = tmp_path / f"candidate_{round_index}"
+        submission_dir.mkdir()
+        return {
+            "candidate_id": f"candidate_{round_index}",
+            "submission_dir": str(submission_dir),
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        name = Path(kwargs["submission_dir"]).name
+        inference_time = timings[name]
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_LOCAL_JUDGE_SCORED",
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": 0.0,
+            "decision": "iterate_before_submit",
+            "tasks": {
+                "1": {
+                    "timing": {"train_time": 0.0, "inference_time": inference_time},
+                    "score": {
+                        "task_total_score": 0.0,
+                        "timeout_zeroed": True,
+                        "segment_score": 10.0,
+                        "prediction_accuracy_score": 7.5,
+                    },
+                }
+            },
+        }
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=2,
+        patience=2,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        learning_objective="auto",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_runner=fake_candidate_runner,
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert report["parameters"]["learning_objective"] == "auto"
+    assert report["best_candidate"]["candidate_id"] == "candidate_2"
+    assert report["best_candidate"]["objective"]["selected_objective"] == "runtime"
+    assert report["best_candidate"]["objective"]["inference_time"] == 130.0
+    assert report["trajectory"][1]["improved"] is True
+    assert report["trajectory"][2]["score"] == 0.0
+
+
 def test_hermes_batch_optimization_loop_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,
@@ -559,8 +631,13 @@ def test_hermes_batch_optimization_loop_cli_returns_payload(
             "best_candidate": {
                 "candidate_id": "candidate_1",
                 "score": 96.0,
+                "objective": {
+                    "selected_objective": "score",
+                    "objective_score": 96.0,
+                },
                 "submission_dir": str(tmp_path / "candidate_1"),
             },
+            "parameters": {"learning_objective": "score"},
             "stop_reason": "submit_threshold_met",
             "decision": "submit_best_candidate",
             "next_command": "submit-best-candidate",
@@ -582,6 +659,8 @@ def test_hermes_batch_optimization_loop_cli_returns_payload(
             "task1_val.hdf5",
             "--max-rounds",
             "2",
+            "--learning-objective",
+            "auto",
         ],
     )
 
@@ -590,4 +669,5 @@ def test_hermes_batch_optimization_loop_cli_returns_payload(
     assert payload["status"] == "ok"
     assert payload["state_hint"] == "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
     assert payload["metrics"]["best_score"] == 96.0
+    assert payload["metrics"]["learning_objective"] == "score"
     assert payload["next_hint"] == "submit-best-candidate"

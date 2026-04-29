@@ -99,6 +99,7 @@ def _best(loop: dict[str, Any]) -> dict[str, Any]:
     return {
         "candidate_id": value.get("candidate_id"),
         "score": value.get("score"),
+        "objective": _objective(value),
         "strategy": _metadata(value).get("strategy"),
         "blend_weight": _metadata(value).get("blend_weight"),
         "source": _metadata(value).get("source"),
@@ -112,6 +113,7 @@ def _trajectory_item(item: dict[str, Any]) -> dict[str, Any]:
         "round_index": item.get("round_index"),
         "candidate_id": item.get("candidate_id"),
         "score": item.get("score"),
+        "objective": _objective(item),
         "rules_passed": item.get("rules_passed"),
         "effective_improvement": item.get("improved"),
         "score_delta_vs_best": item.get("score_delta_vs_best"),
@@ -170,20 +172,29 @@ def _metadata(item: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _objective(item: dict[str, Any]) -> dict[str, Any] | None:
+    value = item.get("objective")
+    return value if isinstance(value, dict) else None
+
+
 def _render_markdown(memory: dict[str, Any]) -> str:
     best = memory["best_candidate"]
+    best_objective = best.get("objective") or {}
     lines = [
         MARKER,
         "",
         "Best Candidate:",
         f"- candidate_id: {best.get('candidate_id')}",
         f"- score: {best.get('score')}",
+        f"- selected_objective: {best_objective.get('selected_objective')}",
+        f"- objective_score: {best_objective.get('objective_score')}",
         f"- strategy: {best.get('strategy')}",
         f"- blend_weight: {best.get('blend_weight')}",
         "",
         "Trajectory Summary:",
     ]
     for item in memory["trajectory_summary"]:
+        objective = item.get("objective") or {}
         lines.append(
             "- round="
             + str(item.get("round_index"))
@@ -191,6 +202,12 @@ def _render_markdown(memory: dict[str, Any]) -> str:
             + str(item.get("candidate_id"))
             + " score="
             + str(item.get("score"))
+            + " selected_objective="
+            + str(objective.get("selected_objective"))
+            + " objective_score="
+            + str(objective.get("objective_score"))
+            + " inference_time="
+            + str(objective.get("inference_time"))
             + " strategy="
             + str(item.get("strategy"))
             + " blend_weight="

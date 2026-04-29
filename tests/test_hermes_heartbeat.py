@@ -60,6 +60,7 @@ def test_hermes_heartbeat_runs_batches_and_carries_best_and_memory(
         max_rounds_per_batch=4,
         checkpoint_every=2,
         max_stagnant_batches=2,
+        learning_objective="auto",
         task1_test_path="task1_test.hdf5",
         task1_target_path="task1_val.hdf5",
         batch_runner=fake_batch_runner,
@@ -69,6 +70,7 @@ def test_hermes_heartbeat_runs_batches_and_carries_best_and_memory(
 
     assert len(batch_calls) == 2
     assert batch_calls[0]["initial_submission_dir"] == initial_dir
+    assert batch_calls[0]["learning_objective"] == "auto"
     assert batch_calls[1]["initial_submission_dir"] == tmp_path / "best_1"
     assert batch_calls[1]["memory_json_path"] == Path(
         report["batches"][0]["memory_json_path"]
@@ -141,6 +143,80 @@ def test_hermes_heartbeat_stops_when_score_stagnates(
     assert report["decision"] == "review_before_next_heartbeat"
 
 
+def test_hermes_heartbeat_uses_objective_score_for_batch_stagnation(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_heartbeat import run_hermes_heartbeat
+
+    objective_scores = iter([-150.0, -130.0, -110.0])
+    batch_count = 0
+
+    def fake_batch_runner(**kwargs: Any) -> dict[str, Any]:
+        nonlocal batch_count
+        batch_count += 1
+        objective_score = next(objective_scores)
+        report_path = Path(kwargs["output_dir"]) / "hermes_batch_optimization_loop.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        best_dir = tmp_path / f"best_{batch_count}"
+        best_dir.mkdir(exist_ok=True)
+        return {
+            "state_hint": "HERMES_BATCH_OPTIMIZATION_LOOP_RAN",
+            "loop_report_path": str(report_path),
+            "round_count": 1,
+            "best_candidate": {
+                "candidate_id": f"runtime_{batch_count}",
+                "score": 0.0,
+                "submission_dir": str(best_dir),
+                "rules_passed": True,
+                "objective": {
+                    "selected_objective": "runtime",
+                    "objective_score": objective_score,
+                    "inference_time": -objective_score,
+                },
+            },
+            "stop_reason": "patience_exhausted",
+            "decision": "iterate_more",
+        }
+
+    def fake_memory_builder(**kwargs: Any) -> dict[str, Any]:
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_text("memory", encoding="utf-8")
+        Path(kwargs["memory_json_path"]).write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_ITERATION_MEMORY_BUILT",
+            "artifacts": {
+                "memory_markdown_path": str(kwargs["output_path"]),
+                "memory_json_path": str(kwargs["memory_json_path"]),
+                "updated_log_paths": [],
+            },
+            "metrics": {},
+        }
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_heartbeat(
+        output_dir=tmp_path / "heartbeat",
+        initial_submission_dir=initial_dir,
+        max_batches=3,
+        batch_deadline_seconds=5.0,
+        max_rounds_per_batch=1,
+        max_stagnant_batches=1,
+        min_batch_score_improvement=1.0,
+        learning_objective="auto",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        batch_runner=fake_batch_runner,
+        memory_builder=fake_memory_builder,
+        force=False,
+    )
+
+    assert report["batch_count"] == 3
+    assert report["best_candidate"]["candidate_id"] == "runtime_3"
+    assert report["best_objective_score"] == -110.0
+    assert report["stop_reason"] == "max_batches_exhausted"
+
+
 def test_hermes_heartbeat_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,
@@ -177,6 +253,8 @@ def test_hermes_heartbeat_cli_returns_payload(
             "task1_test.hdf5",
             "--task1-target-path",
             "task1_val.hdf5",
+            "--learning-objective",
+            "auto",
         ],
     )
 

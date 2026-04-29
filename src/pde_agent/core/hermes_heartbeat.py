@@ -34,6 +34,7 @@ def run_hermes_heartbeat(
     min_batch_score_improvement: float = 1.0,
     min_score_improvement: float = 1.0,
     submit_score_threshold: float = 120.0,
+    learning_objective: str = "score",
     patience: int = 10,
     task1_test_path: str | Path | None = None,
     task1_target_path: str | Path | None = None,
@@ -72,6 +73,7 @@ def run_hermes_heartbeat(
     batches: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     best_score: float | None = None
+    best_objective_score: float | None = None
     stagnant_count = 0
     stop_reason = "max_batches_exhausted"
 
@@ -84,6 +86,7 @@ def run_hermes_heartbeat(
             patience=patience,
             min_score_improvement=min_score_improvement,
             submit_score_threshold=submit_score_threshold,
+            learning_objective=learning_objective,
             task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
             task1_target_path=Path(task1_target_path)
             if task1_target_path is not None
@@ -116,8 +119,13 @@ def run_hermes_heartbeat(
             force=True,
         )
         score = _score(candidate)
-        improved = best_score is None or score - best_score >= min_batch_score_improvement
-        if best_score is None or score > best_score:
+        objective_score = _objective_score(candidate)
+        improved = (
+            best_objective_score is None
+            or objective_score - best_objective_score >= min_batch_score_improvement
+        )
+        if best_objective_score is None or objective_score > best_objective_score:
+            best_objective_score = objective_score
             best_score = score
             best = candidate
         if improved:
@@ -134,6 +142,8 @@ def run_hermes_heartbeat(
             "best_candidate_id": candidate.get("candidate_id"),
             "best_submission_dir": candidate.get("submission_dir"),
             "best_score": score,
+            "best_objective": _objective_name(candidate),
+            "best_objective_score": objective_score,
             "score_improved": improved,
             "batch_stop_reason": batch.get("stop_reason"),
             "batch_decision": batch.get("decision"),
@@ -146,7 +156,7 @@ def run_hermes_heartbeat(
             stop_reason = "stagnation_detected"
             break
 
-    if best is None or best_score is None:
+    if best is None or best_score is None or best_objective_score is None:
         raise HermesHeartbeatError("heartbeat produced no best candidate")
     decision = _decision(stop_reason)
     report = {
@@ -159,11 +169,14 @@ def run_hermes_heartbeat(
             "max_rounds_per_batch": max_rounds_per_batch,
             "checkpoint_every": checkpoint_every,
             "max_stagnant_batches": max_stagnant_batches,
+            "learning_objective": learning_objective,
         },
         "batch_count": len(batches),
         "batches": batches,
         "best_candidate": best,
         "best_score": best_score,
+        "best_objective": _objective_name(best),
+        "best_objective_score": best_objective_score,
         "stop_reason": stop_reason,
         "decision": decision,
         "next_command": "run-hermes-heartbeat",
@@ -186,6 +199,24 @@ def _score(candidate: dict[str, Any]) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise HermesHeartbeatError("best candidate missing numeric score")
     return float(value)
+
+
+def _objective_score(candidate: dict[str, Any]) -> float:
+    objective = candidate.get("objective")
+    if isinstance(objective, dict):
+        value = objective.get("objective_score")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+    return _score(candidate)
+
+
+def _objective_name(candidate: dict[str, Any]) -> str:
+    objective = candidate.get("objective")
+    if isinstance(objective, dict):
+        value = objective.get("selected_objective")
+        if isinstance(value, str) and value:
+            return value
+    return "score"
 
 
 def _decision(stop_reason: str) -> str:

@@ -17,6 +17,7 @@ def run_hermes_batch_optimization_loop_command(
     patience: int,
     min_score_improvement: float,
     submit_score_threshold: float,
+    learning_objective: str,
     task1_test_path: str | None,
     task1_target_path: str | None,
     task2_test_path: str | None,
@@ -43,6 +44,7 @@ def run_hermes_batch_optimization_loop_command(
         patience=patience,
         min_score_improvement=min_score_improvement,
         submit_score_threshold=submit_score_threshold,
+        learning_objective=learning_objective,
         task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
         task1_target_path=Path(task1_target_path)
         if task1_target_path is not None
@@ -76,6 +78,9 @@ def run_hermes_batch_optimization_loop_command(
             "round_count": report["round_count"],
             "best_candidate_id": best["candidate_id"],
             "best_score": best["score"],
+            "learning_objective": report["parameters"]["learning_objective"],
+            "best_objective": best.get("objective", {}).get("selected_objective"),
+            "best_objective_score": best.get("objective", {}).get("objective_score"),
             "stop_reason": report["stop_reason"],
             "decision": report["decision"],
             "memory_checkpoint_count": len(report.get("memory_checkpoints", [])),

@@ -10,6 +10,13 @@ def _write_loop_report(path: Path) -> Path:
         "best_candidate": {
             "candidate_id": "postprocess_spectral_smooth_w0.375",
             "score": 88.0,
+            "objective": {
+                "requested_objective": "auto",
+                "selected_objective": "runtime",
+                "objective_score": -118.0,
+                "objective_reason": "auto_runtime_because_reference_candidate_exceeds_inference_limit",
+                "inference_time": 118.0,
+            },
             "metadata": {
                 "source": "postprocess_generator",
                 "strategy": "spectral_smooth",
@@ -23,6 +30,12 @@ def _write_loop_report(path: Path) -> Path:
                 "score": 82.0,
                 "rules_passed": True,
                 "improved": True,
+                "objective": {
+                    "requested_objective": "auto",
+                    "selected_objective": "runtime",
+                    "objective_score": -157.0,
+                    "inference_time": 157.0,
+                },
                 "metadata": {"source": "initial_submission"},
             },
             {
@@ -31,6 +44,12 @@ def _write_loop_report(path: Path) -> Path:
                 "score": 84.0,
                 "rules_passed": True,
                 "improved": True,
+                "objective": {
+                    "requested_objective": "auto",
+                    "selected_objective": "runtime",
+                    "objective_score": -130.0,
+                    "inference_time": 130.0,
+                },
                 "metadata": {
                     "source": "postprocess_generator",
                     "strategy": "context_anchor_blend",
@@ -93,6 +112,8 @@ def test_build_hermes_iteration_memory_extracts_avoid_list_and_next_hints(
     assert memory_json["best_candidate"]["candidate_id"] == (
         "postprocess_spectral_smooth_w0.375"
     )
+    assert memory_json["best_candidate"]["objective"]["selected_objective"] == "runtime"
+    assert memory_json["trajectory_summary"][0]["objective"]["inference_time"] == 157.0
     assert {
         "strategy": "context_anchor_blend",
         "blend_weight": 1.0,
@@ -104,6 +125,7 @@ def test_build_hermes_iteration_memory_extracts_avoid_list_and_next_hints(
         "reason": "below_min_effective_improvement",
     } in memory_json["avoid_repeating"]
     assert "Do not repeat" in memory_text
+    assert "selected_objective=runtime" in memory_text
     assert "spectral_smooth" in memory_text
     assert "Try local refinement around blend_weight=0.375" in memory_text
 
