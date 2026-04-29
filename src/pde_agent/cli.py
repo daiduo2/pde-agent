@@ -76,6 +76,9 @@ from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
 from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
+from pde_agent.commands.materialize_competition_candidate import (
+    materialize_competition_candidate_command,
+)
 from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_unet_local import predict_unet_local
 from pde_agent.commands.predict_local_model import predict_local_model
@@ -2046,6 +2049,41 @@ def score_competition_submission_cmd(
                 output_path=output_path,
                 prediction_dataset_key=prediction_dataset_key,
                 target_dataset_key=target_dataset_key,
+            )
+        )
+    )
+
+
+@app.command("materialize-competition-candidate")
+def materialize_competition_candidate_cmd(
+    task_id: int = typer.Option(...),
+    candidate_report_path: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option(...),
+    target_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    source_prediction_key: str = typer.Option("prediction"),
+    train_time: float | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            materialize_competition_candidate_command(
+                task_id=task_id,
+                candidate_report_path=candidate_report_path,
+                test_path=test_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                target_path=target_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                source_prediction_key=source_prediction_key,
+                train_time=train_time,
+                force=force,
             )
         )
     )
