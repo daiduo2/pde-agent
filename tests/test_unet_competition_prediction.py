@@ -130,6 +130,42 @@ def test_predict_unet_competition_writes_candidate_report(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="UNet competition test requires torch")
+def test_predict_unet_competition_accepts_chunk_and_thread_config(
+    tmp_path: Path,
+) -> None:
+    import torch
+
+    from pde_agent.core.unet_competition_prediction import predict_unet_competition
+
+    test_path = _write_hdf5(
+        tmp_path / "task1_test.hdf5",
+        np.ones((2, 10, 256), dtype=np.float32),
+    )
+    checkpoint_path = tmp_path / "unet.pt"
+    torch.save(
+        {"model_state_dict": _official_unet_state_dict(torch=torch)},
+        checkpoint_path,
+    )
+
+    report = predict_unet_competition(
+        task_id=1,
+        test_path=test_path,
+        checkpoint_path=checkpoint_path,
+        output_dir=tmp_path / "unet_competition",
+        dataset_key="tensor",
+        force=False,
+        inference_batch_size=1,
+        torch_num_threads=1,
+    )
+
+    assert report["inference"]["inference_batch_size"] == 1
+    assert report["inference"]["torch_num_threads"] == 1
+    assert report["inference"]["phase_timings"]["rollout_seconds"] >= 0.0
+    with np.load(report["artifacts"]["candidate_prediction_path"], allow_pickle=False) as archive:
+        assert archive["prediction"].shape == (2, 190, 256)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="UNet competition test requires torch")
 def test_predict_unet_competition_cli_returns_payload(tmp_path: Path) -> None:
     import torch
     from typer.testing import CliRunner

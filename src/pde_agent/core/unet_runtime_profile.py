@@ -31,6 +31,8 @@ def profile_unet_runtime(
     dataset_key: str = "tensor",
     timeout_seconds: float = 120.0,
     full_sample_count: int = 1000,
+    inference_batch_size: int | None = None,
+    torch_num_threads: int | None = None,
     force: bool = False,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
@@ -77,6 +79,8 @@ def profile_unet_runtime(
                 checkpoint_path=Path(checkpoint_path),
                 output_dir=shard_output_dir,
                 dataset_key=dataset_key,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
                 force=True,
             )
             wall_elapsed = time.perf_counter() - start
@@ -124,6 +128,8 @@ def profile_unet_runtime(
         "dataset_key": dataset_key,
         "timeout_seconds": float(timeout_seconds),
         "full_sample_count": int(full_sample_count),
+        "inference_batch_size": inference_batch_size,
+        "torch_num_threads": torch_num_threads,
         "source_sample_count": int(source_sample_count),
         "shards": shards,
         "recommendation": recommendation,
@@ -217,6 +223,7 @@ def _build_success_record(
         "seconds_per_sample": seconds_per_sample,
         "projected_full_inference_seconds": projected,
         "timeout_risk": projected > timeout_seconds,
+        "phase_timings": run_report.get("inference", {}).get("phase_timings", {}),
     }
 
 

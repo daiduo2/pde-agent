@@ -12,6 +12,8 @@ def predict_unet_local(
     checkpoint_path: str,
     output_path: str,
     metadata_path: str | None,
+    inference_batch_size: int | None,
+    torch_num_threads: int | None,
     force: bool,
 ) -> dict[str, object]:
     summary = predict_core(
@@ -19,6 +21,8 @@ def predict_unet_local(
         checkpoint_path=Path(checkpoint_path),
         output_path=Path(output_path),
         metadata_path=Path(metadata_path) if metadata_path is not None else None,
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
         force=force,
     )
     metrics = {
@@ -27,6 +31,9 @@ def predict_unet_local(
         "forecast_steps": summary["forecast_steps"],
         "space_points": summary["space_points"],
         "checkpoint_format": summary["checkpoint_format"],
+        "inference_batch_size": summary["inference_batch_size"],
+        "torch_num_threads": summary["torch_num_threads"],
+        "rollout_chunk_count": summary["rollout_chunk_count"],
     }
     for key in ("adapter_type", "history_steps", "base_channels", "depth"):
         if key in summary:

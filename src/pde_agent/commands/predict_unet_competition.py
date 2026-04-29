@@ -16,6 +16,8 @@ def predict_unet_competition_command(
     checkpoint_path: str,
     output_dir: str,
     dataset_key: str,
+    inference_batch_size: int | None,
+    torch_num_threads: int | None,
     force: bool,
 ) -> dict[str, object]:
     report = predict_unet_competition(
@@ -24,6 +26,8 @@ def predict_unet_competition_command(
         checkpoint_path=Path(checkpoint_path),
         output_dir=Path(output_dir),
         dataset_key=dataset_key,
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
         force=force,
     )
     return success_payload(
@@ -38,6 +42,8 @@ def predict_unet_competition_command(
             "space_points": report["inputs"]["space_points"],
             "inference_time": report["inference"]["elapsed_seconds"],
             "backend": report["inference"]["backend"],
+            "inference_batch_size": report["inference"]["inference_batch_size"],
+            "torch_num_threads": report["inference"]["torch_num_threads"],
         },
         next_hint=str(report["next_command"]),
     )

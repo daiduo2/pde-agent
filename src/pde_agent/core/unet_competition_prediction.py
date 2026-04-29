@@ -26,6 +26,8 @@ def predict_unet_competition(
     output_dir: str | Path,
     dataset_key: str = "tensor",
     force: bool = False,
+    inference_batch_size: int | None = None,
+    torch_num_threads: int | None = None,
 ) -> dict[str, Any]:
     output_root = Path(output_dir)
     report_path = output_root / "candidate_execution_report.json"
@@ -48,6 +50,8 @@ def predict_unet_competition(
         output_path=output_root / "candidate_prediction.npz",
         metadata_path=None,
         force=force,
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
     )
     inference_time = time.perf_counter() - start
     experiment_id = f"unet_competition_task{task_id}"
@@ -80,6 +84,10 @@ def predict_unet_competition(
             "elapsed_seconds": inference_time,
             "backend": prediction["adapter_type"],
             "checkpoint_format": prediction["checkpoint_format"],
+            "inference_batch_size": prediction["inference_batch_size"],
+            "torch_num_threads": prediction["torch_num_threads"],
+            "rollout_chunk_count": prediction["rollout_chunk_count"],
+            "phase_timings": prediction["phase_timings"],
         },
         "next_command": "materialize-competition-candidate",
     }

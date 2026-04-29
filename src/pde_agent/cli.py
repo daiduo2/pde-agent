@@ -842,6 +842,8 @@ def predict_unet_local_cmd(
     checkpoint_path: str = typer.Option(...),
     output_path: str = typer.Option(...),
     metadata_path: str | None = typer.Option(None),
+    inference_batch_size: int | None = typer.Option(None),
+    torch_num_threads: int | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -853,6 +855,8 @@ def predict_unet_local_cmd(
                 checkpoint_path=checkpoint_path,
                 output_path=output_path,
                 metadata_path=metadata_path,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
                 force=force,
             )
         )
@@ -2470,6 +2474,8 @@ def predict_unet_competition_cmd(
     checkpoint_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
     dataset_key: str = typer.Option("tensor"),
+    inference_batch_size: int | None = typer.Option(None),
+    torch_num_threads: int | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2482,6 +2488,8 @@ def predict_unet_competition_cmd(
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
                 dataset_key=dataset_key,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
                 force=force,
             )
         )
@@ -2498,6 +2506,8 @@ def profile_unet_runtime_cmd(
     dataset_key: str = typer.Option("tensor"),
     timeout_seconds: float = typer.Option(120.0),
     full_sample_count: int = typer.Option(1000),
+    inference_batch_size: int | None = typer.Option(None),
+    torch_num_threads: int | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2513,6 +2523,8 @@ def profile_unet_runtime_cmd(
                 dataset_key=dataset_key,
                 timeout_seconds=timeout_seconds,
                 full_sample_count=full_sample_count,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
                 force=force,
             )
         )

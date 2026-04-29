@@ -16,6 +16,8 @@ def profile_unet_runtime_command(
     dataset_key: str,
     timeout_seconds: float,
     full_sample_count: int,
+    inference_batch_size: int | None,
+    torch_num_threads: int | None,
     force: bool,
 ) -> dict[str, object]:
     report = profile_unet_runtime(
@@ -27,6 +29,8 @@ def profile_unet_runtime_command(
         dataset_key=dataset_key,
         timeout_seconds=timeout_seconds,
         full_sample_count=full_sample_count,
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
         force=force,
     )
     completed = [
@@ -53,6 +57,8 @@ def profile_unet_runtime_command(
             "max_shard_sample_count": max_shard_sample_count,
             "best_projected_full_inference_seconds": best_projected,
             "timeout_seconds": report["timeout_seconds"],
+            "inference_batch_size": report["inference_batch_size"],
+            "torch_num_threads": report["torch_num_threads"],
             "recommended_strategy_id": report["recommendation"]["strategy_id"],
         },
         next_hint=str(report["recommendation"]["next_command"]),

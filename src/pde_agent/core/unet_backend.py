@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tarfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,8 +51,14 @@ def predict_unet_local(
     output_path: str | Path,
     metadata_path: str | Path | None = None,
     force: bool = False,
+    inference_batch_size: int | None = None,
+    torch_num_threads: int | None = None,
 ) -> dict[str, Any]:
     torch = _require_torch()
+    _validate_inference_options(
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
+    )
     windows_file = _require_file(Path(windows_path), "windows")
     checkpoint_file = _require_file(Path(checkpoint_path), "checkpoint")
     output_file = Path(output_path)
@@ -60,8 +67,13 @@ def predict_unet_local(
     if metadata_path is not None:
         _require_file(Path(metadata_path), "metadata")
 
+    phase_start = time.perf_counter()
     context, target = _load_windows(windows_file)
+    load_windows_seconds = time.perf_counter() - phase_start
+    phase_start = time.perf_counter()
     loaded = _load_checkpoint_with_metadata(checkpoint_file, torch=torch)
+    load_checkpoint_seconds = time.perf_counter() - phase_start
+    phase_start = time.perf_counter()
     prediction, metadata = _predict_checkpoint(
         checkpoint=loaded["checkpoint"],
         context=context,
@@ -69,8 +81,22 @@ def predict_unet_local(
         checkpoint_file=checkpoint_file,
         archive_member=loaded["archive_member"],
         torch=torch,
+        inference_batch_size=inference_batch_size,
+        torch_num_threads=torch_num_threads,
     )
+    predict_seconds = time.perf_counter() - phase_start
+    phase_timings = dict(metadata.get("phase_timings", {}))
+    phase_timings.update(
+        {
+            "load_windows_seconds": load_windows_seconds,
+            "load_checkpoint_seconds": load_checkpoint_seconds,
+            "predict_checkpoint_seconds": predict_seconds,
+            "write_output_seconds": 0.0,
+        }
+    )
+    metadata["phase_timings"] = phase_timings
 
+    phase_start = time.perf_counter()
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open("wb") as handle:
         np.savez(
@@ -78,11 +104,24 @@ def predict_unet_local(
             prediction=prediction.astype(np.float32),
             metadata_json=json.dumps(metadata, allow_nan=False, sort_keys=True),
         )
+    write_output_seconds = time.perf_counter() - phase_start
+    metadata["phase_timings"]["write_output_seconds"] = write_output_seconds
     return {
         "prediction_path": str(output_file),
         "prediction_shape": [int(axis) for axis in prediction.shape],
         **metadata,
     }
+
+
+def _validate_inference_options(
+    *,
+    inference_batch_size: int | None,
+    torch_num_threads: int | None,
+) -> None:
+    if inference_batch_size is not None and inference_batch_size <= 0:
+        raise UNetBackendError("inference_batch_size must be positive")
+    if torch_num_threads is not None and torch_num_threads <= 0:
+        raise UNetBackendError("torch_num_threads must be positive")
 
 
 @dataclass(frozen=True)
@@ -589,18 +628,25 @@ def _predict_checkpoint(
     checkpoint_file: Path,
     archive_member: str | None,
     torch: Any,
+    inference_batch_size: int | None,
+    torch_num_threads: int | None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     if not _looks_like_pdebench_unet1d(checkpoint, torch=torch):
         raise UNetBackendError("unsupported UNet checkpoint schema")
     state = _extract_state_dict(checkpoint)
     config = _infer_pdebench_unet1d_config(state, torch=torch)
-    prediction = _rollout_pdebench_unet1d(
-        state=state,
-        config=config,
-        context=context,
-        forecast_steps=forecast_steps,
+    prediction, rollout_metadata = _with_torch_threads(
         torch=torch,
-        device="cpu",
+        torch_num_threads=torch_num_threads,
+        operation=lambda: _rollout_pdebench_unet1d(
+            state=state,
+            config=config,
+            context=context,
+            forecast_steps=forecast_steps,
+            torch=torch,
+            device="cpu",
+            inference_batch_size=inference_batch_size,
+        ),
     )
     metadata: dict[str, Any] = {
         "model_type": "unet",
@@ -612,9 +658,12 @@ def _predict_checkpoint(
         "depth": config.depth,
         "rollout_steps": int(forecast_steps),
         "device": "cpu",
+        "inference_batch_size": int(inference_batch_size or context.shape[0]),
+        "torch_num_threads": int(torch_num_threads or torch.get_num_threads()),
         "sample_count": int(prediction.shape[0]),
         "forecast_steps": int(prediction.shape[1]),
         "space_points": int(prediction.shape[2]),
+        **rollout_metadata,
     }
     if archive_member is not None:
         metadata["archive_member"] = archive_member
@@ -629,7 +678,8 @@ def _rollout_pdebench_unet1d(
     forecast_steps: int,
     torch: Any,
     device: str,
-) -> np.ndarray:
+    inference_batch_size: int | None,
+) -> tuple[np.ndarray, dict[str, Any]]:
     if context.shape[1] < config.history_steps:
         raise UNetBackendError(
             "context_steps must be >= official UNet history steps "
@@ -644,32 +694,89 @@ def _rollout_pdebench_unet1d(
     model = PDEBenchUNet1d(config).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
+    batch_size = int(inference_batch_size or context.shape[0])
+    prediction = np.empty(
+        (context.shape[0], forecast_steps, context.shape[2]),
+        dtype=np.float32,
+    )
+    rollout_start = time.perf_counter()
+    chunk_count = 0
+    context_manager = getattr(torch, "inference_mode", torch.no_grad)
+    with context_manager():
+        for start in range(0, context.shape[0], batch_size):
+            stop = min(start + batch_size, context.shape[0])
+            chunk_prediction = _rollout_pdebench_unet1d_chunk(
+                model=model,
+                context=context[start:stop],
+                history_steps=config.history_steps,
+                forecast_steps=forecast_steps,
+                torch=torch,
+                device=device,
+            )
+            prediction[start:stop] = chunk_prediction
+            chunk_count += 1
+    rollout_seconds = time.perf_counter() - rollout_start
+    if not np.all(np.isfinite(prediction)):
+        raise UNetBackendError("prediction contains non-finite values")
+    return prediction, {
+        "rollout_chunk_count": chunk_count,
+        "phase_timings": {
+            "rollout_seconds": rollout_seconds,
+        },
+    }
+
+
+def _rollout_pdebench_unet1d_chunk(
+    *,
+    model: Any,
+    context: np.ndarray,
+    history_steps: int,
+    forecast_steps: int,
+    torch: Any,
+    device: str,
+) -> np.ndarray:
     history = torch.as_tensor(
-        context[:, -config.history_steps :, :],
+        context[:, -history_steps:, :],
+        dtype=torch.float32,
+        device=device,
+    ).clone()
+    prediction_tensor = torch.empty(
+        (context.shape[0], forecast_steps, context.shape[2]),
         dtype=torch.float32,
         device=device,
     )
+    for step in range(forecast_steps):
+        next_step = model(history)
+        if next_step.shape[-1] != context.shape[2]:
+            next_step = torch.nn.functional.interpolate(
+                next_step.unsqueeze(1),
+                size=context.shape[2],
+                mode="linear",
+                align_corners=False,
+            ).squeeze(1)
+        if not torch.isfinite(next_step).all():
+            raise UNetBackendError("prediction contains non-finite values")
+        prediction_tensor[:, step, :] = next_step
+        if history_steps > 1:
+            history[:, :-1, :] = history[:, 1:, :].clone()
+        history[:, -1, :] = next_step
+    return prediction_tensor.detach().cpu().numpy().astype(np.float32)
 
-    predictions: list[Any] = []
-    with torch.no_grad():
-        for _ in range(forecast_steps):
-            next_step = model(history)
-            if next_step.shape[-1] != context.shape[2]:
-                next_step = torch.nn.functional.interpolate(
-                    next_step.unsqueeze(1),
-                    size=context.shape[2],
-                    mode="linear",
-                    align_corners=False,
-                ).squeeze(1)
-            if not torch.isfinite(next_step).all():
-                raise UNetBackendError("prediction contains non-finite values")
-            predictions.append(next_step)
-            history = torch.cat([history[:, 1:, :], next_step.unsqueeze(1)], dim=1)
-    prediction_tensor = torch.stack(predictions, dim=1)
-    prediction = prediction_tensor.detach().cpu().numpy().astype(np.float32)
-    if not np.all(np.isfinite(prediction)):
-        raise UNetBackendError("prediction contains non-finite values")
-    return prediction
+
+def _with_torch_threads(
+    *,
+    torch: Any,
+    torch_num_threads: int | None,
+    operation: Any,
+) -> Any:
+    if torch_num_threads is None:
+        return operation()
+    previous_threads = torch.get_num_threads()
+    torch.set_num_threads(torch_num_threads)
+    try:
+        return operation()
+    finally:
+        torch.set_num_threads(previous_threads)
 
 
 def _collect_tensors(

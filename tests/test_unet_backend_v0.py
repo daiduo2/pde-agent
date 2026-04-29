@@ -249,6 +249,43 @@ def test_predict_unet_local_official_like_state(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="UNet backend tests require torch extra")
+def test_predict_unet_local_reports_phase_timings_and_chunk_config(
+    tmp_path: Path,
+) -> None:
+    import torch
+
+    from pde_agent.core.unet_backend import predict_unet_local
+
+    windows_path = tmp_path / "windows.npz"
+    checkpoint_path = tmp_path / "unet.pt"
+    output_path = tmp_path / "prediction.npz"
+    _write_windows(windows_path)
+    torch.save({"model_state_dict": _official_unet_state_dict(torch=torch)}, checkpoint_path)
+
+    summary = predict_unet_local(
+        windows_path=windows_path,
+        checkpoint_path=checkpoint_path,
+        output_path=output_path,
+        force=False,
+        inference_batch_size=1,
+        torch_num_threads=1,
+    )
+
+    assert summary["inference_batch_size"] == 1
+    assert summary["torch_num_threads"] == 1
+    assert summary["rollout_chunk_count"] == 2
+    assert summary["phase_timings"]["load_windows_seconds"] >= 0.0
+    assert summary["phase_timings"]["load_checkpoint_seconds"] >= 0.0
+    assert summary["phase_timings"]["rollout_seconds"] >= 0.0
+    assert summary["phase_timings"]["write_output_seconds"] >= 0.0
+    np = pytest.importorskip("numpy")
+    with np.load(output_path, allow_pickle=False) as archive:
+        metadata = json.loads(str(archive["metadata_json"]))
+    assert metadata["phase_timings"]["rollout_seconds"] >= 0.0
+    assert metadata["rollout_chunk_count"] == 2
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="UNet backend tests require torch extra")
 def test_predict_unet_local_cli_writes_payload(tmp_path: Path) -> None:
     import torch
     from typer.testing import CliRunner

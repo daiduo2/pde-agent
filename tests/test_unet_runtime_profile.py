@@ -34,7 +34,10 @@ def test_profile_unet_runtime_writes_shard_scaling_report(tmp_path: Path) -> Non
                     Path(kwargs["output_dir"]) / "candidate_execution_report.json"
                 )
             },
-            "inference": {"elapsed_seconds": sample_count * 0.2},
+            "inference": {
+                "elapsed_seconds": sample_count * 0.2,
+                "phase_timings": {"rollout_seconds": sample_count * 0.15},
+            },
         }
 
     report = profile_unet_runtime(
@@ -53,6 +56,7 @@ def test_profile_unet_runtime_writes_shard_scaling_report(tmp_path: Path) -> Non
     assert calls == [1, 4]
     assert [record["sample_count"] for record in report["shards"]] == [1, 4]
     assert report["shards"][0]["projected_full_inference_seconds"] == 200.0
+    assert report["shards"][0]["phase_timings"]["rollout_seconds"] == 0.15
     assert report["shards"][1]["timeout_risk"] is True
     assert report["recommendation"]["next_command"] == "record-unet-timeout-evidence"
     assert Path(report["artifacts"]["runtime_profile_path"]).exists()
@@ -111,6 +115,8 @@ def test_profile_unet_runtime_cli_returns_payload(
             "state_hint": "UNET_RUNTIME_PROFILED",
             "task_id": 1,
             "timeout_seconds": 120.0,
+            "inference_batch_size": None,
+            "torch_num_threads": None,
             "artifacts": {"runtime_profile_path": str(profile_path)},
             "shards": [
                 {
