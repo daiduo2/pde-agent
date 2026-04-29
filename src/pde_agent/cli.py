@@ -55,6 +55,9 @@ from pde_agent.commands.diagnose_task2_nu_shift import (
     diagnose_task2_nu_shift_command,
 )
 from pde_agent.commands.diagnose_hermes_result import diagnose_hermes_result_command
+from pde_agent.commands.diagnose_hermes_model_quality import (
+    diagnose_hermes_model_quality_command,
+)
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.evaluate_burgers_residual import (
     evaluate_burgers_residual_command,
@@ -167,6 +170,12 @@ from pde_agent.commands.run_hermes_local_strategy_loop import (
 )
 from pde_agent.commands.run_hermes_operator_tuning_loop import (
     run_hermes_operator_tuning_loop_command,
+)
+from pde_agent.commands.run_hermes_validation_scoring import (
+    run_hermes_validation_scoring_command,
+)
+from pde_agent.commands.run_hermes_model_iteration_loop import (
+    run_hermes_model_iteration_loop_command,
 )
 from pde_agent.commands.run_hermes_convergence_loop import (
     run_hermes_convergence_loop_command,
@@ -537,6 +546,113 @@ def run_hermes_operator_tuning_loop_cmd(
                 dataset_key=dataset_key,
                 timeout_seconds=timeout_seconds,
                 full_sample_count=full_sample_count,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-validation-scoring")
+def run_hermes_validation_scoring_cmd(
+    output_dir: str = typer.Option(...),
+    operator_family: str = typer.Option(...),
+    task_id: int = typer.Option(...),
+    validation_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    submission_id: str = typer.Option("team_hermes_validation"),
+    inference_batch_size: int | None = typer.Option(None),
+    torch_num_threads: int | None = typer.Option(None),
+    sample_limit: int | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_validation_scoring_command(
+                output_dir=output_dir,
+                operator_family=operator_family,
+                task_id=task_id,
+                validation_path=validation_path,
+                checkpoint_path=checkpoint_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                submission_id=submission_id,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
+                sample_limit=sample_limit,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("diagnose-hermes-model-quality")
+def diagnose_hermes_model_quality_cmd(
+    validation_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    min_segment_score: float = typer.Option(60.0),
+    min_task_prediction_score: float = typer.Option(45.0),
+    max_late_rmse: float = typer.Option(0.25),
+    max_inference_seconds: float = typer.Option(120.0),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            diagnose_hermes_model_quality_command(
+                validation_report_path=validation_report_path,
+                output_path=output_path,
+                min_segment_score=min_segment_score,
+                min_task_prediction_score=min_task_prediction_score,
+                max_late_rmse=max_late_rmse,
+                max_inference_seconds=max_inference_seconds,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-model-iteration-loop")
+def run_hermes_model_iteration_loop_cmd(
+    output_dir: str = typer.Option(...),
+    operator_family: str = typer.Option(...),
+    task_id: int = typer.Option(...),
+    validation_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    submission_id: str = typer.Option("team_hermes_validation"),
+    inference_batch_size: int | None = typer.Option(None),
+    torch_num_threads: int | None = typer.Option(None),
+    sample_limit: int | None = typer.Option(None),
+    min_segment_score: float = typer.Option(60.0),
+    min_task_prediction_score: float = typer.Option(45.0),
+    max_late_rmse: float = typer.Option(0.25),
+    max_inference_seconds: float = typer.Option(120.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_model_iteration_loop_command(
+                output_dir=output_dir,
+                operator_family=operator_family,
+                task_id=task_id,
+                validation_path=validation_path,
+                checkpoint_path=checkpoint_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                submission_id=submission_id,
+                inference_batch_size=inference_batch_size,
+                torch_num_threads=torch_num_threads,
+                sample_limit=sample_limit,
+                min_segment_score=min_segment_score,
+                min_task_prediction_score=min_task_prediction_score,
+                max_late_rmse=max_late_rmse,
+                max_inference_seconds=max_inference_seconds,
                 force=force,
             )
         )
