@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +57,11 @@ def generate_hermes_postprocess_candidate(
         )
     root.mkdir(parents=True, exist_ok=True)
 
+    base_timing = _read_base_timing(
+        base_submission_dir=Path(base_submission_dir),
+        task_id=task_id,
+    )
+    postprocess_start = time.perf_counter()
     base_prediction_path = Path(base_submission_dir) / f"task{task_id}_pred.hdf5"
     base_prediction = _load_prediction(
         path=base_prediction_path,
@@ -67,6 +74,7 @@ def generate_hermes_postprocess_candidate(
     )
     candidate_prediction_path = root / "candidate_prediction.npz"
     np.savez(candidate_prediction_path, prediction=transformed[:, CONTEXT_STEPS:, :])
+    postprocess_elapsed = time.perf_counter() - postprocess_start
     submission = build_competition_submission(
         task_id=task_id,
         test_path=Path(test_path),
@@ -77,7 +85,8 @@ def generate_hermes_postprocess_candidate(
         method="external_prediction",
         source_prediction_path=candidate_prediction_path,
         source_prediction_key="prediction",
-        train_time=0.0,
+        train_time=base_timing["train_time"],
+        inference_time=base_timing["inference_time"] + postprocess_elapsed,
         force=True,
     )
     candidate_id = f"postprocess_{strategy}_w{blend_weight:g}"
@@ -90,6 +99,13 @@ def generate_hermes_postprocess_candidate(
         "blend_weight": float(blend_weight),
         "task_id": task_id,
         "base_submission_dir": str(base_submission_dir),
+        "timing": {
+            "base_train_time": base_timing["train_time"],
+            "base_inference_time": base_timing["inference_time"],
+            "postprocess_elapsed_seconds": postprocess_elapsed,
+            "reported_train_time": submission["metrics"]["train_time"],
+            "reported_inference_time": submission["metrics"]["inference_time"],
+        },
         "submission_dir": submission["artifacts"]["submission_dir"],
         "artifacts": {
             "candidate_report_path": str(report_path),
@@ -103,6 +119,27 @@ def generate_hermes_postprocess_candidate(
     }
     _write_json(report_path, report)
     return report
+
+
+def _read_base_timing(*, base_submission_dir: Path, task_id: int) -> dict[str, float]:
+    path = base_submission_dir / f"task{task_id}_time.csv"
+    if not path.exists():
+        raise HermesPostprocessCandidateError(f"base time csv not found: {path}")
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    if len(rows) != 1:
+        raise HermesPostprocessCandidateError(f"invalid base time csv rows: {path}")
+    try:
+        train_time = float(rows[0]["train_time"])
+        inference_time = float(rows[0]["inference_time"])
+    except (KeyError, ValueError) as exc:
+        raise HermesPostprocessCandidateError(
+            f"invalid base time csv values: {path}"
+        ) from exc
+    if train_time < 0.0 or inference_time < 0.0:
+        raise HermesPostprocessCandidateError(
+            f"base time csv contains negative values: {path}"
+        )
+    return {"train_time": train_time, "inference_time": inference_time}
 
 
 def _load_prediction(*, path: Path, dataset_key: str) -> np.ndarray:

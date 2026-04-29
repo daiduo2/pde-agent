@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,8 @@ def test_generate_hermes_postprocess_candidate_builds_valid_context_anchor_candi
         submission_id="team_hermes",
         method="external_prediction",
         source_prediction_path=poor_prediction_path,
+        train_time=12.5,
+        inference_time=123.25,
         force=True,
     )
     base_score = score_competition_prediction(
@@ -71,6 +74,15 @@ def test_generate_hermes_postprocess_candidate_builds_valid_context_anchor_candi
     assert candidate["strategy"] == "context_anchor_blend"
     assert audit["decision"] == "passed"
     assert candidate_score["segment_score"] > base_score["segment_score"]
+    timing_rows = list(
+        csv.DictReader(
+            Path(candidate["submission"]["artifacts"]["time_csv_path"]).open(
+                encoding="utf-8"
+            )
+        )
+    )
+    assert float(timing_rows[0]["train_time"]) == 12.5
+    assert float(timing_rows[0]["inference_time"]) >= 123.25
 
 
 def test_generate_hermes_postprocess_candidate_cli_returns_payload(
