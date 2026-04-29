@@ -13,6 +13,10 @@ from pde_agent.commands.audit_competition_submission import (
 )
 from pde_agent.commands.build_local_windows import build_local_windows
 from pde_agent.commands.build_local_window_suite import build_local_window_suite
+from pde_agent.commands.build_local_strategy_library import (
+    build_local_strategy_library_command,
+    lookup_local_strategy_command,
+)
 from pde_agent.commands.build_deeponet_evidence_sweep import (
     build_deeponet_evidence_sweep_command,
 )
@@ -232,6 +236,48 @@ def lookup_strategy_skill_cmd(
                 registry_path=registry_path,
                 applicable_pde=applicable_pde,
                 model_family=model_family,
+                max_results=max_results,
+                output_path=output_path,
+            )
+        )
+    )
+
+
+@app.command("build-local-strategy-library")
+def build_local_strategy_library_cmd(
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_local_strategy_library_command(
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("lookup-local-strategy")
+def lookup_local_strategy_cmd(
+    library_path: str = typer.Option(...),
+    applicable_pde: str = typer.Option(...),
+    model_family: str = typer.Option(...),
+    failure_modes: list[str] = typer.Option(..., "--failure-mode"),
+    output_path: str = typer.Option(...),
+    max_results: int = typer.Option(3),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            lookup_local_strategy_command(
+                library_path=library_path,
+                applicable_pde=applicable_pde,
+                model_family=model_family,
+                failure_modes=failure_modes,
                 max_results=max_results,
                 output_path=output_path,
             )
