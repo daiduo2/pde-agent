@@ -101,7 +101,7 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
             "- Literature retrieval is useful as a source of candidate interventions, not as direct evidence of improvement.",
             "- Retrieved methods should be converted into declarative claims, implementation plans, expected observables, and known risks.",
             "- A strategy should only be internalized after local execution produces audited evidence with non-regressing score, runtime, and physics diagnostics.",
-            "- For the current submission package, official-checkpoint FNO was selected because it passed shape, context-copy, runtime, and packaging audits.",
+            "- For the current submission package, any selected operator candidate must pass shape, context-copy, runtime, and packaging audits before submission.",
         ]
     )
     lines.append("")

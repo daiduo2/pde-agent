@@ -171,6 +171,9 @@ from pde_agent.commands.run_hermes_operator_tuning_loop import (
 from pde_agent.commands.run_hermes_convergence_loop import (
     run_hermes_convergence_loop_command,
 )
+from pde_agent.commands.run_hermes_submission_candidate import (
+    run_hermes_submission_candidate_command,
+)
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
 )
@@ -597,6 +600,39 @@ def run_hermes_convergence_loop_cmd(
                 max_steps=max_steps,
                 max_inference_seconds=max_inference_seconds,
                 min_score_delta=min_score_delta,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-submission-candidate")
+def run_hermes_submission_candidate_cmd(
+    tuning_report_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    submission_id: str = typer.Option(...),
+    target_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_submission_candidate_command(
+                tuning_report_path=tuning_report_path,
+                output_dir=output_dir,
+                task_id=task_id,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                submission_id=submission_id,
+                target_path=target_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
                 force=force,
             )
         )

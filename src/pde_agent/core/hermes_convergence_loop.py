@@ -56,7 +56,10 @@ def run_hermes_convergence_loop(
         )
         final_plan = plan
         executed_artifact: Path | None = None
-        if not plan.get("terminal") and action_executor is not None:
+        should_execute = not plan.get("terminal") or bool(
+            getattr(action_executor, "executes_terminal_actions", False)
+        )
+        if action_executor is not None and should_execute:
             workspace_dir = root / "workspace" / f"step_{step:03d}"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             executed_artifact = action_executor(plan, workspace_dir)
@@ -76,6 +79,12 @@ def run_hermes_convergence_loop(
             }
         )
         if executed_artifact is None:
+            break
+        if plan.get("terminal"):
+            final_plan = {
+                **plan,
+                "command": _executed_next_command(executed_artifact, plan["command"]),
+            }
             break
         current_artifact = executed_artifact
 
@@ -106,3 +115,13 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _executed_next_command(path: Path, fallback: str) -> str:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return fallback
+    if isinstance(payload, dict) and isinstance(payload.get("next_command"), str):
+        return str(payload["next_command"])
+    return fallback
