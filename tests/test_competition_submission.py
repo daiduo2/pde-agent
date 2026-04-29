@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 def _write_test_hdf5(path: Path) -> Path:
@@ -103,6 +104,48 @@ def test_build_competition_submission_reduces_raw_space_to_256(tmp_path: Path) -
     assert prediction.shape == (2, 200, 256)
 
 
+def test_build_competition_submission_wraps_external_future_prediction(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.competition_submission import build_competition_submission
+
+    h5py = __import__("h5py")
+    context = np.arange(2 * 10 * 256, dtype=np.float32).reshape(2, 10, 256)
+    test_path = tmp_path / "task1_test.hdf5"
+    with h5py.File(test_path, "w") as handle:
+        handle.create_dataset("tensor", data=context)
+    future = np.full((2, 190, 256), 7.0, dtype=np.float32)
+    source_prediction_path = tmp_path / "candidate_prediction.npz"
+    np.savez(source_prediction_path, prediction=future)
+
+    report = build_competition_submission(
+        task_id=1,
+        test_path=test_path,
+        output_dir=tmp_path / "submission_out",
+        submission_id="team_hermes",
+        dataset_key="tensor",
+        prediction_dataset_key="tensor",
+        method="external_prediction",
+        source_prediction_path=source_prediction_path,
+        source_prediction_key="prediction",
+        train_time=12.5,
+        force=True,
+    )
+
+    with h5py.File(report["artifacts"]["prediction_path"], "r") as handle:
+        prediction = handle["tensor"][:]
+    assert prediction.shape == (2, 200, 256)
+    np.testing.assert_allclose(prediction[:, :10, :], context, atol=1e-6)
+    np.testing.assert_allclose(prediction[:, 10:, :], future, atol=1e-6)
+    rows = list(
+        csv.DictReader(Path(report["artifacts"]["time_csv_path"]).open(encoding="utf-8"))
+    )
+    assert float(rows[0]["train_time"]) == pytest.approx(12.5)
+    log_text = Path(report["artifacts"]["log_path"]).read_text(encoding="utf-8")
+    assert "external_prediction" in log_text
+    assert str(source_prediction_path) in log_text
+
+
 def test_build_competition_submission_cli_returns_payload(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner
@@ -133,3 +176,42 @@ def test_build_competition_submission_cli_returns_payload(tmp_path: Path) -> Non
     assert payload["state_hint"] == "COMPETITION_SUBMISSION_READY"
     assert payload["metrics"]["task_id"] == 1
     assert payload["next_hint"] == "submit-zip-to-competition"
+
+
+def test_build_competition_submission_cli_accepts_external_prediction(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    test_path = _write_test_hdf5(tmp_path / "task1_test.hdf5")
+    future = np.ones((3, 190, 256), dtype=np.float32)
+    source_prediction_path = tmp_path / "candidate_prediction.npz"
+    np.savez(source_prediction_path, prediction=future)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-competition-submission",
+            "--task-id",
+            "1",
+            "--test-path",
+            str(test_path),
+            "--output-dir",
+            str(tmp_path / "submission_out"),
+            "--submission-id",
+            "team_hermes",
+            "--method",
+            "external_prediction",
+            "--source-prediction-path",
+            str(source_prediction_path),
+            "--train-time",
+            "12.5",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["metrics"]["method"] == "external_prediction"
+    assert payload["metrics"]["train_time"] == pytest.approx(12.5)

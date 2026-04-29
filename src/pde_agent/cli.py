@@ -2000,6 +2000,9 @@ def build_competition_submission_cmd(
     dataset_key: str = typer.Option("tensor"),
     prediction_dataset_key: str = typer.Option("tensor"),
     method: str = typer.Option("persistence"),
+    source_prediction_path: str | None = typer.Option(None),
+    source_prediction_key: str = typer.Option("prediction"),
+    train_time: float = typer.Option(0.0),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2014,6 +2017,9 @@ def build_competition_submission_cmd(
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
                 method=method,
+                source_prediction_path=source_prediction_path,
+                source_prediction_key=source_prediction_key,
+                train_time=train_time,
                 force=force,
             )
         )
