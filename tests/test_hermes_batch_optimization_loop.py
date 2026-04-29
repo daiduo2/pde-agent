@@ -62,8 +62,8 @@ def test_hermes_batch_optimization_loop_tracks_best_and_stops_on_patience(
     assert candidate_calls == [1, 2]
     assert report["state_hint"] == "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
     assert report["round_count"] == 3
-    assert report["best_candidate"]["candidate_id"] == "candidate_1"
-    assert report["best_candidate"]["score"] == 91.0
+    assert report["best_candidate"]["candidate_id"] == "candidate_2"
+    assert report["best_candidate"]["score"] == 91.2
     assert report["stop_reason"] == "patience_exhausted"
     assert report["decision"] == "iterate_more"
     assert report["next_command"] == "run-hermes-batch-optimization-loop"
@@ -120,6 +120,74 @@ def test_hermes_batch_optimization_loop_recommends_submit_when_threshold_met(
     assert report["stop_reason"] == "submit_threshold_met"
     assert report["decision"] == "submit_best_candidate"
     assert report["next_command"] == "submit-best-candidate"
+
+
+def test_hermes_batch_optimization_loop_can_generate_postprocess_candidates(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    generated: list[tuple[str, float]] = []
+
+    def fake_generator(**kwargs: Any) -> dict[str, Any]:
+        strategy = str(kwargs["strategy"])
+        weight = float(kwargs["blend_weight"])
+        generated.append((strategy, weight))
+        submission_dir = Path(kwargs["output_dir"]) / "submission"
+        submission_dir.mkdir(parents=True)
+        return {
+            "state_hint": "HERMES_POSTPROCESS_CANDIDATE_READY",
+            "candidate_id": f"{strategy}_{weight}",
+            "strategy": strategy,
+            "blend_weight": weight,
+            "submission_dir": str(submission_dir),
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        name = Path(kwargs["submission_dir"]).parent.name
+        score = 80.0 if Path(kwargs["submission_dir"]).name == "initial" else 92.0
+        if "round_002" in name:
+            score = 95.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_LOCAL_JUDGE_SCORED",
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "decision": "submit_candidate",
+            "tasks": {"1": {"score": {"task_total_score": score}}},
+        }
+
+    monkeypatch.setattr(loop_module, "generate_hermes_postprocess_candidate", fake_generator)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=2,
+        patience=2,
+        min_score_improvement=1.0,
+        submit_score_threshold=99.0,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="postprocess",
+        postprocess_strategies=["context_anchor_blend", "spectral_smooth"],
+        postprocess_blend_weights=[0.25, 0.5],
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert generated == [("context_anchor_blend", 0.25), ("spectral_smooth", 0.5)]
+    assert report["best_candidate"]["score"] == 95.0
+    assert report["best_candidate"]["metadata"]["source"] == "postprocess_generator"
+    assert report["round_count"] == 3
 
 
 def test_hermes_batch_optimization_loop_cli_returns_payload(

@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
+from pde_agent.core.hermes_postprocess_candidate import (
+    generate_hermes_postprocess_candidate,
+)
 
 
 STATE_HINT = "HERMES_BATCH_OPTIMIZATION_LOOP_RAN"
@@ -34,6 +37,10 @@ def run_hermes_batch_optimization_loop(
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
     candidate_submission_dirs: Sequence[str | Path] | None = None,
+    candidate_generator: str = "none",
+    postprocess_strategies: Sequence[str] | None = None,
+    postprocess_blend_weights: Sequence[float] | None = None,
+    submission_id: str = "team_hermes",
     candidate_runner: CandidateRunner | None = None,
     judge: Judge | None = None,
     force: bool = False,
@@ -53,7 +60,19 @@ def run_hermes_batch_optimization_loop(
     root.mkdir(parents=True, exist_ok=True)
 
     run_judge = judge or judge_hermes_submission
-    run_candidate = candidate_runner or _candidate_dir_runner(candidate_submission_dirs)
+    run_candidate = candidate_runner or _build_candidate_runner(
+        candidate_submission_dirs=candidate_submission_dirs,
+        candidate_generator=candidate_generator,
+        initial_submission_dir=Path(initial_submission_dir),
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+        dataset_key=dataset_key,
+        prediction_dataset_key=prediction_dataset_key,
+        postprocess_strategies=postprocess_strategies,
+        postprocess_blend_weights=postprocess_blend_weights,
+        submission_id=submission_id,
+        force=force,
+    )
     trajectory: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     no_improvement_count = 0
@@ -106,8 +125,9 @@ def run_hermes_batch_optimization_loop(
             )
             delta = evaluated["score"] - best["score"]
             improved = delta >= min_score_improvement
-            if improved:
+            if delta > 0.0:
                 best = evaluated
+            if improved:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
@@ -137,6 +157,7 @@ def run_hermes_batch_optimization_loop(
             "patience": patience,
             "min_score_improvement": min_score_improvement,
             "submit_score_threshold": submit_score_threshold,
+            "candidate_generator": candidate_generator,
         },
         "round_count": len(trajectory),
         "trajectory": trajectory,
@@ -188,6 +209,39 @@ def _evaluate_candidate(
     }
 
 
+def _build_candidate_runner(
+    *,
+    candidate_submission_dirs: Sequence[str | Path] | None,
+    candidate_generator: str,
+    initial_submission_dir: Path,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    postprocess_strategies: Sequence[str] | None,
+    postprocess_blend_weights: Sequence[float] | None,
+    submission_id: str,
+    force: bool,
+) -> CandidateRunner:
+    if candidate_generator == "none":
+        return _candidate_dir_runner(candidate_submission_dirs)
+    if candidate_generator == "postprocess":
+        return _postprocess_candidate_runner(
+            initial_submission_dir=initial_submission_dir,
+            task1_test_path=task1_test_path,
+            task2_test_path=task2_test_path,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            strategies=postprocess_strategies,
+            blend_weights=postprocess_blend_weights,
+            submission_id=submission_id,
+            force=force,
+        )
+    raise HermesBatchOptimizationLoopError(
+        f"unsupported candidate_generator: {candidate_generator}"
+    )
+
+
 def _candidate_dir_runner(
     candidate_submission_dirs: Sequence[str | Path] | None,
 ) -> CandidateRunner:
@@ -205,6 +259,82 @@ def _candidate_dir_runner(
         }
 
     return run_candidate
+
+
+def _postprocess_candidate_runner(
+    *,
+    initial_submission_dir: Path,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    strategies: Sequence[str] | None,
+    blend_weights: Sequence[float] | None,
+    submission_id: str,
+    force: bool,
+) -> CandidateRunner:
+    task_id, test_path = _single_task_context(
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+    )
+    strategy_values = list(strategies or ["context_anchor_blend", "spectral_smooth"])
+    weight_values = list(blend_weights or [0.25, 0.5, 0.75])
+    if not strategy_values:
+        raise HermesBatchOptimizationLoopError("postprocess strategies must not be empty")
+    if not weight_values:
+        raise HermesBatchOptimizationLoopError("postprocess blend weights must not be empty")
+    schedule = list(zip(strategy_values, weight_values, strict=False))
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        round_index = int(kwargs["round_index"])
+        if round_index > len(schedule):
+            return None
+        strategy, blend_weight = schedule[round_index - 1]
+        best_candidate = kwargs.get("best_candidate")
+        base_submission_dir = initial_submission_dir
+        if isinstance(best_candidate, dict):
+            value = best_candidate.get("submission_dir")
+            if isinstance(value, str) and value:
+                base_submission_dir = Path(value)
+        candidate = generate_hermes_postprocess_candidate(
+            base_submission_dir=base_submission_dir,
+            output_dir=Path(kwargs["output_dir"]),
+            task_id=task_id,
+            test_path=Path(test_path),
+            strategy=strategy,
+            blend_weight=float(blend_weight),
+            submission_id=submission_id,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            force=force,
+        )
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "submission_dir": candidate["submission_dir"],
+            "source": "postprocess_generator",
+            "strategy": candidate["strategy"],
+            "blend_weight": candidate.get("blend_weight"),
+            "candidate_report_path": candidate.get("candidate_report_path"),
+        }
+
+    return run_candidate
+
+
+def _single_task_context(
+    *,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+) -> tuple[int, Path]:
+    provided = [
+        (task_id, Path(path))
+        for task_id, path in ((1, task1_test_path), (2, task2_test_path))
+        if path is not None
+    ]
+    if len(provided) != 1:
+        raise HermesBatchOptimizationLoopError(
+            "postprocess candidate generation requires exactly one task test path"
+        )
+    return provided[0]
 
 
 def _candidate_submission_dir(candidate: dict[str, Any]) -> Path:

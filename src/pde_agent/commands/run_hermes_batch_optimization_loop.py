@@ -24,6 +24,10 @@ def run_hermes_batch_optimization_loop_command(
     dataset_key: str,
     prediction_dataset_key: str,
     candidate_submission_dirs: list[str],
+    candidate_generator: str,
+    postprocess_strategies: list[str],
+    postprocess_blend_weights: list[float],
+    submission_id: str,
     force: bool,
 ) -> dict[str, object]:
     report = run_hermes_batch_optimization_loop(
@@ -44,6 +48,10 @@ def run_hermes_batch_optimization_loop_command(
         dataset_key=dataset_key,
         prediction_dataset_key=prediction_dataset_key,
         candidate_submission_dirs=[Path(path) for path in candidate_submission_dirs],
+        candidate_generator=candidate_generator,
+        postprocess_strategies=postprocess_strategies,
+        postprocess_blend_weights=postprocess_blend_weights,
+        submission_id=submission_id,
         force=force,
     )
     best = report["best_candidate"]

@@ -85,6 +85,9 @@ from pde_agent.commands.formalize_external_strategy_candidate import (
 )
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
+from pde_agent.commands.generate_hermes_postprocess_candidate import (
+    generate_hermes_postprocess_candidate_command,
+)
 from pde_agent.commands.hermes_strategy_growth_autopilot import (
     hermes_strategy_growth_autopilot_command,
 )
@@ -710,6 +713,16 @@ def run_hermes_batch_optimization_loop_cmd(
         [],
         "--candidate-submission-dir",
     ),
+    candidate_generator: str = typer.Option("none"),
+    postprocess_strategies: list[str] = typer.Option(
+        [],
+        "--postprocess-strategy",
+    ),
+    postprocess_blend_weights: list[float] = typer.Option(
+        [],
+        "--postprocess-blend-weight",
+    ),
+    submission_id: str = typer.Option("team_hermes"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -730,6 +743,43 @@ def run_hermes_batch_optimization_loop_cmd(
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
                 candidate_submission_dirs=candidate_submission_dirs,
+                candidate_generator=candidate_generator,
+                postprocess_strategies=postprocess_strategies,
+                postprocess_blend_weights=postprocess_blend_weights,
+                submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("generate-hermes-postprocess-candidate")
+def generate_hermes_postprocess_candidate_cmd(
+    base_submission_dir: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    strategy: str = typer.Option(...),
+    blend_weight: float = typer.Option(0.25),
+    submission_id: str = typer.Option("team_hermes"),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            generate_hermes_postprocess_candidate_command(
+                base_submission_dir=base_submission_dir,
+                output_dir=output_dir,
+                task_id=task_id,
+                test_path=test_path,
+                strategy=strategy,
+                blend_weight=blend_weight,
+                submission_id=submission_id,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
                 force=force,
             )
         )
