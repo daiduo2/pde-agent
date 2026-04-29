@@ -113,6 +113,7 @@ from pde_agent.commands.predict_unet_local import predict_unet_local
 from pde_agent.commands.predict_unet_competition import (
     predict_unet_competition_command,
 )
+from pde_agent.commands.profile_unet_runtime import profile_unet_runtime_command
 from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
@@ -2481,6 +2482,37 @@ def predict_unet_competition_cmd(
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
                 dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("profile-unet-runtime")
+def profile_unet_runtime_cmd(
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    shard_sizes: list[int] = typer.Option(..., "--shard-size"),
+    dataset_key: str = typer.Option("tensor"),
+    timeout_seconds: float = typer.Option(120.0),
+    full_sample_count: int = typer.Option(1000),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            profile_unet_runtime_command(
+                task_id=task_id,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                shard_sizes=shard_sizes,
+                dataset_key=dataset_key,
+                timeout_seconds=timeout_seconds,
+                full_sample_count=full_sample_count,
                 force=force,
             )
         )
