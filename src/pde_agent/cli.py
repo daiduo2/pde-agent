@@ -148,6 +148,9 @@ from pde_agent.commands.run_deeponet_strategy_sweep import (
 from pde_agent.commands.run_burgers_spectral_viscosity_benchmark import (
     run_burgers_spectral_viscosity_benchmark_command,
 )
+from pde_agent.commands.run_competition_task_pipeline import (
+    run_competition_task_pipeline_command,
+)
 from pde_agent.commands.run_unet_strategy_sweep import run_unet_strategy_sweep_command
 from pde_agent.commands.score_local_rollout import score_local_rollout
 from pde_agent.commands.score_competition_submission import (
@@ -2190,6 +2193,37 @@ def predict_fno_competition_cmd(
                 test_path=test_path,
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
+                dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-competition-task-pipeline")
+def run_competition_task_pipeline_cmd(
+    task_id: int = typer.Option(...),
+    model_family: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option(...),
+    target_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_competition_task_pipeline_command(
+                task_id=task_id,
+                model_family=model_family,
+                test_path=test_path,
+                checkpoint_path=checkpoint_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                target_path=target_path,
                 dataset_key=dataset_key,
                 force=force,
             )
