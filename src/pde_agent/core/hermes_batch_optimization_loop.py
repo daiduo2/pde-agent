@@ -38,8 +38,10 @@ def run_hermes_batch_optimization_loop(
     prediction_dataset_key: str = "tensor",
     candidate_submission_dirs: Sequence[str | Path] | None = None,
     candidate_generator: str = "none",
+    postprocess_search_mode: str = "paired",
     postprocess_strategies: Sequence[str] | None = None,
     postprocess_blend_weights: Sequence[float] | None = None,
+    postprocess_adaptive_step: float = 0.125,
     submission_id: str = "team_hermes",
     candidate_runner: CandidateRunner | None = None,
     judge: Judge | None = None,
@@ -70,6 +72,8 @@ def run_hermes_batch_optimization_loop(
         prediction_dataset_key=prediction_dataset_key,
         postprocess_strategies=postprocess_strategies,
         postprocess_blend_weights=postprocess_blend_weights,
+        postprocess_search_mode=postprocess_search_mode,
+        postprocess_adaptive_step=postprocess_adaptive_step,
         submission_id=submission_id,
         force=force,
     )
@@ -158,6 +162,8 @@ def run_hermes_batch_optimization_loop(
             "min_score_improvement": min_score_improvement,
             "submit_score_threshold": submit_score_threshold,
             "candidate_generator": candidate_generator,
+            "postprocess_search_mode": postprocess_search_mode,
+            "postprocess_adaptive_step": postprocess_adaptive_step,
         },
         "round_count": len(trajectory),
         "trajectory": trajectory,
@@ -220,6 +226,8 @@ def _build_candidate_runner(
     prediction_dataset_key: str,
     postprocess_strategies: Sequence[str] | None,
     postprocess_blend_weights: Sequence[float] | None,
+    postprocess_search_mode: str,
+    postprocess_adaptive_step: float,
     submission_id: str,
     force: bool,
 ) -> CandidateRunner:
@@ -234,6 +242,8 @@ def _build_candidate_runner(
             prediction_dataset_key=prediction_dataset_key,
             strategies=postprocess_strategies,
             blend_weights=postprocess_blend_weights,
+            search_mode=postprocess_search_mode,
+            adaptive_step=postprocess_adaptive_step,
             submission_id=submission_id,
             force=force,
         )
@@ -270,6 +280,8 @@ def _postprocess_candidate_runner(
     prediction_dataset_key: str,
     strategies: Sequence[str] | None,
     blend_weights: Sequence[float] | None,
+    search_mode: str,
+    adaptive_step: float,
     submission_id: str,
     force: bool,
 ) -> CandidateRunner:
@@ -283,13 +295,29 @@ def _postprocess_candidate_runner(
         raise HermesBatchOptimizationLoopError("postprocess strategies must not be empty")
     if not weight_values:
         raise HermesBatchOptimizationLoopError("postprocess blend weights must not be empty")
-    schedule = list(zip(strategy_values, weight_values, strict=False))
+    if adaptive_step <= 0.0:
+        raise HermesBatchOptimizationLoopError("postprocess adaptive step must be positive")
+    schedule = _postprocess_schedule(
+        strategies=strategy_values,
+        blend_weights=weight_values,
+        search_mode=search_mode,
+    )
+    tried: set[tuple[str, float]] = set()
 
     def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
         round_index = int(kwargs["round_index"])
-        if round_index > len(schedule):
+        next_pair = _next_postprocess_pair(
+            round_index=round_index,
+            schedule=schedule,
+            search_mode=search_mode,
+            tried=tried,
+            best_candidate=kwargs.get("best_candidate"),
+            adaptive_step=adaptive_step,
+        )
+        if next_pair is None:
             return None
-        strategy, blend_weight = schedule[round_index - 1]
+        strategy, blend_weight = next_pair
+        tried.add((strategy, blend_weight))
         best_candidate = kwargs.get("best_candidate")
         base_submission_dir = initial_submission_dir
         if isinstance(best_candidate, dict):
@@ -318,6 +346,78 @@ def _postprocess_candidate_runner(
         }
 
     return run_candidate
+
+
+def _postprocess_schedule(
+    *,
+    strategies: list[str],
+    blend_weights: list[float],
+    search_mode: str,
+) -> list[tuple[str, float]]:
+    weights = [_normalize_weight(value) for value in blend_weights]
+    if search_mode == "paired":
+        return list(zip(strategies, weights, strict=False))
+    if search_mode in {"grid", "adaptive"}:
+        return [(strategy, weight) for strategy in strategies for weight in weights]
+    raise HermesBatchOptimizationLoopError(
+        f"unsupported postprocess_search_mode: {search_mode}"
+    )
+
+
+def _next_postprocess_pair(
+    *,
+    round_index: int,
+    schedule: list[tuple[str, float]],
+    search_mode: str,
+    tried: set[tuple[str, float]],
+    best_candidate: object,
+    adaptive_step: float,
+) -> tuple[str, float] | None:
+    if round_index <= len(schedule):
+        return schedule[round_index - 1]
+    if search_mode != "adaptive":
+        return None
+    best = _best_postprocess_metadata(best_candidate)
+    if best is None:
+        return None
+    strategy, weight = best
+    for candidate_weight in _adaptive_weight_neighbors(
+        weight=weight,
+        step=adaptive_step,
+    ):
+        pair = (strategy, candidate_weight)
+        if pair not in tried:
+            return pair
+    return None
+
+
+def _best_postprocess_metadata(candidate: object) -> tuple[str, float] | None:
+    if not isinstance(candidate, dict):
+        return None
+    metadata = candidate.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    if metadata.get("source") != "postprocess_generator":
+        return None
+    strategy = metadata.get("strategy")
+    weight = metadata.get("blend_weight")
+    if not isinstance(strategy, str) or not isinstance(weight, int | float):
+        return None
+    return strategy, _normalize_weight(float(weight))
+
+
+def _adaptive_weight_neighbors(*, weight: float, step: float) -> list[float]:
+    lower = _normalize_weight(weight - step)
+    upper = _normalize_weight(weight + step)
+    if lower == weight:
+        return [upper] if upper != weight else []
+    if upper == weight:
+        return [lower] if lower != weight else []
+    return [lower, upper]
+
+
+def _normalize_weight(value: float) -> float:
+    return round(min(1.0, max(0.0, float(value))), 6)
 
 
 def _single_task_context(

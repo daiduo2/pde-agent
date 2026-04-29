@@ -25,8 +25,10 @@ def run_hermes_batch_optimization_loop_command(
     prediction_dataset_key: str,
     candidate_submission_dirs: list[str],
     candidate_generator: str,
+    postprocess_search_mode: str,
     postprocess_strategies: list[str],
     postprocess_blend_weights: list[float],
+    postprocess_adaptive_step: float,
     submission_id: str,
     force: bool,
 ) -> dict[str, object]:
@@ -49,8 +51,10 @@ def run_hermes_batch_optimization_loop_command(
         prediction_dataset_key=prediction_dataset_key,
         candidate_submission_dirs=[Path(path) for path in candidate_submission_dirs],
         candidate_generator=candidate_generator,
+        postprocess_search_mode=postprocess_search_mode,
         postprocess_strategies=postprocess_strategies,
         postprocess_blend_weights=postprocess_blend_weights,
+        postprocess_adaptive_step=postprocess_adaptive_step,
         submission_id=submission_id,
         force=force,
     )

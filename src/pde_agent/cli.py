@@ -714,6 +714,7 @@ def run_hermes_batch_optimization_loop_cmd(
         "--candidate-submission-dir",
     ),
     candidate_generator: str = typer.Option("none"),
+    postprocess_search_mode: str = typer.Option("paired"),
     postprocess_strategies: list[str] = typer.Option(
         [],
         "--postprocess-strategy",
@@ -722,6 +723,7 @@ def run_hermes_batch_optimization_loop_cmd(
         [],
         "--postprocess-blend-weight",
     ),
+    postprocess_adaptive_step: float = typer.Option(0.125),
     submission_id: str = typer.Option("team_hermes"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
@@ -744,8 +746,10 @@ def run_hermes_batch_optimization_loop_cmd(
                 prediction_dataset_key=prediction_dataset_key,
                 candidate_submission_dirs=candidate_submission_dirs,
                 candidate_generator=candidate_generator,
+                postprocess_search_mode=postprocess_search_mode,
                 postprocess_strategies=postprocess_strategies,
                 postprocess_blend_weights=postprocess_blend_weights,
+                postprocess_adaptive_step=postprocess_adaptive_step,
                 submission_id=submission_id,
                 force=force,
             )
