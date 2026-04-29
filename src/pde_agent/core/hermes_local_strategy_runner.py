@@ -39,6 +39,7 @@ def run_hermes_local_strategy_loop(
     max_inference_seconds: float,
     executor: Executor | None,
     force: bool,
+    baseline_score: float | None = None,
 ) -> dict[str, Any]:
     if max_experiments < 1:
         raise HermesLocalStrategyRunnerError("max_experiments must be positive")
@@ -73,7 +74,7 @@ def run_hermes_local_strategy_loop(
         ingested = ingest_local_strategy_result(
             source_path=source_result_path,
             output_path=ingested_path,
-            baseline_score=None,
+            baseline_score=baseline_score,
             result_status="completed",
             failure_reason=None,
         )
@@ -123,6 +124,7 @@ def run_hermes_local_strategy_loop(
         "leaderboard": leaderboard,
         "decision": leaderboard["decision"],
         "final_route": final_route,
+        "baseline_score_override": baseline_score,
         "next_command": final_route["route"]["command"],
     }
     _write_json(report_path, report)
