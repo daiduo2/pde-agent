@@ -26,6 +26,9 @@ from pde_agent.commands.build_deeponet_evidence_sweep import (
 from pde_agent.commands.build_competition_submission import (
     build_competition_submission_command,
 )
+from pde_agent.commands.build_hermes_iteration_memory import (
+    build_hermes_iteration_memory_command,
+)
 from pde_agent.commands.build_research_chronicle import (
     build_research_chronicle_command,
 )
@@ -784,6 +787,31 @@ def generate_hermes_postprocess_candidate_cmd(
                 submission_id=submission_id,
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-hermes-iteration-memory")
+def build_hermes_iteration_memory_cmd(
+    batch_loop_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    memory_json_path: str = typer.Option(...),
+    submission_dir: str | None = typer.Option(None),
+    task_ids: list[int] = typer.Option([], "--task-id"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_hermes_iteration_memory_command(
+                batch_loop_report_path=batch_loop_report_path,
+                output_path=output_path,
+                memory_json_path=memory_json_path,
+                submission_dir=submission_dir,
+                task_ids=task_ids,
                 force=force,
             )
         )
