@@ -113,6 +113,7 @@ from pde_agent.commands.local_strategy_leaderboard import (
     record_local_strategy_result_command,
 )
 from pde_agent.commands.literature_algorithm_lab import (
+    adapt_fno_architecture_candidate_command,
     build_blocked_candidate_handoff_command,
     build_executor_taxonomy_command,
     build_literature_source_records_command,
@@ -1097,6 +1098,29 @@ def build_executor_taxonomy_cmd(
     typer.echo(
         json.dumps(
             build_executor_taxonomy_command(
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("adapt-fno-architecture-candidate")
+def adapt_fno_architecture_candidate_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    algorithm_candidate_id: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            adapt_fno_architecture_candidate_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                algorithm_candidate_id=algorithm_candidate_id,
+                checkpoint_path=checkpoint_path,
                 output_path=output_path,
                 force=force,
             )

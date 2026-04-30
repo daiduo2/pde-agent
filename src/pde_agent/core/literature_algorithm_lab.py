@@ -23,6 +23,7 @@ ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
 SANDBOX_PLAN_STATE_HINT = "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
 EXECUTOR_TAXONOMY_STATE_HINT = "EXECUTOR_TAXONOMY_BUILT"
+FNO_CANDIDATE_ADAPTED_STATE_HINT = "FNO_ARCHITECTURE_CANDIDATE_ADAPTED"
 EXECUTOR_DESIGN_REQUEST_STATE_HINT = "EXECUTOR_DESIGN_REQUEST_CREATED"
 BLOCKED_CANDIDATE_HANDOFF_STATE_HINT = "BLOCKED_CANDIDATE_HANDOFF_BUILT"
 
@@ -726,7 +727,10 @@ def plan_candidate_sandbox(
     candidates_report = _read_json(
         _require_file(Path(algorithm_candidates_path), "algorithm candidates")
     )
-    if candidates_report.get("state_hint") != ALGORITHM_CANDIDATES_STATE_HINT:
+    if candidates_report.get("state_hint") not in {
+        ALGORITHM_CANDIDATES_STATE_HINT,
+        FNO_CANDIDATE_ADAPTED_STATE_HINT,
+    }:
         raise LiteratureAlgorithmLabError(
             "algorithm candidates report has invalid state_hint"
         )
@@ -794,6 +798,96 @@ def build_executor_taxonomy(
             "requires_executor_design": len(EXECUTOR_DESIGN_HOOKS),
         },
         "next_command": "create-executor-design-request",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def adapt_fno_architecture_candidate(
+    *,
+    algorithm_candidates_path: str | Path,
+    algorithm_candidate_id: str,
+    checkpoint_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    candidates_report = _read_json(
+        _require_file(Path(algorithm_candidates_path), "algorithm candidates")
+    )
+    if candidates_report.get("state_hint") != ALGORITHM_CANDIDATES_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "algorithm candidates report has invalid state_hint"
+        )
+    selected_id = _nonempty_text(algorithm_candidate_id, "algorithm_candidate_id")
+    candidate = _find_by_id(
+        candidates_report.get("algorithm_candidates"),
+        selected_id,
+        "algorithm_candidate_id",
+    )
+    executor = candidate.get("executor_spec")
+    if not isinstance(executor, dict):
+        raise LiteratureAlgorithmLabError("candidate executor_spec must be an object")
+    if executor.get("unsupported_hook") != "fourier_neural_operator_architecture":
+        raise LiteratureAlgorithmLabError(
+            "FNO architecture adapter requires a fourier_neural_operator_architecture candidate"
+        )
+    checkpoint_file = _require_file(Path(checkpoint_path), "checkpoint resource")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    source_grounding = candidate.get("source_grounding")
+    if not isinstance(source_grounding, dict):
+        source_grounding = {}
+    adapted_source_grounding = {
+        **source_grounding,
+        "adapter_source_candidate_id": selected_id,
+        "adapter_route": "official_checkpoint_family",
+    }
+    adapted_candidate = {
+        "algorithm_candidate_id": f"{selected_id}_official_checkpoint_adapter",
+        "parent_algorithm_card_id": candidate.get("parent_algorithm_card_id"),
+        "candidate_family": "official_checkpoint_family",
+        "target_problem": candidate.get("target_problem", "PDE_Burgers"),
+        "target_task": candidate.get("target_task", "task1"),
+        "model_family": "checkpoint",
+        "hypothesis": candidate.get("hypothesis"),
+        "mechanism": (
+            f"{candidate.get('mechanism')} Adapted through a local official "
+            "checkpoint-family sandbox instead of unbounded architecture code."
+        ),
+        "executor_spec": _executor_spec("run-checkpoint-family-sandbox"),
+        "parameter_grid": _default_parameter_grid("official_checkpoint_family"),
+        "resource_bindings": {"checkpoint_paths": [str(checkpoint_file)]},
+        "benchmark_plan": {
+            "judge": "hermes_local_judge",
+            "primary_metric": "task1_total_score_proxy",
+            "sandbox_level": 1,
+        },
+        "ablation_plan": {
+            "baseline": "persistence_or_current_best",
+            "contrast": "checkpoint_adapter_disabled",
+        },
+        "promotion_criteria": {
+            "min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+            "requires_ablation": True,
+        },
+        "risk_controls": [
+            "preserve first 10 context steps",
+            "do not execute external repo code",
+            "verify checkpoint tensor convention before promotion",
+        ],
+        "source_grounding": adapted_source_grounding,
+    }
+    report = {
+        "schema_version": 1,
+        "state_hint": FNO_CANDIDATE_ADAPTED_STATE_HINT,
+        "adapted_candidate_path": str(output_file),
+        "algorithm_candidates_path": str(output_file),
+        "source_algorithm_candidate_id": selected_id,
+        "algorithm_candidate_count": 1,
+        "adapted_candidate": adapted_candidate,
+        "algorithm_candidates": [adapted_candidate],
+        "next_command": "plan-algorithm-candidate-sandbox",
     }
     _write_json(output_file, report)
     return report

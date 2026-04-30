@@ -861,6 +861,63 @@ def test_create_executor_design_request_from_blocked_fno_candidate(
     assert report["next_command"] == "build-blocked-candidate-handoff"
 
 
+def test_adapt_fno_architecture_candidate_to_checkpoint_resource(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        adapt_fno_architecture_candidate,
+    )
+
+    checkpoint = tmp_path / "1D_Burgers_Sols_Nu0.001_FNO.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_fno_blocked",
+                        "parent_algorithm_card_id": "card_fno",
+                        "candidate_family": "unsupported",
+                        "hypothesis": "FNO improves Burgers rollout.",
+                        "mechanism": "Fourier kernels learn global modes.",
+                        "executor_spec": {
+                            "cli_command": "blocked_requires_executor_design",
+                            "unsupported_hook": "fourier_neural_operator_architecture",
+                            "required_options": [],
+                        },
+                        "source_grounding": {
+                            "source_ids": ["source_fno"],
+                            "algorithm_card_id": "card_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = adapt_fno_architecture_candidate(
+        algorithm_candidates_path=candidates_path,
+        algorithm_candidate_id="candidate_fno_blocked",
+        checkpoint_path=checkpoint,
+        output_path=tmp_path / "adapted_candidate.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "FNO_ARCHITECTURE_CANDIDATE_ADAPTED"
+    adapted = report["adapted_candidate"]
+    assert adapted["candidate_family"] == "official_checkpoint_family"
+    assert adapted["executor_spec"]["cli_command"] == "run-checkpoint-family-sandbox"
+    assert adapted["resource_bindings"]["checkpoint_paths"] == [str(checkpoint)]
+    assert adapted["source_grounding"]["adapter_source_candidate_id"] == (
+        "candidate_fno_blocked"
+    )
+    assert report["next_command"] == "plan-algorithm-candidate-sandbox"
+
+
 def test_build_blocked_candidate_handoff_exposes_strategy_proposal_fields(
     tmp_path: Path,
 ) -> None:

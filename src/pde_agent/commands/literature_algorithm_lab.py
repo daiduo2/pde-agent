@@ -10,6 +10,7 @@ from pde_agent.core.literature_algorithm_lab import (
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
+    FNO_CANDIDATE_ADAPTED_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
     MINERU_TASK_POLLED_STATE_HINT,
     MINERU_TASK_SUBMITTED_STATE_HINT,
@@ -18,6 +19,7 @@ from pde_agent.core.literature_algorithm_lab import (
     SOURCE_DOCUMENT_STATE_HINT,
     SOURCE_SEARCH_STATE_HINT,
     SOURCE_RECORDS_STATE_HINT,
+    adapt_fno_architecture_candidate,
     build_blocked_candidate_handoff,
     build_executor_taxonomy,
     build_literature_source_records,
@@ -352,6 +354,38 @@ def build_executor_taxonomy_command(
         state_hint=EXECUTOR_TAXONOMY_STATE_HINT,
         artifacts={"executor_taxonomy_path": report["executor_taxonomy_path"]},
         metrics=report["route_counts"],
+        next_hint=report["next_command"],
+    )
+
+
+def adapt_fno_architecture_candidate_command(
+    *,
+    algorithm_candidates_path: str,
+    algorithm_candidate_id: str,
+    checkpoint_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = adapt_fno_architecture_candidate(
+        algorithm_candidates_path=Path(algorithm_candidates_path),
+        algorithm_candidate_id=algorithm_candidate_id,
+        checkpoint_path=Path(checkpoint_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="adapt-fno-architecture-candidate",
+        state_hint=FNO_CANDIDATE_ADAPTED_STATE_HINT,
+        artifacts={"adapted_candidate_path": report["adapted_candidate_path"]},
+        metrics={
+            "source_algorithm_candidate_id": report[
+                "source_algorithm_candidate_id"
+            ],
+            "adapted_candidate_id": report["adapted_candidate"][
+                "algorithm_candidate_id"
+            ],
+        },
         next_hint=report["next_command"],
     )
 
