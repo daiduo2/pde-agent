@@ -724,6 +724,7 @@ def run_hermes_batch_optimization_loop_cmd(
         "--candidate-submission-dir",
     ),
     candidate_generator: str = typer.Option("none"),
+    hypothesis_blueprint_path: str | None = typer.Option(None),
     postprocess_search_mode: str = typer.Option("paired"),
     postprocess_strategies: list[str] = typer.Option(
         [],
@@ -762,6 +763,7 @@ def run_hermes_batch_optimization_loop_cmd(
                 prediction_dataset_key=prediction_dataset_key,
                 candidate_submission_dirs=candidate_submission_dirs,
                 candidate_generator=candidate_generator,
+                hypothesis_blueprint_path=hypothesis_blueprint_path,
                 postprocess_search_mode=postprocess_search_mode,
                 postprocess_strategies=postprocess_strategies,
                 postprocess_blend_weights=postprocess_blend_weights,
@@ -882,6 +884,7 @@ def run_hermes_heartbeat_cmd(
     dataset_key: str = typer.Option("tensor"),
     prediction_dataset_key: str = typer.Option("tensor"),
     candidate_generator: str = typer.Option("postprocess"),
+    hypothesis_blueprint_path: str | None = typer.Option(None),
     postprocess_search_mode: str = typer.Option("adaptive"),
     postprocess_strategies: list[str] = typer.Option(
         [],
@@ -920,6 +923,7 @@ def run_hermes_heartbeat_cmd(
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
                 candidate_generator=candidate_generator,
+                hypothesis_blueprint_path=hypothesis_blueprint_path,
                 postprocess_search_mode=postprocess_search_mode,
                 postprocess_strategies=postprocess_strategies,
                 postprocess_blend_weights=postprocess_blend_weights,

@@ -28,6 +28,7 @@ def run_hermes_heartbeat_command(
     dataset_key: str,
     prediction_dataset_key: str,
     candidate_generator: str,
+    hypothesis_blueprint_path: str | None,
     postprocess_search_mode: str,
     postprocess_strategies: list[str],
     postprocess_blend_weights: list[float],
@@ -62,6 +63,9 @@ def run_hermes_heartbeat_command(
         dataset_key=dataset_key,
         prediction_dataset_key=prediction_dataset_key,
         candidate_generator=candidate_generator,
+        hypothesis_blueprint_path=Path(hypothesis_blueprint_path)
+        if hypothesis_blueprint_path is not None
+        else None,
         postprocess_search_mode=postprocess_search_mode,
         postprocess_strategies=postprocess_strategies,
         postprocess_blend_weights=postprocess_blend_weights,

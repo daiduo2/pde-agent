@@ -144,6 +144,12 @@ def test_hypothesis_lab_generates_hypotheses_and_blueprints(tmp_path: Path) -> N
     blueprint = blueprints["blueprints"][0]
     assert blueprint["candidate_family"] == "linear_trend_spectral"
     assert blueprints["blueprint_count"] == 1
+    assert blueprint["seed_params"][0]["params"] == {
+        "slope_window": 5,
+        "gain": -0.1,
+        "decay": 60.0,
+        "spectral_strength": 1.0,
+    }
     assert blueprint["sandbox"]["allowed_executor"] == "controlled_numpy_operator"
     assert 1.0 in blueprint["parameter_grid"]["spectral_strength"]
 
@@ -225,6 +231,37 @@ def test_hypothesis_lab_sandbox_verifies_blueprint_with_submission(tmp_path: Pat
     assert Path(sandbox["artifacts"]["best_submission_dir"]).exists()
 
 
+def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[_manual_report(tmp_path / "manual_report.json")],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    verified_path = Path(report["artifacts"]["verified_blueprint_path"])
+    verified = json.loads(verified_path.read_text(encoding="utf-8"))
+    assert verified["state_hint"] == "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED"
+    assert verified["blueprints"][0]["seed_params"][0]["source"] == "sandbox_best"
+    assert verified["blueprints"][0]["seed_params"][0]["params"] == report["sandbox"][
+        "best_candidate"
+    ]["params"]
+
+
 def test_hermes_batch_loop_can_run_linear_trend_spectral_generator(
     tmp_path: Path,
 ) -> None:
@@ -270,3 +307,80 @@ def test_hermes_batch_loop_can_run_linear_trend_spectral_generator(
     assert report["best_candidate"]["objective_signals"]["segment_score"] > (
         report["trajectory"][0]["objective_signals"]["segment_score"]
     )
+
+
+def test_hermes_batch_loop_can_drive_linear_trend_spectral_from_blueprint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.competition_submission import build_competition_submission
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    initial = build_competition_submission(
+        task_id=1,
+        test_path=test_path,
+        output_dir=tmp_path / "initial",
+        submission_id="team_hermes",
+        method="persistence",
+        force=False,
+    )
+    blueprint_path = tmp_path / "blueprints.json"
+    blueprint_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED",
+                "blueprints": [
+                    {
+                        "candidate_family": "linear_trend_spectral",
+                        "seed_params": [
+                            {
+                                "params": {
+                                    "slope_window": 5,
+                                    "gain": -0.1,
+                                    "decay": 60.0,
+                                    "spectral_strength": 1.0,
+                                },
+                                "source": "sandbox_best",
+                            }
+                        ],
+                        "parameter_grid": {
+                            "slope_window": [4],
+                            "gain": [-0.075],
+                            "decay": [70.0],
+                            "spectral_strength": [0.5],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial["artifacts"]["submission_dir"],
+        max_rounds=1,
+        patience=1,
+        min_score_improvement=0.0,
+        submit_score_threshold=150.0,
+        task1_test_path=test_path,
+        task1_target_path=target_path,
+        candidate_generator="linear_trend_spectral",
+        hypothesis_blueprint_path=blueprint_path,
+        force=False,
+    )
+
+    assert report["trajectory"][1]["metadata"]["params"] == {
+        "slope_window": 5,
+        "gain": -0.1,
+        "decay": 60.0,
+        "spectral_strength": 1.0,
+    }

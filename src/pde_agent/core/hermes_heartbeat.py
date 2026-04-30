@@ -44,6 +44,7 @@ def run_hermes_heartbeat(
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
     candidate_generator: str = "postprocess",
+    hypothesis_blueprint_path: str | Path | None = None,
     postprocess_search_mode: str = "adaptive",
     postprocess_strategies: list[str] | None = None,
     postprocess_blend_weights: list[float] | None = None,
@@ -102,6 +103,9 @@ def run_hermes_heartbeat(
             dataset_key=dataset_key,
             prediction_dataset_key=prediction_dataset_key,
             candidate_generator=candidate_generator,
+            hypothesis_blueprint_path=Path(hypothesis_blueprint_path)
+            if hypothesis_blueprint_path is not None
+            else None,
             postprocess_search_mode=postprocess_search_mode,
             postprocess_strategies=postprocess_strategies or [],
             postprocess_blend_weights=postprocess_blend_weights or [],
@@ -176,6 +180,9 @@ def run_hermes_heartbeat(
             "learning_objective": learning_objective,
             "unet_checkpoint_path": str(unet_checkpoint_path)
             if unet_checkpoint_path is not None
+            else None,
+            "hypothesis_blueprint_path": str(hypothesis_blueprint_path)
+            if hypothesis_blueprint_path is not None
             else None,
         },
         "batch_count": len(batches),

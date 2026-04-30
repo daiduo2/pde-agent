@@ -23,6 +23,7 @@ from pde_agent.core.manual_operator_tuning import (
 CARDS_STATE_HINT = "HYPOTHESIS_LAB_KNOWLEDGE_CARDS_BUILT"
 HYPOTHESES_STATE_HINT = "HYPOTHESIS_LAB_HYPOTHESES_GENERATED"
 BLUEPRINTS_STATE_HINT = "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED"
+VERIFIED_BLUEPRINTS_STATE_HINT = "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED"
 SANDBOX_STATE_HINT = "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
 RUN_STATE_HINT = "HYPOTHESIS_LAB_RAN"
 
@@ -113,6 +114,7 @@ def generate_hypotheses(
                     "expected_observables",
                 ),
                 "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
                 "priority": 1,
             }
         )
@@ -162,6 +164,44 @@ def _merge_card_list(cards: list[dict[str, Any]], key: str) -> list[str]:
     return values
 
 
+def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    seen: set[str] = set()
+    for card in cards:
+        evidence = card.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        params = evidence.get("params")
+        if not isinstance(params, dict):
+            continue
+        key = json.dumps(params, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "params": {
+                    "slope_window": int(params["slope_window"]),
+                    "gain": float(params["gain"]),
+                    "decay": float(params["decay"]),
+                    "spectral_strength": float(params["spectral_strength"]),
+                },
+                "source_card_id": card["card_id"],
+                "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
+                "segment_score": evidence.get("segment_score"),
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            -float(item["task1_total_fast_proxy"])
+            if isinstance(item.get("task1_total_fast_proxy"), int | float)
+            else 0.0,
+            str(item["source_card_id"]),
+        )
+    )
+    return rows
+
+
 def design_algorithm_blueprints(
     *,
     hypotheses: dict[str, Any],
@@ -199,6 +239,7 @@ def design_algorithm_blueprints(
                         "decay": [40.0, 50.0, 60.0, 70.0],
                         "spectral_strength": [0.5, 0.75, 1.0],
                     },
+                    "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
                         "allowed_executor": "controlled_numpy_operator",
                         "primary_metric": "task1_total_score_proxy",
@@ -384,6 +425,12 @@ def run_hypothesis_lab(
         submission_id=submission_id,
         force=force,
     )
+    verified_blueprints_path = root / "verified_blueprints.json"
+    verified_blueprints = _verified_blueprints(
+        blueprints=blueprints,
+        sandbox=sandbox,
+    )
+    _write_json(verified_blueprints_path, verified_blueprints)
     report = {
         "schema_version": 1,
         "state_hint": RUN_STATE_HINT,
@@ -404,11 +451,58 @@ def run_hypothesis_lab(
             "hypothesis_lab_report_path": str(report_path),
             "sandbox_report_path": sandbox["artifacts"]["sandbox_report_path"],
             "best_submission_dir": sandbox["artifacts"]["best_submission_dir"],
+            "verified_blueprint_path": str(verified_blueprints_path),
         },
         "next_command": sandbox["next_command"],
     }
     _write_json(report_path, report)
     return report
+
+
+def _verified_blueprints(
+    *,
+    blueprints: dict[str, Any],
+    sandbox: dict[str, Any],
+) -> dict[str, Any]:
+    verified = json.loads(json.dumps(blueprints))
+    verified["state_hint"] = VERIFIED_BLUEPRINTS_STATE_HINT
+    verified["source_sandbox_report_path"] = sandbox["artifacts"]["sandbox_report_path"]
+    best = sandbox["best_candidate"]
+    for blueprint in verified.get("blueprints", []):
+        if not isinstance(blueprint, dict):
+            continue
+        if blueprint.get("blueprint_id") != sandbox.get("blueprint_id"):
+            continue
+        seed = {
+            "params": best["params"],
+            "source": "sandbox_best",
+            "candidate_id": best["candidate_id"],
+            "task1_total_score_proxy": best["task1_total_score_proxy"],
+            "segment_score": best["segment_score"],
+        }
+        existing = blueprint.get("seed_params")
+        if not isinstance(existing, list):
+            existing = []
+        blueprint["seed_params"] = [seed, *_dedupe_seed_params(existing, seed["params"])]
+    return verified
+
+
+def _dedupe_seed_params(
+    rows: list[Any],
+    first_params: dict[str, Any],
+) -> list[dict[str, Any]]:
+    deduped = []
+    first_key = json.dumps(first_params, sort_keys=True)
+    seen = {first_key}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("params"), dict):
+            continue
+        key = json.dumps(row["params"], sort_keys=True)
+        if key in seen:
+            continue
+        deduped.append(row)
+        seen.add(key)
+    return deduped
 
 
 def _linear_trend_spectral_card(

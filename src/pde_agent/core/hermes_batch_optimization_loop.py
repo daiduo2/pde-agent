@@ -63,6 +63,7 @@ def run_hermes_batch_optimization_loop(
     prediction_dataset_key: str = "tensor",
     candidate_submission_dirs: Sequence[str | Path] | None = None,
     candidate_generator: str = "none",
+    hypothesis_blueprint_path: str | Path | None = None,
     postprocess_search_mode: str = "paired",
     postprocess_strategies: Sequence[str] | None = None,
     postprocess_blend_weights: Sequence[float] | None = None,
@@ -109,6 +110,7 @@ def run_hermes_batch_optimization_loop(
     run_candidate = candidate_runner or _build_candidate_runner(
         candidate_submission_dirs=candidate_submission_dirs,
         candidate_generator=candidate_generator,
+        hypothesis_blueprint_path=hypothesis_blueprint_path,
         initial_submission_dir=Path(initial_submission_dir),
         task1_test_path=task1_test_path,
         task2_test_path=task2_test_path,
@@ -256,6 +258,9 @@ def run_hermes_batch_optimization_loop(
             "submit_score_threshold": submit_score_threshold,
             "learning_objective": learning_objective,
             "candidate_generator": candidate_generator,
+            "hypothesis_blueprint_path": str(hypothesis_blueprint_path)
+            if hypothesis_blueprint_path is not None
+            else None,
             "unet_checkpoint_path": str(unet_checkpoint_path)
             if unet_checkpoint_path is not None
             else None,
@@ -325,6 +330,7 @@ def _build_candidate_runner(
     *,
     candidate_submission_dirs: Sequence[str | Path] | None,
     candidate_generator: str,
+    hypothesis_blueprint_path: str | Path | None,
     initial_submission_dir: Path,
     task1_test_path: str | Path | None,
     task2_test_path: str | Path | None,
@@ -391,6 +397,7 @@ def _build_candidate_runner(
         return _linear_trend_spectral_runner(
             task1_test_path=task1_test_path,
             task2_test_path=task2_test_path,
+            hypothesis_blueprint_path=hypothesis_blueprint_path,
             dataset_key=dataset_key,
             prediction_dataset_key=prediction_dataset_key,
             submission_id=submission_id,
@@ -655,6 +662,7 @@ def _linear_trend_spectral_runner(
     *,
     task1_test_path: str | Path | None,
     task2_test_path: str | Path | None,
+    hypothesis_blueprint_path: str | Path | None,
     dataset_key: str,
     prediction_dataset_key: str,
     submission_id: str,
@@ -664,32 +672,7 @@ def _linear_trend_spectral_runner(
         task1_test_path=task1_test_path,
         task2_test_path=task2_test_path,
     )
-    schedule = [
-        {
-            "slope_window": 5,
-            "gain": -0.1,
-            "decay": 60.0,
-            "spectral_strength": 1.0,
-        },
-        {
-            "slope_window": 5,
-            "gain": -0.125,
-            "decay": 50.0,
-            "spectral_strength": 1.0,
-        },
-        {
-            "slope_window": 6,
-            "gain": -0.1,
-            "decay": 60.0,
-            "spectral_strength": 1.0,
-        },
-        {
-            "slope_window": 5,
-            "gain": -0.1,
-            "decay": 60.0,
-            "spectral_strength": 0.75,
-        },
-    ]
+    schedule = _linear_trend_spectral_schedule(hypothesis_blueprint_path)
 
     def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
         round_index = int(kwargs["round_index"])
@@ -748,6 +731,9 @@ def _linear_trend_spectral_runner(
                     "state_hint": "LINEAR_TREND_SPECTRAL_CANDIDATE_READY",
                     "candidate_id": candidate_id,
                     "params": params,
+                    "hypothesis_blueprint_path": str(hypothesis_blueprint_path)
+                    if hypothesis_blueprint_path is not None
+                    else None,
                     "artifacts": {
                         "candidate_prediction_path": str(prediction_path),
                         "submission_dir": submission["artifacts"]["submission_dir"],
@@ -766,10 +752,148 @@ def _linear_trend_spectral_runner(
             "submission_dir": submission["artifacts"]["submission_dir"],
             "source": "linear_trend_spectral_generator",
             "params": params,
+            "hypothesis_blueprint_path": str(hypothesis_blueprint_path)
+            if hypothesis_blueprint_path is not None
+            else None,
             "candidate_report_path": str(candidate_report_path),
         }
 
     return run_candidate
+
+
+def _linear_trend_spectral_schedule(
+    hypothesis_blueprint_path: str | Path | None,
+) -> list[dict[str, float | int]]:
+    if hypothesis_blueprint_path is not None:
+        blueprint = _load_linear_trend_spectral_blueprint(Path(hypothesis_blueprint_path))
+        return _blueprint_schedule(blueprint)
+    return [
+        {
+            "slope_window": 5,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 5,
+            "gain": -0.125,
+            "decay": 50.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 6,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 5,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 0.75,
+        },
+    ]
+
+
+def _load_linear_trend_spectral_blueprint(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise HermesBatchOptimizationLoopError(f"hypothesis blueprint not found: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HermesBatchOptimizationLoopError(
+            f"invalid hypothesis blueprint JSON: {path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HermesBatchOptimizationLoopError("hypothesis blueprint must be a JSON object")
+    blueprints = payload.get("blueprints")
+    if not isinstance(blueprints, list):
+        raise HermesBatchOptimizationLoopError(
+            "hypothesis blueprint file must include blueprints list"
+        )
+    for blueprint in blueprints:
+        if (
+            isinstance(blueprint, dict)
+            and blueprint.get("candidate_family") == "linear_trend_spectral"
+            and isinstance(blueprint.get("parameter_grid"), dict)
+        ):
+            return blueprint
+    raise HermesBatchOptimizationLoopError(
+        "no linear_trend_spectral blueprint found in hypothesis blueprint file"
+    )
+
+
+def _grid_schedule(grid: dict[str, Any]) -> list[dict[str, float | int]]:
+    required = ("slope_window", "gain", "decay", "spectral_strength")
+    values: dict[str, list[Any]] = {}
+    for key in required:
+        raw = grid.get(key)
+        if not isinstance(raw, list) or not raw:
+            raise HermesBatchOptimizationLoopError(
+                f"linear_trend_spectral blueprint missing non-empty {key} list"
+            )
+        values[key] = raw
+    schedule = []
+    for slope_window in values["slope_window"]:
+        for gain in values["gain"]:
+            for decay in values["decay"]:
+                for strength in values["spectral_strength"]:
+                    schedule.append(
+                        {
+                            "slope_window": int(slope_window),
+                            "gain": float(gain),
+                            "decay": float(decay),
+                            "spectral_strength": float(strength),
+                        }
+                    )
+    return schedule
+
+
+def _blueprint_schedule(blueprint: dict[str, Any]) -> list[dict[str, float | int]]:
+    schedule: list[dict[str, float | int]] = []
+    seen: set[tuple[int, float, float, float]] = set()
+    seed_params = blueprint.get("seed_params")
+    if isinstance(seed_params, list):
+        for row in seed_params:
+            if not isinstance(row, dict) or not isinstance(row.get("params"), dict):
+                continue
+            params = _normalize_linear_trend_spectral_params(row["params"])
+            key = _linear_trend_spectral_param_key(params)
+            if key not in seen:
+                schedule.append(params)
+                seen.add(key)
+    for params in _grid_schedule(blueprint["parameter_grid"]):
+        key = _linear_trend_spectral_param_key(params)
+        if key not in seen:
+            schedule.append(params)
+            seen.add(key)
+    if not schedule:
+        raise HermesBatchOptimizationLoopError(
+            "linear_trend_spectral blueprint produced an empty schedule"
+        )
+    return schedule
+
+
+def _normalize_linear_trend_spectral_params(
+    params: dict[str, Any],
+) -> dict[str, float | int]:
+    return {
+        "slope_window": int(params["slope_window"]),
+        "gain": float(params["gain"]),
+        "decay": float(params["decay"]),
+        "spectral_strength": float(params["spectral_strength"]),
+    }
+
+
+def _linear_trend_spectral_param_key(
+    params: dict[str, float | int],
+) -> tuple[int, float, float, float]:
+    return (
+        int(params["slope_window"]),
+        float(params["gain"]),
+        float(params["decay"]),
+        float(params["spectral_strength"]),
+    )
 
 
 def _postprocess_schedule(
