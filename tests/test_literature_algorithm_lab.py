@@ -523,6 +523,51 @@ def test_ingest_mineru_parse_accepts_downloaded_source_record(
     assert report["source_id"] == "source_fno"
 
 
+def test_ingest_mineru_parse_accepts_neural_operator_method_sections(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import ingest_mineru_parse
+
+    source_path = tmp_path / "downloaded_source.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {"source_id": "source_fno"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    markdown = tmp_path / "full.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Fourier Neural Operator for PDEs",
+                "## Abstract",
+                "We introduce Fourier neural operators.",
+                "## Neural Operator",
+                "The model learns a map between function spaces.",
+                "## Fourier Neural Operator",
+                "The kernel integral is parameterized in Fourier space.",
+                "$$x$$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = ingest_mineru_parse(
+        source_records_path=source_path,
+        source_id="source_fno",
+        markdown_path=markdown,
+        asset_dir=tmp_path / "images",
+        output_path=tmp_path / "parse.json",
+        force=False,
+    )
+
+    assert report["parse_quality"]["quality"] == "usable"
+    assert report["parse_quality"]["quality_flags"] == []
+
+
 def test_extract_algorithm_cards_reads_operational_markdown(
     tmp_path: Path,
 ) -> None:

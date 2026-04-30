@@ -869,7 +869,12 @@ def _parse_quality_flags(
     lowered_sections = set(section_index)
     if "abstract" not in lowered_sections:
         flags.append("missing_abstract")
-    if "method" not in lowered_sections and "methods" not in lowered_sections:
+    has_method_section = any(
+        keyword in section
+        for section in lowered_sections
+        for keyword in ["method", "approach", "algorithm", "neural operator"]
+    )
+    if not has_method_section:
         flags.append("missing_method")
     if len(markdown.strip()) < 200:
         flags.append("markdown_too_short")
