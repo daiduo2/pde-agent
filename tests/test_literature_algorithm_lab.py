@@ -475,6 +475,54 @@ def test_ingest_mineru_parse_scores_markdown_quality(tmp_path: Path) -> None:
     assert report["next_command"] == "extract-algorithm-cards"
 
 
+def test_ingest_mineru_parse_accepts_downloaded_source_record(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import ingest_mineru_parse
+
+    source_path = tmp_path / "downloaded_source.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {
+                    "source_id": "source_fno",
+                    "title": "FNO",
+                    "local_raw_path": str(tmp_path / "paper.pdf"),
+                    "content_hash": "abc",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    markdown = tmp_path / "full.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Paper",
+                "## Abstract",
+                "Neural operator abstract.",
+                "## Method",
+                "The method learns operators.",
+                "$$x$$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = ingest_mineru_parse(
+        source_records_path=source_path,
+        source_id="source_fno",
+        markdown_path=markdown,
+        asset_dir=tmp_path / "images",
+        output_path=tmp_path / "parse.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "MINERU_PARSE_INGESTED"
+    assert report["source_id"] == "source_fno"
+
+
 def test_extract_algorithm_cards_reads_operational_markdown(
     tmp_path: Path,
 ) -> None:

@@ -518,11 +518,7 @@ def ingest_mineru_parse(
     _guard_output(output_file, force=force)
     markdown_file = _require_file(Path(markdown_path), "MinerU markdown")
     selected_source_id = _nonempty_text(source_id, "source_id")
-    source_ids = {
-        record.get("source_id")
-        for record in source_records.get("source_records", [])
-        if isinstance(record, dict)
-    }
+    source_ids = _source_ids_from_source_artifact(source_records)
     if selected_source_id not in source_ids:
         raise LiteratureAlgorithmLabError(
             f"source_id not found in source records: {selected_source_id}"
@@ -900,6 +896,19 @@ def _source_type(value: Any) -> str:
     if text not in VALID_SOURCE_TYPES:
         raise LiteratureAlgorithmLabError(f"unsupported source_type: {text}")
     return text
+
+
+def _source_ids_from_source_artifact(payload: dict[str, Any]) -> set[Any]:
+    if payload.get("state_hint") == SOURCE_DOCUMENT_STATE_HINT:
+        record = payload.get("source_record")
+        if isinstance(record, dict):
+            return {record.get("source_id")}
+        return set()
+    return {
+        record.get("source_id")
+        for record in payload.get("source_records", [])
+        if isinstance(record, dict)
+    }
 
 
 def _write_source_search_report(
