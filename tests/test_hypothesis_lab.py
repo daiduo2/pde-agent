@@ -72,6 +72,61 @@ def _manual_report_with_external_best(path: Path) -> Path:
     return path
 
 
+def _adaptive_plateau_report(path: Path) -> Path:
+    payload = {
+        "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+        "stage_count": 2,
+        "policy_events": [
+            {
+                "stage_index": 1,
+                "action": "switch_to_verified_blueprint",
+                "trajectory_state": "plateau",
+                "reason_codes": ["stagnation_detected"],
+                "best_candidate_id": "initial",
+                "best_score": 85.61,
+            },
+            {
+                "stage_index": 2,
+                "action": "verified_blueprint_plateau",
+                "trajectory_state": "plateau",
+                "reason_codes": ["recent_batches_not_improved"],
+                "best_candidate_id": "linear_trend_spectral_w5_g-0.075_d70_s1",
+                "best_score": 86.21,
+            },
+        ],
+        "stages": [
+            {
+                "stage_index": 2,
+                "candidate_generator": "linear_trend_spectral",
+                "best_candidate_id": "linear_trend_spectral_w5_g-0.075_d70_s1",
+                "best_score": 86.21,
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _scientific_log(path: Path) -> Path:
+    path.write_text(
+        "\n".join(
+            [
+                "Hermes PDE Agent Scientific Log",
+                "Trace:",
+                "- Hermes diagnosed heartbeat trajectory reports before selecting the next generator.",
+                "Experiment Tracking:",
+                "- stage=1 action=switch_to_verified_blueprint state=plateau best=initial score=85.6089",
+                "- stage=2 action=verified_blueprint_plateau state=plateau best=linear_trend_spectral_w5_g-0.075_d70_s1 score=86.2087",
+                "Reflection:",
+                "- Linear trend spectral improved over persistence but plateaued after verified blueprint reuse.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -115,6 +170,49 @@ def test_hypothesis_lab_extracts_internalizable_top_candidate_not_only_best(
     assert families == ["linear_trend_spectral", "external_residual_blend"]
 
 
+def test_hypothesis_lab_builds_cards_from_adaptive_plateau_report(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[_adaptive_plateau_report(tmp_path / "adaptive.json")],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "adaptive_heartbeat_report"
+    assert card["evidence_status"] == "plateaued"
+    assert card["implementation_hooks"] == ["linear_trend_spectral_escape"]
+    assert "verified_blueprint_plateau" in card["known_risks"]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "linear_trend_spectral_escape"
+    )
+    assert hypotheses["hypotheses"][0]["priority"] < 1
+
+
+def test_hypothesis_lab_builds_cards_from_scientific_logs(tmp_path: Path) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        log_paths=[_scientific_log(tmp_path / "task1_logs.log")],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "scientific_log"
+    assert card["evidence_status"] == "observed_plateau"
+    assert "linear_trend_spectral_escape" in card["implementation_hooks"]
+    assert "verified blueprint reuse" in card["claim"].lower()
+
+
 def test_hypothesis_lab_generates_hypotheses_and_blueprints(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import (
         build_knowledge_cards,
@@ -152,6 +250,37 @@ def test_hypothesis_lab_generates_hypotheses_and_blueprints(tmp_path: Path) -> N
     }
     assert blueprint["sandbox"]["allowed_executor"] == "controlled_numpy_operator"
     assert 1.0 in blueprint["parameter_grid"]["spectral_strength"]
+
+
+def test_hypothesis_lab_designs_escape_blueprint_from_plateau_cards(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[_adaptive_plateau_report(tmp_path / "adaptive.json")],
+        log_paths=[_scientific_log(tmp_path / "task1_logs.log")],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["candidate_family"] == "linear_trend_spectral"
+    assert blueprint["search_mode"] == "plateau_escape"
+    assert 0.0 in blueprint["parameter_grid"]["spectral_strength"]
+    assert 1.5 in blueprint["parameter_grid"]["spectral_strength"]
+    assert -0.025 in blueprint["parameter_grid"]["gain"]
 
 
 def test_hypothesis_lab_groups_duplicate_cards_by_candidate_family(
@@ -228,6 +357,10 @@ def test_hypothesis_lab_sandbox_verifies_blueprint_with_submission(tmp_path: Pat
     assert sandbox["state_hint"] == "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
     assert sandbox["verifier"]["decision"] == "promote_to_strategy_proposal"
     assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
+    assert sandbox["verifier"]["metric_results"]["score_delta_vs_baseline"]["passed"]
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+    assert "late_rmse_delta_vs_baseline" in sandbox["verifier"]["metric_results"]
+    assert sandbox["verifier"]["metric_results"]["late_rmse_delta_vs_baseline"]["value"] > 0.0
     assert Path(sandbox["artifacts"]["best_submission_dir"]).exists()
 
 

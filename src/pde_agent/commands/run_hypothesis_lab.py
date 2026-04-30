@@ -14,9 +14,15 @@ def run_hypothesis_lab_command(
     output_dir: str,
     submission_id: str,
     force: bool,
+    adaptive_report_paths: list[str] | None = None,
+    log_paths: list[str] | None = None,
 ) -> dict[str, object]:
     report = run_hypothesis_lab(
         manual_report_paths=[Path(path) for path in manual_report_paths],
+        adaptive_report_paths=[
+            Path(path) for path in (adaptive_report_paths or [])
+        ],
+        log_paths=[Path(path) for path in (log_paths or [])],
         context_path=Path(context_path),
         target_path=Path(target_path),
         output_dir=Path(output_dir),

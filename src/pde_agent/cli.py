@@ -785,6 +785,8 @@ def run_hermes_batch_optimization_loop_cmd(
 @app.command("run-hypothesis-lab")
 def run_hypothesis_lab_cmd(
     manual_report_paths: list[str] = typer.Option([], "--manual-report-path"),
+    adaptive_report_paths: list[str] = typer.Option([], "--adaptive-report-path"),
+    log_paths: list[str] = typer.Option([], "--log-path"),
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
@@ -797,6 +799,8 @@ def run_hypothesis_lab_cmd(
         json.dumps(
             run_hypothesis_lab_command(
                 manual_report_paths=manual_report_paths,
+                adaptive_report_paths=adaptive_report_paths,
+                log_paths=log_paths,
                 context_path=context_path,
                 target_path=target_path,
                 output_dir=output_dir,

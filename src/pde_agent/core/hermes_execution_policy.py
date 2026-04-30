@@ -196,6 +196,11 @@ def run_hermes_adaptive_heartbeat(
     if best is None:
         raise HermesExecutionPolicyError("adaptive heartbeat produced no best candidate")
     _append_policy_log(submission_dir=Path(str(best["submission_dir"])), events=policy_events)
+    next_command = _next_command(policy_events)
+    next_hypothesis_lab_inputs = _next_hypothesis_lab_inputs(
+        adaptive_report_path=report_path,
+        best_submission_dir=Path(str(best["submission_dir"])),
+    )
     report = {
         "schema_version": 1,
         "state_hint": POLICY_STATE_HINT,
@@ -206,8 +211,10 @@ def run_hermes_adaptive_heartbeat(
         "best_candidate": best,
         "best_score": _score(best),
         "decision": "continue_next_adaptive_heartbeat",
-        "next_command": "run-hermes-adaptive-heartbeat",
+        "next_command": next_command,
     }
+    if next_hypothesis_lab_inputs is not None:
+        report["next_hypothesis_lab_inputs"] = next_hypothesis_lab_inputs
     _write_json(report_path, report)
     return report
 
@@ -329,6 +336,27 @@ def _append_policy_log(*, submission_dir: Path, events: list[dict[str, Any]]) ->
             )
         )
     log_path.write_text(text.rstrip() + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _next_command(events: list[dict[str, Any]]) -> str:
+    if events and events[-1].get("action") == "verified_blueprint_plateau":
+        return "run-hypothesis-lab"
+    return "run-hermes-adaptive-heartbeat"
+
+
+def _next_hypothesis_lab_inputs(
+    *,
+    adaptive_report_path: Path,
+    best_submission_dir: Path,
+) -> dict[str, Any] | None:
+    log_path = best_submission_dir / "task1_logs.log"
+    if not log_path.exists():
+        return None
+    return {
+        "manual_report_paths": [],
+        "adaptive_report_path": str(adaptive_report_path),
+        "log_paths": [str(log_path)],
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:

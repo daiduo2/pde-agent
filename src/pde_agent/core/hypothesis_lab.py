@@ -35,6 +35,8 @@ class HypothesisLabError(RuntimeError):
 def build_knowledge_cards(
     *,
     manual_report_paths: list[str | Path],
+    adaptive_report_paths: list[str | Path] | None = None,
+    log_paths: list[str | Path] | None = None,
     output_path: str | Path | None,
     force: bool,
 ) -> dict[str, Any]:
@@ -55,6 +57,17 @@ def build_knowledge_cards(
                 cards.append(_linear_trend_spectral_card(report_file, candidate))
             elif family == "external_blend":
                 cards.append(_external_blend_card(report_file, candidate))
+    for report_path in adaptive_report_paths or []:
+        report_file = Path(report_path)
+        report = _read_json(report_file)
+        card = _adaptive_plateau_card(report_file, report)
+        if card is not None:
+            cards.append(card)
+    for log_path in log_paths or []:
+        log_file = Path(log_path)
+        card = _scientific_log_card(log_file)
+        if card is not None:
+            cards.append(card)
     result = {
         "schema_version": 1,
         "state_hint": CARDS_STATE_HINT,
@@ -93,9 +106,34 @@ def generate_hypotheses(
         hooks = set(card.get("implementation_hooks", []))
         if "linear_trend_spectral" in hooks:
             grouped_cards.setdefault("linear_trend_spectral", []).append(card)
+        if "linear_trend_spectral_escape" in hooks:
+            grouped_cards.setdefault("linear_trend_spectral_escape", []).append(card)
         if "external_residual_blend" in hooks:
             grouped_cards.setdefault("external_residual_blend", []).append(card)
     hypotheses = []
+    if "linear_trend_spectral_escape" in grouped_cards:
+        source_cards = grouped_cards["linear_trend_spectral_escape"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_burgers_trend_spectral_plateau_escape_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "linear_trend_spectral_escape",
+                "mechanism": (
+                    "When the verified damped-trend spectral blueprint plateaus, "
+                    "escape its local basin by widening slope windows, allowing "
+                    "near-zero damping, and testing both unsmoothed and stronger "
+                    "spectral variants under the same controlled NumPy executor."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
+                "priority": 0,
+            }
+        )
     if "linear_trend_spectral" in grouped_cards:
         source_cards = grouped_cards["linear_trend_spectral"]
         hypotheses.append(
@@ -221,6 +259,7 @@ def design_algorithm_blueprints(
                     "blueprint_id": "bp_linear_trend_spectral_grid_001",
                     "hypothesis_id": hypothesis["hypothesis_id"],
                     "candidate_family": "linear_trend_spectral",
+                    "search_mode": "evidence_refine",
                     "algorithm": {
                         "summary": (
                             "Estimate a damped negative linear trend from the "
@@ -238,6 +277,41 @@ def design_algorithm_blueprints(
                         "gain": [-0.15, -0.125, -0.1, -0.075],
                         "decay": [40.0, 50.0, 60.0, 70.0],
                         "spectral_strength": [0.5, 0.75, 1.0],
+                    },
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_operator",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "linear_trend_spectral_escape":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_linear_trend_spectral_escape_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "linear_trend_spectral",
+                    "search_mode": "plateau_escape",
+                    "algorithm": {
+                        "summary": (
+                            "Use the same controlled damped-trend spectral "
+                            "operator, but search outside the verified blueprint's "
+                            "local basin after repeated plateau evidence."
+                        ),
+                        "pseudocode": [
+                            "slope = (u[-1] - u[-1-window]) / window",
+                            "future[t] = u[-1] + gain * t * exp(-t/decay) * slope",
+                            "future = optional spectral_smooth(future, strength)",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "slope_window": [2, 3, 4, 5, 8],
+                        "gain": [-0.2, -0.15, -0.1, -0.075, -0.05, -0.025],
+                        "decay": [20.0, 40.0, 70.0, 100.0],
+                        "spectral_strength": [0.0, 0.25, 0.5, 1.0, 1.5],
                     },
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
@@ -336,18 +410,27 @@ def run_blueprint_sandbox(
         prediction=best["_prediction"],
         context=context,
     )
+    baseline_total = _task1_total_score_proxy(
+        prediction_score=float(baseline_score["task1_prediction_score"]),
+        inference_seconds=0.0,
+    )
     delta = (
         float(judge["total_score_proxy"])
-        - _task1_total_score_proxy(
-            prediction_score=float(baseline_score["task1_prediction_score"]),
-            inference_seconds=0.0,
-        )
+        - baseline_total
+    )
+    metric_results = _sandbox_metric_results(
+        judge=judge,
+        baseline_score=baseline_score,
+        best_segments=best["segments"],
+        score_delta=delta,
+        context_preserved=context_preserved,
+        inference_seconds=float(best["elapsed_seconds"]),
+        max_inference_seconds=float(blueprint["sandbox"]["max_inference_seconds"]),
+        promotion_min_score_delta=float(blueprint["sandbox"]["promotion_min_score_delta"]),
     )
     verifier = {
         "decision": "promote_to_strategy_proposal"
-        if judge["rules_passed"]
-        and context_preserved
-        and delta >= float(blueprint["sandbox"]["promotion_min_score_delta"])
+        if _sandbox_metrics_pass(metric_results)
         else "reject_or_revise",
         "rules_passed": bool(judge["rules_passed"]),
         "context_preserved": context_preserved,
@@ -356,6 +439,8 @@ def run_blueprint_sandbox(
         "best_segment_score": judge["tasks"]["1"]["score"]["segment_score"],
         "inference_time": float(best["elapsed_seconds"]),
         "judge_decision": judge["decision"],
+        "metric_results": metric_results,
+        "promotion_score": _sandbox_promotion_score(metric_results),
     }
     serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
     report = {
@@ -390,6 +475,8 @@ def run_blueprint_sandbox(
 def run_hypothesis_lab(
     *,
     manual_report_paths: list[str | Path],
+    adaptive_report_paths: list[str | Path] | None = None,
+    log_paths: list[str | Path] | None = None,
     context_path: str | Path,
     target_path: str | Path,
     output_dir: str | Path,
@@ -402,6 +489,8 @@ def run_hypothesis_lab(
     root.mkdir(parents=True, exist_ok=True)
     cards = build_knowledge_cards(
         manual_report_paths=manual_report_paths,
+        adaptive_report_paths=adaptive_report_paths,
+        log_paths=log_paths,
         output_path=root / "knowledge_cards.json",
         force=force,
     )
@@ -578,6 +667,115 @@ def _external_blend_card(report_file: Path, candidate: dict[str, Any]) -> dict[s
     }
 
 
+def _adaptive_plateau_card(
+    report_file: Path,
+    report: dict[str, Any],
+) -> dict[str, Any] | None:
+    if report.get("state_hint") != "HERMES_ADAPTIVE_HEARTBEAT_RAN":
+        return None
+    events = [item for item in report.get("policy_events", []) if isinstance(item, dict)]
+    plateau_events = [
+        item
+        for item in events
+        if item.get("trajectory_state") == "plateau"
+        or item.get("action") == "verified_blueprint_plateau"
+    ]
+    if not plateau_events:
+        return None
+    last = plateau_events[-1]
+    best_candidate_id = str(last.get("best_candidate_id", "unknown"))
+    reason_codes = [
+        str(item)
+        for event in plateau_events
+        for item in event.get("reason_codes", [])
+        if isinstance(item, str)
+    ]
+    if last.get("action") == "verified_blueprint_plateau":
+        reason_codes.append("verified_blueprint_plateau")
+    return {
+        "card_id": f"adaptive_plateau_{report_file.stem}",
+        "source_type": "adaptive_heartbeat_report",
+        "source_path": str(report_file),
+        "claim": (
+            "The verified linear trend spectral blueprint reached a local "
+            "plateau and should trigger a wider controlled escape search."
+        ),
+        "procedural_heuristic": (
+            "Keep the controlled NumPy operator, but expand slope windows, "
+            "weaken the gain, and include unsmoothed plus stronger spectral "
+            "settings instead of repeating the verified seed."
+        ),
+        "preconditions": [
+            "adaptive heartbeat plateau",
+            "verified blueprint reuse already attempted",
+            "candidate generator is linear_trend_spectral",
+        ],
+        "implementation_hooks": ["linear_trend_spectral_escape"],
+        "expected_observables": [
+            "new top candidate outside previous seed parameters",
+            "non-negative score delta versus persistence",
+            "runtime remains below inference budget",
+        ],
+        "known_risks": sorted(set(reason_codes)),
+        "evidence_status": "plateaued",
+        "evidence": {
+            "candidate_id": best_candidate_id,
+            "task1_total_fast_proxy": last.get("best_score"),
+            "action": last.get("action"),
+            "stage_index": last.get("stage_index"),
+        },
+    }
+
+
+def _scientific_log_card(log_file: Path) -> dict[str, Any] | None:
+    if not log_file.exists():
+        raise HypothesisLabError(f"log artifact not found: {log_file}")
+    text = log_file.read_text(encoding="utf-8")
+    lower = text.lower()
+    if "verified_blueprint_plateau" not in lower and "plateaued" not in lower:
+        return None
+    if "linear_trend_spectral" not in lower and "linear trend spectral" not in lower:
+        return None
+    return {
+        "card_id": f"scientific_log_{log_file.stem}",
+        "source_type": "scientific_log",
+        "source_path": str(log_file),
+        "claim": (
+            "Verified blueprint reuse plateaued in the scientific log, so "
+            "Hermes should explore a controlled linear trend spectral escape."
+        ),
+        "procedural_heuristic": (
+            "Convert the log reflection into a structured memory card before "
+            "choosing the next hypothesis, so the next batch does not repeat "
+            "the same verified blueprint."
+        ),
+        "preconditions": [
+            "task1 agent log contains plateau evidence",
+            "linear trend spectral strategy has already been reused",
+        ],
+        "implementation_hooks": ["linear_trend_spectral_escape"],
+        "expected_observables": [
+            "hypothesis generator prioritizes plateau_escape",
+            "knowledge card is visible in hypothesis sources",
+        ],
+        "known_risks": ["verified_blueprint_plateau", "repeating prior seed"],
+        "evidence_status": "observed_plateau",
+        "evidence": {
+            "candidate_id": _first_log_best_candidate(text),
+            "summary": "adaptive policy log reported verified blueprint plateau",
+        },
+    }
+
+
+def _first_log_best_candidate(text: str) -> str | None:
+    for line in text.splitlines():
+        marker = "best="
+        if marker not in line:
+            continue
+        return line.split(marker, 1)[1].split()[0].strip()
+    return None
+
+
 def _prediction_from_linear_trend_spectral(
     *,
     context: np.ndarray,
@@ -629,6 +827,102 @@ def _candidate_id(params: dict[str, Any]) -> str:
 
 def _context_preserved(*, prediction: np.ndarray, context: np.ndarray) -> bool:
     return bool(np.allclose(prediction[:, : context.shape[1], :], context, atol=1e-6))
+
+
+def _sandbox_metric_results(
+    *,
+    judge: dict[str, Any],
+    baseline_score: dict[str, Any],
+    best_segments: dict[str, Any],
+    score_delta: float,
+    context_preserved: bool,
+    inference_seconds: float,
+    max_inference_seconds: float,
+    promotion_min_score_delta: float,
+) -> dict[str, Any]:
+    best_score = judge["tasks"]["1"]["score"]
+    baseline_segments = baseline_score.get("segments", {})
+    late_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="late",
+        metric="rmse",
+        lower_is_better=True,
+    )
+    segment_delta = float(best_score["segment_score"]) - float(
+        baseline_score["segment_score"]
+    )
+    return {
+        "rules_passed": {
+            "value": bool(judge["rules_passed"]),
+            "passed": bool(judge["rules_passed"]),
+        },
+        "context_preserved": {
+            "value": bool(context_preserved),
+            "passed": bool(context_preserved),
+        },
+        "score_delta_vs_baseline": {
+            "value": score_delta,
+            "threshold": promotion_min_score_delta,
+            "passed": score_delta >= promotion_min_score_delta,
+        },
+        "segment_score_delta_vs_baseline": {
+            "value": segment_delta,
+            "passed": segment_delta >= 0.0,
+        },
+        "late_rmse_delta_vs_baseline": {
+            "value": late_delta,
+            "passed": late_delta is None or late_delta >= 0.0,
+        },
+        "inference_time_budget": {
+            "value": inference_seconds,
+            "threshold": max_inference_seconds,
+            "passed": inference_seconds <= max_inference_seconds,
+        },
+    }
+
+
+def _segment_metric_delta(
+    *,
+    baseline_segments: Any,
+    best_segments: Any,
+    segment: str,
+    metric: str,
+    lower_is_better: bool,
+) -> float | None:
+    if not isinstance(baseline_segments, dict) or not isinstance(best_segments, dict):
+        return None
+    baseline = baseline_segments.get(segment)
+    best = best_segments.get(segment)
+    if not isinstance(baseline, dict) or not isinstance(best, dict):
+        return None
+    baseline_value = baseline.get(metric)
+    best_value = best.get(metric)
+    if not isinstance(baseline_value, int | float) or not isinstance(
+        best_value,
+        int | float,
+    ):
+        return None
+    if lower_is_better:
+        return float(baseline_value) - float(best_value)
+    return float(best_value) - float(baseline_value)
+
+
+def _sandbox_metrics_pass(metric_results: dict[str, Any]) -> bool:
+    required = [
+        "rules_passed",
+        "context_preserved",
+        "score_delta_vs_baseline",
+        "inference_time_budget",
+    ]
+    return all(bool(metric_results[name]["passed"]) for name in required)
+
+
+def _sandbox_promotion_score(metric_results: dict[str, Any]) -> float:
+    score_delta = metric_results["score_delta_vs_baseline"]["value"]
+    segment_delta = metric_results["segment_score_delta_vs_baseline"]["value"]
+    runtime = metric_results["inference_time_budget"]["value"]
+    return float(score_delta + 0.1 * segment_delta - 0.001 * runtime)
 
 
 def _task1_total_score_proxy(

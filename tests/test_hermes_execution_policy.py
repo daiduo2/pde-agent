@@ -207,6 +207,79 @@ def test_run_adaptive_heartbeat_switches_to_verified_blueprint_after_plateau(
     assert "switch_to_verified_blueprint" in log_text
 
 
+def test_run_adaptive_heartbeat_exposes_hypothesis_lab_inputs_after_verified_plateau(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_execution_policy import run_hermes_adaptive_heartbeat
+
+    calls: list[dict[str, Any]] = []
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    blueprint_path = tmp_path / "verified_blueprints.json"
+    blueprint_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED",
+                "blueprints": [{"candidate_family": "linear_trend_spectral"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_heartbeat(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        index = len(calls)
+        report_path = Path(kwargs["output_dir"]) / "hermes_heartbeat_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        best_dir = tmp_path / f"best_{index}"
+        best_dir.mkdir()
+        (best_dir / "task1_logs.log").write_text(
+            "Hermes PDE Agent Scientific Log\n\nTrace:\n- prior\n",
+            encoding="utf-8",
+        )
+        report = {
+            "state_hint": "HERMES_HEARTBEAT_RAN",
+            "heartbeat_report_path": str(report_path),
+            "parameters": {
+                "candidate_generator": kwargs["candidate_generator"],
+                "hypothesis_blueprint_path": str(kwargs.get("hypothesis_blueprint_path"))
+                if kwargs.get("hypothesis_blueprint_path") is not None
+                else None,
+            },
+            "batch_count": 1,
+            "batches": [{"score_improved": False}],
+            "best_candidate": {
+                "candidate_id": f"best_{index}",
+                "score": 85.0 + index,
+                "submission_dir": str(best_dir),
+            },
+            "best_score": 85.0 + index,
+            "best_objective_score": 85.0 + index,
+            "stop_reason": "stagnation_detected",
+            "decision": "review_before_next_heartbeat",
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report
+
+    result = run_hermes_adaptive_heartbeat(
+        output_dir=tmp_path / "adaptive",
+        initial_submission_dir=initial_dir,
+        verified_blueprint_path=blueprint_path,
+        max_policy_stages=2,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        heartbeat_runner=fake_heartbeat,
+        force=False,
+    )
+
+    assert result["policy_events"][-1]["action"] == "verified_blueprint_plateau"
+    assert result["next_command"] == "run-hypothesis-lab"
+    inputs = result["next_hypothesis_lab_inputs"]
+    assert inputs["adaptive_report_path"] == result["adaptive_report_path"]
+    assert inputs["log_paths"] == [str(tmp_path / "best_2" / "task1_logs.log")]
+    assert inputs["manual_report_paths"] == []
+
+
 def test_run_hermes_adaptive_heartbeat_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,
