@@ -1,6 +1,6 @@
 # Literature Algorithm Lab Phase 1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build the offline artifact backbone for a PDE-focused literature-to-algorithm lab that turns local source fixtures and MinerU markdown into benchmark-ready algorithm candidates and sandbox plans.
 
@@ -47,7 +47,7 @@ This plan intentionally does not implement live OpenAlex/arXiv/GitHub search, PD
 - Create: `src/pde_agent/core/literature_algorithm_lab.py`
 - Create: `tests/test_literature_algorithm_lab.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add this test file with the source-record test first:
 
@@ -138,7 +138,7 @@ def test_build_source_records_rejects_missing_raw_file(tmp_path: Path) -> None:
         )
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -148,7 +148,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_build_sou
 
 Expected: fails with `ModuleNotFoundError` for `pde_agent.core.literature_algorithm_lab`.
 
-- [ ] **Step 3: Implement source-record core**
+- [x] **Step 3: Implement source-record core**
 
 Create `src/pde_agent/core/literature_algorithm_lab.py`:
 
@@ -308,7 +308,7 @@ def _text_list(value: Any, label: str) -> list[str]:
     return result
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -318,7 +318,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_build_sou
 
 Expected: `2 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -- src/pde_agent/core/literature_algorithm_lab.py tests/test_literature_algorithm_lab.py
@@ -333,7 +333,7 @@ git commit -m "feat: add literature source records"
 - Modify: `src/pde_agent/core/literature_algorithm_lab.py`
 - Modify: `tests/test_literature_algorithm_lab.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append these tests:
 
@@ -454,7 +454,7 @@ def test_extract_algorithm_cards_reads_operational_markdown(tmp_path: Path) -> N
     assert report["next_command"] == "compile-algorithm-candidates"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -464,7 +464,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_ingest_mi
 
 Expected: fails because `ingest_mineru_parse` and `extract_algorithm_cards` are undefined.
 
-- [ ] **Step 3: Implement parse ingestion and card extraction**
+- [x] **Step 3: Implement parse ingestion and card extraction**
 
 Append these functions to `src/pde_agent/core/literature_algorithm_lab.py`:
 
@@ -618,7 +618,7 @@ def _extract_colon_fields(markdown: str) -> dict[str, str]:
     return fields
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -628,7 +628,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_ingest_mi
 
 Expected: `2 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -- src/pde_agent/core/literature_algorithm_lab.py tests/test_literature_algorithm_lab.py
@@ -643,7 +643,7 @@ git commit -m "feat: ingest literature algorithm cards"
 - Modify: `src/pde_agent/core/literature_algorithm_lab.py`
 - Modify: `tests/test_literature_algorithm_lab.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append these tests:
 
@@ -755,7 +755,7 @@ def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(tmp_path: Path)
     assert report["next_command"] == "run-checkpoint-family-sandbox"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -765,7 +765,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_compile_a
 
 Expected: fails because candidate compilation and sandbox planning functions are undefined.
 
-- [ ] **Step 3: Implement candidate compilation and sandbox planning**
+- [x] **Step 3: Implement candidate compilation and sandbox planning**
 
 Append these functions and constants to `src/pde_agent/core/literature_algorithm_lab.py`:
 
@@ -1002,7 +1002,7 @@ def _sandbox_level(candidate_family: str) -> int:
     return 2
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -1012,7 +1012,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_compile_a
 
 Expected: `2 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -- src/pde_agent/core/literature_algorithm_lab.py tests/test_literature_algorithm_lab.py
@@ -1028,7 +1028,7 @@ git commit -m "feat: compile literature algorithm candidates"
 - Modify: `src/pde_agent/cli.py`
 - Modify: `tests/test_literature_algorithm_lab.py`
 
-- [ ] **Step 1: Write the failing CLI test**
+- [x] **Step 1: Write the failing CLI test**
 
 Append this test:
 
@@ -1080,7 +1080,7 @@ def test_literature_algorithm_lab_cli_source_records(tmp_path: Path) -> None:
     assert payload["next_hint"] == "ingest-mineru-parse"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -1090,7 +1090,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_literatur
 
 Expected: fails because `build-literature-source-records` is not registered.
 
-- [ ] **Step 3: Add command wrappers**
+- [x] **Step 3: Add command wrappers**
 
 Create `src/pde_agent/commands/literature_algorithm_lab.py`:
 
@@ -1235,7 +1235,7 @@ def plan_candidate_sandbox_command(
     )
 ```
 
-- [ ] **Step 4: Register CLI commands**
+- [x] **Step 4: Register CLI commands**
 
 Modify `src/pde_agent/cli.py`.
 
@@ -1357,7 +1357,7 @@ def plan_algorithm_candidate_sandbox_cmd(
     )
 ```
 
-- [ ] **Step 5: Run CLI test to verify it passes**
+- [x] **Step 5: Run CLI test to verify it passes**
 
 Run:
 
@@ -1367,7 +1367,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py::test_literatur
 
 Expected: `1 passed`.
 
-- [ ] **Step 6: Run all literature lab tests**
+- [x] **Step 6: Run all literature lab tests**
 
 Run:
 
@@ -1377,7 +1377,7 @@ uv run --frozen pytest -q tests/test_literature_algorithm_lab.py
 
 Expected: all tests in `tests/test_literature_algorithm_lab.py` pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -- src/pde_agent/commands/literature_algorithm_lab.py src/pde_agent/cli.py tests/test_literature_algorithm_lab.py
@@ -1392,7 +1392,7 @@ git commit -m "feat: expose literature algorithm lab cli"
 - Modify: `docs/superpowers/specs/2026-04-30-literature-to-algorithm-lab-design.md`
 - Modify: `docs/superpowers/plans/2026-04-30-literature-algorithm-lab-phase1.md`
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run:
 
@@ -1402,7 +1402,7 @@ uv run --frozen pytest -q
 
 Expected: full suite passes.
 
-- [ ] **Step 2: Add an implementation note to the spec**
+- [x] **Step 2: Add an implementation note to the spec**
 
 Append this section to `docs/superpowers/specs/2026-04-30-literature-to-algorithm-lab-design.md`:
 
@@ -1415,11 +1415,11 @@ MinerU runtime execution. Network retrieval and parser invocation remain smoke
 test concerns for later phases.
 ```
 
-- [ ] **Step 3: Mark this plan complete**
+- [x] **Step 3: Mark this plan complete**
 
 In `docs/superpowers/plans/2026-04-30-literature-algorithm-lab-phase1.md`, change the unchecked boxes for completed tasks to checked boxes as the final worker action. Keep command outputs in the commit message or final response rather than pasting large logs into the plan.
 
-- [ ] **Step 4: Commit verification docs**
+- [x] **Step 4: Commit verification docs**
 
 ```bash
 git add -- docs/superpowers/specs/2026-04-30-literature-to-algorithm-lab-design.md docs/superpowers/plans/2026-04-30-literature-algorithm-lab-phase1.md

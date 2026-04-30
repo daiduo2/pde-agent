@@ -438,3 +438,10 @@ hypothesis. The recommended module name is:
 
 This keeps the emphasis on benchmark-ready algorithm candidates while still
 allowing hypotheses, knowledge cards, and source records as internal artifacts.
+
+## Phase 1 Implementation Note
+
+Phase 1 is intentionally offline. It validates artifact contracts and candidate
+handoff semantics with local fixture data before adding live source retrieval or
+MinerU runtime execution. Network retrieval and parser invocation remain smoke
+test concerns for later phases.
