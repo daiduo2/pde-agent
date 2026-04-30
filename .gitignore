@@ -35,4 +35,5 @@ integration_tests/real_hdf5_smoke/base_config.runtime.json
 integration_tests/real_hdf5_smoke/run_state.yaml
 integration_tests/real_hdf5_smoke/runs/
 data/pdebench/burgers/*.part
+data/official/
 runs/
