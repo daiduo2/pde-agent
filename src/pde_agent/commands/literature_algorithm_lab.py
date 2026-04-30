@@ -1,20 +1,127 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pde_agent.core.json_output import success_payload
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATES_STATE_HINT,
     ALGORITHM_CARDS_STATE_HINT,
+    MINERU_RESULT_DOWNLOADED_STATE_HINT,
+    MINERU_TASK_POLLED_STATE_HINT,
+    MINERU_TASK_SUBMITTED_STATE_HINT,
     PAPER_PARSE_STATE_HINT,
     SANDBOX_PLAN_STATE_HINT,
+    SOURCE_DOCUMENT_STATE_HINT,
+    SOURCE_SEARCH_STATE_HINT,
     SOURCE_RECORDS_STATE_HINT,
     build_literature_source_records,
     compile_algorithm_candidates,
+    download_mineru_parse_result,
+    download_source_document,
     extract_algorithm_cards,
     ingest_mineru_parse,
+    normalize_arxiv_search_results,
+    normalize_github_search_results,
+    normalize_openalex_search_results,
     plan_candidate_sandbox,
+    poll_mineru_parse_task,
+    submit_mineru_parse_task,
 )
+
+
+def normalize_openalex_sources_command(
+    *,
+    search_results_path: str,
+    query: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = normalize_openalex_search_results(
+        search_results_path=Path(search_results_path),
+        query=query,
+        output_path=Path(output_path),
+        force=force,
+    )
+    return _source_search_payload("normalize-openalex-sources", report)
+
+
+def normalize_arxiv_sources_command(
+    *,
+    search_results_path: str,
+    query: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = normalize_arxiv_search_results(
+        search_results_path=Path(search_results_path),
+        query=query,
+        output_path=Path(output_path),
+        force=force,
+    )
+    return _source_search_payload("normalize-arxiv-sources", report)
+
+
+def normalize_github_sources_command(
+    *,
+    search_results_path: str,
+    query: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = normalize_github_search_results(
+        search_results_path=Path(search_results_path),
+        query=query,
+        output_path=Path(output_path),
+        force=force,
+    )
+    return _source_search_payload("normalize-github-sources", report)
+
+
+def _source_search_payload(command: str, report: dict[str, object]) -> dict[str, object]:
+    return success_payload(
+        run_id="local",
+        command=command,
+        state_hint=SOURCE_SEARCH_STATE_HINT,
+        artifacts={"source_candidates_path": report["source_candidates_path"]},
+        metrics={
+            "provider": report["provider"],
+            "source_candidate_count": report["source_candidate_count"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def download_source_document_command(
+    *,
+    source_candidates_path: str,
+    source_id: str,
+    output_path: str,
+    cache_dir: str,
+    force: bool,
+) -> dict[str, object]:
+    report = download_source_document(
+        source_candidates_path=Path(source_candidates_path),
+        source_id=source_id,
+        output_path=Path(output_path),
+        cache_dir=Path(cache_dir),
+        force=force,
+    )
+    source_record = report["source_record"]
+    return success_payload(
+        run_id="local",
+        command="download-source-document",
+        state_hint=SOURCE_DOCUMENT_STATE_HINT,
+        artifacts={
+            "downloaded_source_path": report["downloaded_source_path"],
+            "local_raw_path": source_record["local_raw_path"],
+        },
+        metrics={
+            "source_id": source_record["source_id"],
+            "source_type": source_record["source_type"],
+        },
+        next_hint=str(report["next_command"]),
+    )
 
 
 def build_literature_source_records_command(
@@ -35,6 +142,92 @@ def build_literature_source_records_command(
         artifacts={"source_records_path": report["source_records_path"]},
         metrics={"source_count": report["source_count"]},
         next_hint=report["next_command"],
+    )
+
+
+def submit_mineru_parse_command(
+    *,
+    downloaded_source_path: str,
+    output_path: str,
+    mode: str,
+    model_version: str,
+    force: bool,
+) -> dict[str, object]:
+    token = None if mode == "agent_url" else os.environ.get("MINERU_API_TOKEN")
+    report = submit_mineru_parse_task(
+        downloaded_source_path=Path(downloaded_source_path),
+        output_path=Path(output_path),
+        mode=mode,
+        token=token,
+        model_version=model_version,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="submit-mineru-parse",
+        state_hint=MINERU_TASK_SUBMITTED_STATE_HINT,
+        artifacts={"mineru_task_path": report["mineru_task_path"]},
+        metrics={
+            "task_id": report["task_id"],
+            "mineru_mode": report["mineru_mode"],
+            "model_version": report.get("model_version"),
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def poll_mineru_parse_command(
+    *,
+    mineru_task_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    task = Path(mineru_task_path).read_text(encoding="utf-8")
+    token = os.environ.get("MINERU_API_TOKEN") if "precise_url" in task else None
+    report = poll_mineru_parse_task(
+        mineru_task_path=Path(mineru_task_path),
+        output_path=Path(output_path),
+        token=token,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="poll-mineru-parse",
+        state_hint=MINERU_TASK_POLLED_STATE_HINT,
+        artifacts={"mineru_poll_path": report["mineru_poll_path"]},
+        metrics={
+            "task_id": report["task_id"],
+            "state": report["state"],
+            "mineru_mode": report["mineru_mode"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def download_mineru_result_command(
+    *,
+    mineru_poll_path: str,
+    output_path: str,
+    output_dir: str,
+    force: bool,
+) -> dict[str, object]:
+    report = download_mineru_parse_result(
+        mineru_poll_path=Path(mineru_poll_path),
+        output_path=Path(output_path),
+        output_dir=Path(output_dir),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="download-mineru-result",
+        state_hint=MINERU_RESULT_DOWNLOADED_STATE_HINT,
+        artifacts={
+            "mineru_result_path": report["mineru_result_path"],
+            "local_markdown_path": report["local_markdown_path"],
+            "local_zip_path": report["local_zip_path"],
+        },
+        metrics={"task_id": report["task_id"], "source_id": report["source_id"]},
+        next_hint=str(report["next_command"]),
     )
 
 

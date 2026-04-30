@@ -680,3 +680,109 @@ def test_literature_algorithm_lab_cli_source_records(tmp_path: Path) -> None:
     assert payload["artifacts"]["source_records_path"] == str(output_path)
     assert payload["metrics"]["source_count"] == 1
     assert payload["next_hint"] == "ingest-mineru-parse"
+
+
+def test_literature_algorithm_lab_cli_normalize_openalex_sources(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    fixture = tmp_path / "openalex.json"
+    output_path = tmp_path / "source_candidates.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "id": "https://openalex.org/W1",
+                        "display_name": "Neural Operator Paper",
+                        "open_access": {"oa_url": "https://example.test/paper.pdf"},
+                        "primary_location": {
+                            "landing_page_url": "https://example.test/paper"
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "normalize-openalex-sources",
+            "--search-results-path",
+            str(fixture),
+            "--query",
+            "neural operator",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "EXTERNAL_SOURCE_SEARCH_NORMALIZED"
+    assert payload["metrics"]["source_candidate_count"] == 1
+    assert payload["next_hint"] == "download-source-document"
+
+
+def test_literature_algorithm_lab_cli_submit_mineru_agent_parse(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+    import pde_agent.commands.literature_algorithm_lab as command_module
+
+    source_path = tmp_path / "downloaded_source.json"
+    output_path = tmp_path / "mineru_task.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {
+                    "source_id": "source",
+                    "title": "Paper",
+                    "download_url": "https://example.test/paper.pdf",
+                    "local_raw_path": str(tmp_path / "paper.pdf"),
+                    "content_hash": "abc",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_submit(**_: object) -> dict[str, object]:
+        return {
+            "state_hint": "MINERU_PARSE_TASK_SUBMITTED",
+            "mineru_task_path": str(output_path),
+            "task_id": "task-1",
+            "mineru_mode": "agent_url",
+            "next_command": "poll-mineru-parse",
+        }
+
+    monkeypatch = __import__("pytest").MonkeyPatch()
+    monkeypatch.setattr(command_module, "submit_mineru_parse_task", fake_submit)
+    try:
+        result = CliRunner().invoke(
+            app,
+            [
+                "submit-mineru-parse",
+                "--downloaded-source-path",
+                str(source_path),
+                "--output-path",
+                str(output_path),
+                "--mode",
+                "agent_url",
+            ],
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "MINERU_PARSE_TASK_SUBMITTED"
+    assert payload["metrics"]["task_id"] == "task-1"

@@ -115,9 +115,16 @@ from pde_agent.commands.local_strategy_leaderboard import (
 from pde_agent.commands.literature_algorithm_lab import (
     build_literature_source_records_command,
     compile_algorithm_candidates_command,
+    download_mineru_result_command,
+    download_source_document_command,
     extract_algorithm_cards_command,
     ingest_mineru_parse_command,
+    normalize_arxiv_sources_command,
+    normalize_github_sources_command,
+    normalize_openalex_sources_command,
     plan_candidate_sandbox_command,
+    poll_mineru_parse_command,
+    submit_mineru_parse_command,
 )
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
@@ -825,6 +832,92 @@ def run_hypothesis_lab_cmd(
     )
 
 
+@app.command("normalize-openalex-sources")
+def normalize_openalex_sources_cmd(
+    search_results_path: str = typer.Option(...),
+    query: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            normalize_openalex_sources_command(
+                search_results_path=search_results_path,
+                query=query,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("normalize-arxiv-sources")
+def normalize_arxiv_sources_cmd(
+    search_results_path: str = typer.Option(...),
+    query: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            normalize_arxiv_sources_command(
+                search_results_path=search_results_path,
+                query=query,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("normalize-github-sources")
+def normalize_github_sources_cmd(
+    search_results_path: str = typer.Option(...),
+    query: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            normalize_github_sources_command(
+                search_results_path=search_results_path,
+                query=query,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("download-source-document")
+def download_source_document_cmd(
+    source_candidates_path: str = typer.Option(...),
+    source_id: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    cache_dir: str = typer.Option("data/literature_lab/sources"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            download_source_document_command(
+                source_candidates_path=source_candidates_path,
+                source_id=source_id,
+                output_path=output_path,
+                cache_dir=cache_dir,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("build-literature-source-records")
 def build_literature_source_records_cmd(
     source_fixture_path: str = typer.Option(...),
@@ -838,6 +931,69 @@ def build_literature_source_records_cmd(
             build_literature_source_records_command(
                 source_fixture_path=source_fixture_path,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("submit-mineru-parse")
+def submit_mineru_parse_cmd(
+    downloaded_source_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    mode: str = typer.Option("precise_url"),
+    model_version: str = typer.Option("vlm"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            submit_mineru_parse_command(
+                downloaded_source_path=downloaded_source_path,
+                output_path=output_path,
+                mode=mode,
+                model_version=model_version,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("poll-mineru-parse")
+def poll_mineru_parse_cmd(
+    mineru_task_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            poll_mineru_parse_command(
+                mineru_task_path=mineru_task_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("download-mineru-result")
+def download_mineru_result_cmd(
+    mineru_poll_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            download_mineru_result_command(
+                mineru_poll_path=mineru_poll_path,
+                output_path=output_path,
+                output_dir=output_dir,
                 force=force,
             )
         )
