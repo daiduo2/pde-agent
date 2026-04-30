@@ -107,6 +107,33 @@ def _adaptive_plateau_report(path: Path) -> Path:
     return path
 
 
+def _adaptive_plateau_escape_report(path: Path) -> Path:
+    payload = {
+        "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+        "stage_count": 2,
+        "policy_events": [
+            {
+                "stage_index": 2,
+                "action": "verified_blueprint_plateau",
+                "trajectory_state": "plateau",
+                "reason_codes": ["stagnation_detected"],
+                "best_candidate_id": "linear_trend_spectral_w5_g-0.075_d70_s1.5",
+                "best_score": 86.24,
+            }
+        ],
+        "stages": [
+            {
+                "stage_index": 2,
+                "candidate_generator": "linear_trend_spectral",
+                "best_candidate_id": "linear_trend_spectral_w5_g-0.075_d70_s1.5",
+                "best_score": 86.24,
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def _scientific_log(path: Path) -> Path:
     path.write_text(
         "\n".join(
@@ -119,6 +146,24 @@ def _scientific_log(path: Path) -> Path:
                 "- stage=2 action=verified_blueprint_plateau state=plateau best=linear_trend_spectral_w5_g-0.075_d70_s1 score=86.2087",
                 "Reflection:",
                 "- Linear trend spectral improved over persistence but plateaued after verified blueprint reuse.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _late_ramp_scientific_log(path: Path) -> Path:
+    path.write_text(
+        "\n".join(
+            [
+                "Hermes PDE Agent Scientific Log",
+                "Trajectory Summary:",
+                "- round=1 candidate=linear_trend_spectral_w5_g-0.075_d70_s1.5_ls2.25_lt60 score=86.33 effective_improvement=False",
+                "Hermes Adaptive Execution Policy",
+                "Experiment Tracking:",
+                "- stage=2 action=verified_blueprint_plateau state=plateau best=initial score=86.34",
             ]
         )
         + "\n",
@@ -213,6 +258,26 @@ def test_hypothesis_lab_builds_cards_from_scientific_logs(tmp_path: Path) -> Non
     assert "verified blueprint reuse" in card["claim"].lower()
 
 
+def test_hypothesis_lab_scientific_log_remembers_late_ramp_attempt(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        log_paths=[_late_ramp_scientific_log(tmp_path / "task1_logs.log")],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "linear_trend_late_spectral_ramp"
+    ]
+    assert cards["cards"][0]["evidence"]["candidate_id"] == (
+        "linear_trend_spectral_w5_g-0.075_d70_s1.5_ls2.25_lt60"
+    )
+
+
 def test_hypothesis_lab_generates_hypotheses_and_blueprints(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import (
         build_knowledge_cards,
@@ -281,6 +346,41 @@ def test_hypothesis_lab_designs_escape_blueprint_from_plateau_cards(
     assert 0.0 in blueprint["parameter_grid"]["spectral_strength"]
     assert 1.5 in blueprint["parameter_grid"]["spectral_strength"]
     assert -0.025 in blueprint["parameter_grid"]["gain"]
+
+
+def test_hypothesis_lab_generates_late_spectral_ramp_after_escape_plateau(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[
+            _adaptive_plateau_escape_report(tmp_path / "adaptive_escape.json")
+        ],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "linear_trend_late_spectral_ramp"
+    )
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["search_mode"] == "late_spectral_ramp"
+    assert blueprint["candidate_family"] == "linear_trend_spectral"
+    assert blueprint["parameter_grid"]["spectral_strength"] == [1.5]
+    assert 2.0 in blueprint["parameter_grid"]["late_spectral_strength"]
+    assert 80 in blueprint["parameter_grid"]["late_start"]
 
 
 def test_hypothesis_lab_groups_duplicate_cards_by_candidate_family(
@@ -362,6 +462,50 @@ def test_hypothesis_lab_sandbox_verifies_blueprint_with_submission(tmp_path: Pat
     assert "late_rmse_delta_vs_baseline" in sandbox["verifier"]["metric_results"]
     assert sandbox["verifier"]["metric_results"]["late_rmse_delta_vs_baseline"]["value"] > 0.0
     assert Path(sandbox["artifacts"]["best_submission_dir"]).exists()
+
+
+def test_hypothesis_lab_sandbox_executes_late_spectral_ramp_params(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_linear_trend_late_spectral_ramp_001",
+        "candidate_family": "linear_trend_spectral",
+        "search_mode": "late_spectral_ramp",
+        "parameter_grid": {
+            "slope_window": [5],
+            "gain": [-0.075],
+            "decay": [70.0],
+            "spectral_strength": [1.5],
+            "late_spectral_strength": [2.0],
+            "late_start": [80],
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["best_candidate"]["params"]["late_spectral_strength"] == 2.0
+    assert sandbox["best_candidate"]["params"]["late_start"] == 80
+    assert "_ls2" in sandbox["best_candidate"]["candidate_id"]
 
 
 def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
@@ -517,3 +661,83 @@ def test_hermes_batch_loop_can_drive_linear_trend_spectral_from_blueprint(
         "decay": 60.0,
         "spectral_strength": 1.0,
     }
+
+
+def test_hermes_batch_loop_can_drive_late_spectral_ramp_blueprint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.competition_submission import build_competition_submission
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    initial = build_competition_submission(
+        task_id=1,
+        test_path=test_path,
+        output_dir=tmp_path / "initial",
+        submission_id="team_hermes",
+        method="persistence",
+        force=False,
+    )
+    blueprint_path = tmp_path / "blueprints.json"
+    blueprint_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED",
+                "blueprints": [
+                    {
+                        "candidate_family": "linear_trend_spectral",
+                        "search_mode": "late_spectral_ramp",
+                        "seed_params": [
+                            {
+                                "params": {
+                                    "slope_window": 5,
+                                    "gain": -0.075,
+                                    "decay": 70.0,
+                                    "spectral_strength": 1.5,
+                                    "late_spectral_strength": 2.0,
+                                    "late_start": 80,
+                                },
+                                "source": "sandbox_best",
+                            }
+                        ],
+                        "parameter_grid": {
+                            "slope_window": [5],
+                            "gain": [-0.075],
+                            "decay": [70.0],
+                            "spectral_strength": [1.5],
+                            "late_spectral_strength": [2.0],
+                            "late_start": [80],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial["artifacts"]["submission_dir"],
+        max_rounds=1,
+        patience=1,
+        min_score_improvement=0.0,
+        submit_score_threshold=150.0,
+        task1_test_path=test_path,
+        task1_target_path=target_path,
+        candidate_generator="linear_trend_spectral",
+        hypothesis_blueprint_path=blueprint_path,
+        force=False,
+    )
+
+    params = report["trajectory"][1]["metadata"]["params"]
+    assert params["late_spectral_strength"] == 2.0
+    assert params["late_start"] == 80
+    assert "_ls2" in report["trajectory"][1]["candidate_id"]

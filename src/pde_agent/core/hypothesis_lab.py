@@ -108,9 +108,34 @@ def generate_hypotheses(
             grouped_cards.setdefault("linear_trend_spectral", []).append(card)
         if "linear_trend_spectral_escape" in hooks:
             grouped_cards.setdefault("linear_trend_spectral_escape", []).append(card)
+        if "linear_trend_late_spectral_ramp" in hooks:
+            grouped_cards.setdefault("linear_trend_late_spectral_ramp", []).append(card)
         if "external_residual_blend" in hooks:
             grouped_cards.setdefault("external_residual_blend", []).append(card)
     hypotheses = []
+    if "linear_trend_late_spectral_ramp" in grouped_cards:
+        source_cards = grouped_cards["linear_trend_late_spectral_ramp"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_burgers_late_spectral_ramp_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "linear_trend_late_spectral_ramp",
+                "mechanism": (
+                    "After plateau_escape has already selected strong global "
+                    "spectral smoothing, preserve the early rollout behavior and "
+                    "apply an additional late-window spectral ramp only after the "
+                    "middle horizon where the score is dominated by long-window RMSE."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
+                "priority": -1,
+            }
+        )
     if "linear_trend_spectral_escape" in grouped_cards:
         source_cards = grouped_cards["linear_trend_spectral_escape"]
         hypotheses.append(
@@ -312,6 +337,45 @@ def design_algorithm_blueprints(
                         "gain": [-0.2, -0.15, -0.1, -0.075, -0.05, -0.025],
                         "decay": [20.0, 40.0, 70.0, 100.0],
                         "spectral_strength": [0.0, 0.25, 0.5, 1.0, 1.5],
+                    },
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_operator",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "linear_trend_late_spectral_ramp":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_linear_trend_late_spectral_ramp_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "linear_trend_spectral",
+                    "search_mode": "late_spectral_ramp",
+                    "algorithm": {
+                        "summary": (
+                            "Reuse the plateau_escape damped trend candidate, then "
+                            "apply extra spectral smoothing only to later future "
+                            "steps to target long-horizon RMSE without changing "
+                            "the context prefix."
+                        ),
+                        "pseudocode": [
+                            "future = damped_linear_trend(context, base_params)",
+                            "future = spectral_smooth(future, base_strength)",
+                            "late_future = spectral_smooth(future, late_strength)",
+                            "future[t >= late_start] = late_future[t >= late_start]",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "slope_window": [5],
+                        "gain": [-0.075, -0.05],
+                        "decay": [70.0, 100.0],
+                        "spectral_strength": [1.5],
+                        "late_spectral_strength": [1.75, 2.0, 2.25],
+                        "late_start": [60, 80, 100],
                     },
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
@@ -692,6 +756,9 @@ def _adaptive_plateau_card(
     ]
     if last.get("action") == "verified_blueprint_plateau":
         reason_codes.append("verified_blueprint_plateau")
+    escaped_once = "s1.5" in best_candidate_id or "spectral_strength': 1.5" in str(
+        last.get("metadata", "")
+    )
     return {
         "card_id": f"adaptive_plateau_{report_file.stem}",
         "source_type": "adaptive_heartbeat_report",
@@ -710,7 +777,11 @@ def _adaptive_plateau_card(
             "verified blueprint reuse already attempted",
             "candidate generator is linear_trend_spectral",
         ],
-        "implementation_hooks": ["linear_trend_spectral_escape"],
+        "implementation_hooks": [
+            "linear_trend_late_spectral_ramp"
+            if escaped_once
+            else "linear_trend_spectral_escape"
+        ],
         "expected_observables": [
             "new top candidate outside previous seed parameters",
             "non-negative score delta versus persistence",
@@ -723,6 +794,7 @@ def _adaptive_plateau_card(
             "task1_total_fast_proxy": last.get("best_score"),
             "action": last.get("action"),
             "stage_index": last.get("stage_index"),
+            "plateau_escape_already_used": escaped_once,
         },
     }
 
@@ -736,6 +808,8 @@ def _scientific_log_card(log_file: Path) -> dict[str, Any] | None:
         return None
     if "linear_trend_spectral" not in lower and "linear trend spectral" not in lower:
         return None
+    candidate_id = _first_log_best_candidate(text)
+    late_ramp_seen = "_ls" in lower and "_lt" in lower
     return {
         "card_id": f"scientific_log_{log_file.stem}",
         "source_type": "scientific_log",
@@ -753,7 +827,11 @@ def _scientific_log_card(log_file: Path) -> dict[str, Any] | None:
             "task1 agent log contains plateau evidence",
             "linear trend spectral strategy has already been reused",
         ],
-        "implementation_hooks": ["linear_trend_spectral_escape"],
+        "implementation_hooks": [
+            "linear_trend_late_spectral_ramp"
+            if late_ramp_seen
+            else "linear_trend_spectral_escape"
+        ],
         "expected_observables": [
             "hypothesis generator prioritizes plateau_escape",
             "knowledge card is visible in hypothesis sources",
@@ -761,13 +839,19 @@ def _scientific_log_card(log_file: Path) -> dict[str, Any] | None:
         "known_risks": ["verified_blueprint_plateau", "repeating prior seed"],
         "evidence_status": "observed_plateau",
         "evidence": {
-            "candidate_id": _first_log_best_candidate(text),
+            "candidate_id": candidate_id,
             "summary": "adaptive policy log reported verified blueprint plateau",
+            "late_spectral_ramp_seen": late_ramp_seen,
         },
     }
 
 
 def _first_log_best_candidate(text: str) -> str | None:
+    for line in text.splitlines():
+        marker = "candidate="
+        if marker not in line:
+            continue
+        return line.split(marker, 1)[1].split()[0].strip()
     for line in text.splitlines():
         marker = "best="
         if marker not in line:
@@ -795,34 +879,57 @@ def _prediction_from_linear_trend_spectral(
             prediction=prediction,
             strength=strength,
         )
+    late_strength = params.get("late_spectral_strength")
+    late_start = params.get("late_start")
+    if isinstance(late_strength, int | float) and float(late_strength) > 0.0:
+        start = int(late_start) if isinstance(late_start, int | float) else 105
+        start = max(context.shape[1], min(prediction.shape[1], start))
+        late_prediction = spectral_smooth_prediction(
+            prediction=prediction,
+            strength=float(late_strength),
+        )
+        prediction = prediction.copy()
+        prediction[:, start:, :] = late_prediction[:, start:, :]
     return prediction
 
 
 def _iter_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
     rows = []
+    late_strengths = grid.get("late_spectral_strength", [None])
+    late_starts = grid.get("late_start", [None])
     for slope_window in grid["slope_window"]:
         for gain in grid["gain"]:
             for decay in grid["decay"]:
                 for strength in grid["spectral_strength"]:
-                    rows.append(
-                        {
-                            "slope_window": int(slope_window),
-                            "gain": float(gain),
-                            "decay": float(decay),
-                            "spectral_strength": float(strength),
-                        }
-                    )
+                    for late_strength in late_strengths:
+                        for late_start in late_starts:
+                            row = {
+                                "slope_window": int(slope_window),
+                                "gain": float(gain),
+                                "decay": float(decay),
+                                "spectral_strength": float(strength),
+                            }
+                            if late_strength is not None:
+                                row["late_spectral_strength"] = float(late_strength)
+                            if late_start is not None:
+                                row["late_start"] = int(late_start)
+                            rows.append(row)
     return rows
 
 
 def _candidate_id(params: dict[str, Any]) -> str:
-    return (
+    candidate = (
         "linear_trend_spectral"
         f"_w{params['slope_window']}"
         f"_g{params['gain']:g}"
         f"_d{params['decay']:g}"
         f"_s{params['spectral_strength']:g}"
     )
+    if "late_spectral_strength" in params:
+        candidate += f"_ls{params['late_spectral_strength']:g}"
+    if "late_start" in params:
+        candidate += f"_lt{params['late_start']}"
+    return candidate
 
 
 def _context_preserved(*, prediction: np.ndarray, context: np.ndarray) -> bool:

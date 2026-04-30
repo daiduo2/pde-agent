@@ -698,6 +698,17 @@ def _linear_trend_spectral_runner(
                 prediction=prediction,
                 strength=strength,
             )
+        late_strength = params.get("late_spectral_strength")
+        late_start = params.get("late_start")
+        if isinstance(late_strength, int | float) and float(late_strength) > 0.0:
+            start_index = int(late_start) if isinstance(late_start, int | float) else 105
+            start_index = max(context.shape[1], min(prediction.shape[1], start_index))
+            late_prediction = spectral_smooth_prediction(
+                prediction=prediction,
+                strength=float(late_strength),
+            )
+            prediction = prediction.copy()
+            prediction[:, start_index:, :] = late_prediction[:, start_index:, :]
         elapsed = time.perf_counter() - start
         output_dir.mkdir(parents=True, exist_ok=True)
         prediction_path = output_dir / "linear_trend_spectral_prediction.npz"
@@ -723,6 +734,10 @@ def _linear_trend_spectral_runner(
             f"_d{params['decay']:g}"
             f"_s{params['spectral_strength']:g}"
         )
+        if "late_spectral_strength" in params:
+            candidate_id += f"_ls{params['late_spectral_strength']:g}"
+        if "late_start" in params:
+            candidate_id += f"_lt{params['late_start']}"
         candidate_report_path = output_dir / "linear_trend_spectral_candidate.json"
         candidate_report_path.write_text(
             json.dumps(
@@ -833,19 +848,34 @@ def _grid_schedule(grid: dict[str, Any]) -> list[dict[str, float | int]]:
                 f"linear_trend_spectral blueprint missing non-empty {key} list"
             )
         values[key] = raw
+    late_strengths = grid.get("late_spectral_strength", [None])
+    late_starts = grid.get("late_start", [None])
+    if not isinstance(late_strengths, list) or not late_strengths:
+        raise HermesBatchOptimizationLoopError(
+            "linear_trend_spectral blueprint late_spectral_strength must be a list"
+        )
+    if not isinstance(late_starts, list) or not late_starts:
+        raise HermesBatchOptimizationLoopError(
+            "linear_trend_spectral blueprint late_start must be a list"
+        )
     schedule = []
     for slope_window in values["slope_window"]:
         for gain in values["gain"]:
             for decay in values["decay"]:
                 for strength in values["spectral_strength"]:
-                    schedule.append(
-                        {
-                            "slope_window": int(slope_window),
-                            "gain": float(gain),
-                            "decay": float(decay),
-                            "spectral_strength": float(strength),
-                        }
-                    )
+                    for late_strength in late_strengths:
+                        for late_start in late_starts:
+                            params = {
+                                "slope_window": int(slope_window),
+                                "gain": float(gain),
+                                "decay": float(decay),
+                                "spectral_strength": float(strength),
+                            }
+                            if late_strength is not None:
+                                params["late_spectral_strength"] = float(late_strength)
+                            if late_start is not None:
+                                params["late_start"] = int(late_start)
+                            schedule.append(params)
     return schedule
 
 
@@ -877,22 +907,31 @@ def _blueprint_schedule(blueprint: dict[str, Any]) -> list[dict[str, float | int
 def _normalize_linear_trend_spectral_params(
     params: dict[str, Any],
 ) -> dict[str, float | int]:
-    return {
+    normalized: dict[str, float | int] = {
         "slope_window": int(params["slope_window"]),
         "gain": float(params["gain"]),
         "decay": float(params["decay"]),
         "spectral_strength": float(params["spectral_strength"]),
     }
+    if "late_spectral_strength" in params:
+        normalized["late_spectral_strength"] = float(params["late_spectral_strength"])
+    if "late_start" in params:
+        normalized["late_start"] = int(params["late_start"])
+    return normalized
 
 
 def _linear_trend_spectral_param_key(
     params: dict[str, float | int],
-) -> tuple[int, float, float, float]:
+) -> tuple[int, float, float, float, float | None, int | None]:
     return (
         int(params["slope_window"]),
         float(params["gain"]),
         float(params["decay"]),
         float(params["spectral_strength"]),
+        float(params["late_spectral_strength"])
+        if "late_spectral_strength" in params
+        else None,
+        int(params["late_start"]) if "late_start" in params else None,
     )
 
 
