@@ -815,6 +815,14 @@ def run_hypothesis_lab_cmd(
     log_paths: list[str] = typer.Option([], "--log-path"),
     checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
     literature_paths: list[str] = typer.Option([], "--literature-path"),
+    algorithm_candidate_paths: list[str] = typer.Option(
+        [],
+        "--algorithm-candidates-path",
+    ),
+    failure_memory_output_path: str | None = typer.Option(
+        None,
+        "--failure-memory-output-path",
+    ),
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
@@ -831,6 +839,8 @@ def run_hypothesis_lab_cmd(
                 log_paths=log_paths,
                 checkpoint_paths=checkpoint_paths,
                 literature_paths=literature_paths,
+                algorithm_candidate_paths=algorithm_candidate_paths,
+                failure_memory_output_path=failure_memory_output_path,
                 context_path=context_path,
                 target_path=target_path,
                 output_dir=output_dir,

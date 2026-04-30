@@ -10,6 +10,9 @@ from typing import Any
 import numpy as np
 
 from pde_agent.core.competition_submission import build_competition_submission
+from pde_agent.core.hermes_literature_expansion import (
+    record_hermes_literature_candidate_outcome,
+)
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
 from pde_agent.core.manual_operator_tuning import (
     linear_trend_prediction,
@@ -39,6 +42,7 @@ def build_knowledge_cards(
     log_paths: list[str | Path] | None = None,
     checkpoint_paths: list[str | Path] | None = None,
     literature_paths: list[str | Path] | None = None,
+    algorithm_candidate_paths: list[str | Path] | None = None,
     output_path: str | Path | None,
     force: bool,
 ) -> dict[str, Any]:
@@ -76,6 +80,8 @@ def build_knowledge_cards(
         card = _literature_note_card(Path(literature_path))
         if card is not None:
             cards.append(card)
+    for candidate_path in algorithm_candidate_paths or []:
+        cards.extend(_algorithm_candidate_cards(Path(candidate_path)))
     result = {
         "schema_version": 1,
         "state_hint": CARDS_STATE_HINT,
@@ -733,6 +739,8 @@ def run_hypothesis_lab(
     log_paths: list[str | Path] | None = None,
     checkpoint_paths: list[str | Path] | None = None,
     literature_paths: list[str | Path] | None = None,
+    algorithm_candidate_paths: list[str | Path] | None = None,
+    failure_memory_output_path: str | Path | None = None,
     context_path: str | Path,
     target_path: str | Path,
     output_dir: str | Path,
@@ -749,6 +757,7 @@ def run_hypothesis_lab(
         log_paths=log_paths,
         checkpoint_paths=checkpoint_paths,
         literature_paths=literature_paths,
+        algorithm_candidate_paths=algorithm_candidate_paths,
         output_path=root / "knowledge_cards.json",
         force=force,
     )
@@ -781,6 +790,14 @@ def run_hypothesis_lab(
         sandbox=sandbox,
     )
     _write_json(verified_blueprints_path, verified_blueprints)
+    candidate_outcome = _record_algorithm_candidate_outcome(
+        cards=cards,
+        hypotheses=hypotheses,
+        executable_blueprint=executable_blueprint,
+        sandbox=sandbox,
+        failure_memory_output_path=failure_memory_output_path,
+        force=force,
+    )
     report = {
         "schema_version": 1,
         "state_hint": RUN_STATE_HINT,
@@ -805,6 +822,8 @@ def run_hypothesis_lab(
         },
         "next_command": sandbox["next_command"],
     }
+    if candidate_outcome is not None:
+        report["candidate_outcome"] = candidate_outcome
     _write_json(report_path, report)
     return report
 
@@ -1103,6 +1122,183 @@ def _literature_expansion_report_card(
             "blocked_candidate_ids": blocked_ids,
         },
     }
+
+
+def _algorithm_candidate_cards(candidate_file: Path) -> list[dict[str, Any]]:
+    report = _read_json(candidate_file)
+    if report.get("state_hint") != "ALGORITHM_CANDIDATES_COMPILED":
+        raise HypothesisLabError("algorithm candidates artifact has invalid state_hint")
+    candidates = report.get("algorithm_candidates")
+    if not isinstance(candidates, list):
+        raise HypothesisLabError("algorithm_candidates must be a list")
+    cards = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        card = _algorithm_candidate_card(candidate_file, candidate)
+        if card is not None:
+            cards.append(card)
+    return cards
+
+
+def _algorithm_candidate_card(
+    candidate_file: Path,
+    candidate: dict[str, Any],
+) -> dict[str, Any] | None:
+    if candidate.get("candidate_family") != "local_strategy_skill":
+        return None
+    executor = candidate.get("executor_spec")
+    if not isinstance(executor, dict):
+        return None
+    hooks = _candidate_hypothesis_hooks(executor.get("implementation_hooks"))
+    if not hooks:
+        return None
+    candidate_id = str(candidate.get("algorithm_candidate_id", "")).strip()
+    if not candidate_id:
+        return None
+    grounding = candidate.get("source_grounding")
+    if not isinstance(grounding, dict):
+        grounding = {}
+    algorithm_card_id = str(
+        grounding.get("algorithm_card_id") or candidate.get("parent_algorithm_card_id")
+    ).strip()
+    candidate_family = str(candidate.get("candidate_family", "")).strip()
+    candidate_key = "|".join(
+        [
+            algorithm_card_id or "unknown_card",
+            candidate_family or "unknown_family",
+        ]
+    )
+    return {
+        "card_id": f"algorithm_candidate_{candidate_id}",
+        "source_type": "algorithm_candidate",
+        "source_path": str(candidate_file),
+        "claim": str(candidate.get("hypothesis", "")).strip()
+        or "Local algorithm candidate should be tested in Hypothesis Lab.",
+        "procedural_heuristic": str(candidate.get("mechanism", "")).strip()
+        or "Run the bounded local sandbox before promotion.",
+        "preconditions": [
+            "Hermes local asset candidate queue selected this strategy",
+            str(candidate.get("target_problem", "PDE_Burgers")),
+        ],
+        "implementation_hooks": hooks,
+        "expected_observables": _candidate_string_list(
+            candidate.get("expected_observables")
+        )
+        or ["sandbox score improves"],
+        "known_risks": _candidate_string_list(candidate.get("risk_controls"))
+        or ["candidate may not transfer"],
+        "evidence_status": "candidate_ready",
+        "evidence": {
+            "algorithm_candidate_id": candidate_id,
+            "candidate_key": candidate_key,
+            "candidate_family": candidate_family,
+            "model_family": candidate.get("model_family"),
+            "source_algorithm_card_id": algorithm_card_id,
+        },
+    }
+
+
+def _candidate_hypothesis_hooks(value: Any) -> list[str]:
+    supported = {
+        "linear_trend_spectral",
+        "linear_trend_spectral_escape",
+        "linear_trend_late_spectral_ramp",
+        "learned_residual_correction",
+        "external_residual_blend",
+    }
+    hooks = []
+    seen: set[str] = set()
+    for item in _candidate_string_list(value):
+        if item not in supported or item in seen:
+            continue
+        hooks.append(item)
+        seen.add(item)
+    return hooks
+
+
+def _candidate_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _record_algorithm_candidate_outcome(
+    *,
+    cards: dict[str, Any],
+    hypotheses: dict[str, Any],
+    executable_blueprint: dict[str, Any],
+    sandbox: dict[str, Any],
+    failure_memory_output_path: str | Path | None,
+    force: bool,
+) -> dict[str, Any] | None:
+    if failure_memory_output_path is None:
+        return None
+    evidence = _executed_algorithm_candidate_evidence(
+        cards=cards,
+        hypotheses=hypotheses,
+        executable_blueprint=executable_blueprint,
+    )
+    if evidence is None:
+        return None
+    verifier = sandbox.get("verifier") if isinstance(sandbox.get("verifier"), dict) else {}
+    decision = str(verifier.get("decision", "unknown"))
+    outcome = "passed" if decision == "promote_to_strategy_proposal" else "failed"
+    reason_codes = [
+        f"hypothesis_lab_decision_{decision}",
+        f"score_delta_{float(verifier.get('score_delta_vs_baseline', 0.0)):.6g}",
+        f"best_segment_score_{float(verifier.get('best_segment_score', 0.0)):.6g}",
+    ]
+    output_file = Path(failure_memory_output_path)
+    record = record_hermes_literature_candidate_outcome(
+        algorithm_candidate_id=str(evidence["algorithm_candidate_id"]),
+        candidate_key=str(evidence["candidate_key"]),
+        outcome=outcome,
+        reason_codes=reason_codes,
+        output_path=output_file,
+        force=force and not output_file.exists(),
+    )
+    return {
+        "algorithm_candidate_id": evidence["algorithm_candidate_id"],
+        "candidate_key": evidence["candidate_key"],
+        "outcome": outcome,
+        "reason_codes": reason_codes,
+        "failure_memory_path": str(output_file),
+        "outcome_count": len(record.get("outcomes", [])),
+    }
+
+
+def _executed_algorithm_candidate_evidence(
+    *,
+    cards: dict[str, Any],
+    hypotheses: dict[str, Any],
+    executable_blueprint: dict[str, Any],
+) -> dict[str, Any] | None:
+    hypothesis_id = executable_blueprint.get("hypothesis_id")
+    source_card_ids: list[str] = []
+    for hypothesis in hypotheses.get("hypotheses", []):
+        if not isinstance(hypothesis, dict):
+            continue
+        if hypothesis.get("hypothesis_id") != hypothesis_id:
+            continue
+        source_card_ids = [
+            str(item)
+            for item in hypothesis.get("source_card_ids", [])
+            if isinstance(item, str)
+        ]
+        break
+    if not source_card_ids:
+        return None
+    source_ids = set(source_card_ids)
+    for card in cards.get("cards", []):
+        if not isinstance(card, dict) or card.get("card_id") not in source_ids:
+            continue
+        evidence = card.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        if evidence.get("algorithm_candidate_id") and evidence.get("candidate_key"):
+            return evidence
+    return None
 
 
 def _adaptive_plateau_card(

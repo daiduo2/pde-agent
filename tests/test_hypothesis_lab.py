@@ -190,6 +190,67 @@ def _literature_note(path: Path) -> Path:
     return path
 
 
+def _local_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": (
+                    "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+                ),
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "DataInference",
+                "hypothesis": (
+                    "Damped trend plus spectral smoothing can improve a "
+                    "persistence plateau."
+                ),
+                "mechanism": (
+                    "Use context slope, damped extrapolation, and spectral "
+                    "smoothing while preserving context frames."
+                ),
+                "executor_spec": {
+                    "cli_command": "run-hypothesis-lab",
+                    "implementation_hooks": [
+                        "run-hypothesis-lab",
+                        "linear_trend_spectral",
+                    ],
+                },
+                "expected_observables": [
+                    "higher local segment score than persistence plateau"
+                ],
+                "risk_controls": ["strong smoothing may damp shocks"],
+                "source_grounding": {
+                    "algorithm_card_id": (
+                        "local_strategy_data_inference_linear_trend_spectral_v0"
+                    ),
+                    "source_ids": ["data_inference_linear_trend_spectral_v0"],
+                },
+            },
+            {
+                "algorithm_candidate_id": "candidate_local_checkpoint_burgers_fno",
+                "candidate_family": "official_checkpoint_family",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "hypothesis": "Evaluate FNO checkpoint.",
+                "mechanism": "Run checkpoint family sandbox.",
+                "executor_spec": {
+                    "cli_command": "run-checkpoint-family-sandbox",
+                    "implementation_hooks": [],
+                },
+                "source_grounding": {
+                    "algorithm_card_id": "local_checkpoint_burgers_fno",
+                },
+            },
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -237,6 +298,35 @@ def test_hypothesis_lab_builds_cards_from_checkpoint_paths(tmp_path: Path) -> No
     assert "official_checkpoint_calibration" in [
         item["candidate_family"] for item in hypotheses["hypotheses"]
     ]
+
+
+def test_hypothesis_lab_builds_cards_from_algorithm_candidates(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    candidates_path = _local_asset_algorithm_candidates(
+        tmp_path / "local_asset_candidates.json"
+    )
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[candidates_path],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "algorithm_candidate"
+    assert card["implementation_hooks"] == ["linear_trend_spectral"]
+    assert card["evidence"]["algorithm_candidate_id"] == (
+        "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+    )
+    assert card["evidence"]["candidate_key"] == (
+        "local_strategy_data_inference_linear_trend_spectral_v0|local_strategy_skill"
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == "linear_trend_spectral"
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
@@ -725,6 +815,91 @@ def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
     assert verified["blueprints"][0]["seed_params"][0]["params"] == report["sandbox"][
         "best_candidate"
     ]["params"]
+
+
+def test_hypothesis_lab_records_algorithm_candidate_outcome(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] += np.float32(0.01 * step)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    for step in range(190):
+        target[:, 10 + step, :] = context[:, 9, :] - np.float32(0.002 * (step + 1))
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    memory_path = tmp_path / "failure_memory.json"
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _local_asset_algorithm_candidates(tmp_path / "local_asset_candidates.json")
+        ],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        failure_memory_output_path=memory_path,
+        force=False,
+    )
+
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    assert report["candidate_outcome"]["algorithm_candidate_id"] == (
+        "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+    )
+    assert memory["outcomes"][0]["outcome"] == "passed"
+    assert memory["outcomes"][0]["algorithm_candidate_id"] == (
+        "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+    )
+    assert memory["failed_algorithm_candidate_ids"] == []
+
+
+def test_hypothesis_lab_cli_accepts_algorithm_candidates_and_memory_output(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] += np.float32(0.01 * step)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    for step in range(190):
+        target[:, 10 + step, :] = context[:, 9, :] - np.float32(0.002 * (step + 1))
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    memory_path = tmp_path / "failure_memory.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-hypothesis-lab",
+            "--algorithm-candidates-path",
+            str(_local_asset_algorithm_candidates(tmp_path / "candidates.json")),
+            "--failure-memory-output-path",
+            str(memory_path),
+            "--context-path",
+            str(context_path),
+            "--target-path",
+            str(target_path),
+            "--output-dir",
+            str(tmp_path / "lab"),
+            "--submission-id",
+            "team_hermes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["metrics"]["card_count"] == 1
+    assert payload["metrics"]["decision"] == "promote_to_strategy_proposal"
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    assert memory["outcomes"][0]["outcome"] == "passed"
 
 
 def test_hermes_batch_loop_can_run_linear_trend_spectral_generator(

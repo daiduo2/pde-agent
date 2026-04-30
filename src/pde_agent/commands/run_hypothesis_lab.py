@@ -18,6 +18,8 @@ def run_hypothesis_lab_command(
     log_paths: list[str] | None = None,
     checkpoint_paths: list[str] | None = None,
     literature_paths: list[str] | None = None,
+    algorithm_candidate_paths: list[str] | None = None,
+    failure_memory_output_path: str | None = None,
 ) -> dict[str, object]:
     report = run_hypothesis_lab(
         manual_report_paths=[Path(path) for path in manual_report_paths],
@@ -27,6 +29,12 @@ def run_hypothesis_lab_command(
         log_paths=[Path(path) for path in (log_paths or [])],
         checkpoint_paths=[Path(path) for path in (checkpoint_paths or [])],
         literature_paths=[Path(path) for path in (literature_paths or [])],
+        algorithm_candidate_paths=[
+            Path(path) for path in (algorithm_candidate_paths or [])
+        ],
+        failure_memory_output_path=Path(failure_memory_output_path)
+        if failure_memory_output_path is not None
+        else None,
         context_path=Path(context_path),
         target_path=Path(target_path),
         output_dir=Path(output_dir),
