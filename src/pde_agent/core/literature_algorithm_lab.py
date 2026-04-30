@@ -24,6 +24,39 @@ VALID_SOURCE_TYPES = {
     "manual_source",
 }
 
+HOOK_TO_FAMILY = {
+    "official_checkpoint_calibration": {
+        "candidate_family": "official_checkpoint_family",
+        "model_family": "checkpoint",
+        "cli_command": "run-checkpoint-family-sandbox",
+        "sandbox_level": 1,
+    },
+    "learned_residual_correction": {
+        "candidate_family": "lightweight_residual_corrector",
+        "model_family": "postprocess",
+        "cli_command": "run-blueprint-sandbox",
+        "sandbox_level": 0,
+    },
+    "spectral_rollout_stabilization": {
+        "candidate_family": "spectral_rollout_stabilization",
+        "model_family": "postprocess",
+        "cli_command": "run-blueprint-sandbox",
+        "sandbox_level": 0,
+    },
+    "physics_residual_regularization": {
+        "candidate_family": "physics_residual_regularization",
+        "model_family": "FNO",
+        "cli_command": "run-blueprint-sandbox",
+        "sandbox_level": 1,
+    },
+    "scheduled_rollout_training": {
+        "candidate_family": "scheduled_rollout_training",
+        "model_family": "FNO",
+        "cli_command": "execute-fno-finetune-candidate",
+        "sandbox_level": 1,
+    },
+}
+
 
 class LiteratureAlgorithmLabError(ValueError):
     """Raised when literature algorithm lab artifacts are invalid."""
@@ -209,6 +242,235 @@ def extract_algorithm_cards(
     }
     _write_json(output_file, report)
     return report
+
+
+def compile_algorithm_candidates(
+    *,
+    algorithm_cards_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    cards_report = _read_json(
+        _require_file(Path(algorithm_cards_path), "algorithm cards")
+    )
+    if cards_report.get("state_hint") != ALGORITHM_CARDS_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "algorithm cards report has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    candidates = []
+    for card in cards_report.get("algorithm_cards", []):
+        if not isinstance(card, dict):
+            raise LiteratureAlgorithmLabError("algorithm card must be an object")
+        hooks = _text_list(card.get("implementation_hooks"), "implementation_hooks")
+        hook = hooks[0]
+        family_spec = HOOK_TO_FAMILY.get(hook)
+        if family_spec is None:
+            candidates.append(_blocked_candidate(card=card, hook=hook))
+            continue
+        candidate_id = (
+            f"candidate_{_slug(card['algorithm_card_id'])}_"
+            f"{family_spec['candidate_family']}"
+        )
+        candidates.append(
+            {
+                "algorithm_candidate_id": candidate_id,
+                "parent_algorithm_card_id": card["algorithm_card_id"],
+                "candidate_family": family_spec["candidate_family"],
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": family_spec["model_family"],
+                "hypothesis": card["claim"],
+                "mechanism": card["core_mechanism"],
+                "executor_spec": _executor_spec(str(family_spec["cli_command"])),
+                "parameter_grid": _default_parameter_grid(
+                    str(family_spec["candidate_family"])
+                ),
+                "benchmark_plan": {
+                    "judge": "hermes_local_judge",
+                    "primary_metric": "task1_total_score_proxy",
+                    "sandbox_level": family_spec["sandbox_level"],
+                },
+                "ablation_plan": {
+                    "baseline": "persistence_or_current_best",
+                    "contrast": "candidate_disabled_or_weight_zero",
+                },
+                "promotion_criteria": {
+                    "min_score_delta": 0.01,
+                    "max_inference_seconds": 120.0,
+                    "requires_ablation": True,
+                },
+                "risk_controls": [
+                    "preserve first 10 context steps",
+                    "do not execute external repo code",
+                ],
+                "source_grounding": {
+                    "source_ids": card["source_ids"],
+                    "algorithm_card_id": card["algorithm_card_id"],
+                },
+            }
+        )
+    report = {
+        "schema_version": 1,
+        "state_hint": ALGORITHM_CANDIDATES_STATE_HINT,
+        "algorithm_candidates_path": str(output_file),
+        "algorithm_candidate_count": len(candidates),
+        "algorithm_candidates": candidates,
+        "next_command": "plan-algorithm-candidate-sandbox",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def plan_candidate_sandbox(
+    *,
+    algorithm_candidates_path: str | Path,
+    algorithm_candidate_id: str,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    candidates_report = _read_json(
+        _require_file(Path(algorithm_candidates_path), "algorithm candidates")
+    )
+    if candidates_report.get("state_hint") != ALGORITHM_CANDIDATES_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "algorithm candidates report has invalid state_hint"
+        )
+    selected_id = _nonempty_text(algorithm_candidate_id, "algorithm_candidate_id")
+    selected = None
+    for candidate in candidates_report.get("algorithm_candidates", []):
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("algorithm_candidate_id") == selected_id
+        ):
+            selected = candidate
+            break
+    if selected is None:
+        raise LiteratureAlgorithmLabError(
+            f"algorithm candidate not found: {selected_id}"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    executor = selected.get("executor_spec")
+    if not isinstance(executor, dict):
+        raise LiteratureAlgorithmLabError("candidate executor_spec must be an object")
+    cli_command = _nonempty_text(executor.get("cli_command"), "cli_command")
+    blocked = cli_command == "blocked_requires_executor_design"
+    report = {
+        "schema_version": 1,
+        "state_hint": SANDBOX_PLAN_STATE_HINT,
+        "sandbox_plan_path": str(output_file),
+        "algorithm_candidate_id": selected_id,
+        "candidate_family": selected.get("candidate_family"),
+        "sandbox_level": _sandbox_level(str(selected.get("candidate_family"))),
+        "executor": executor,
+        "blocked": blocked,
+        "reason_codes": ["requires_new_bounded_executor"] if blocked else [],
+        "risk_controls": selected.get("risk_controls", []),
+        "next_command": "design-bounded-executor" if blocked else cli_command,
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
+    return {
+        "algorithm_candidate_id": f"candidate_{_slug(card['algorithm_card_id'])}_blocked",
+        "parent_algorithm_card_id": card["algorithm_card_id"],
+        "candidate_family": "unsupported",
+        "target_problem": "PDE_Burgers",
+        "target_task": "task1",
+        "model_family": "hybrid",
+        "hypothesis": card["claim"],
+        "mechanism": card["core_mechanism"],
+        "executor_spec": {
+            "cli_command": "blocked_requires_executor_design",
+            "unsupported_hook": hook,
+            "required_options": [],
+        },
+        "parameter_grid": {},
+        "benchmark_plan": {
+            "judge": "hermes_local_judge",
+            "primary_metric": "task1_total_score_proxy",
+            "sandbox_level": 2,
+        },
+        "ablation_plan": {
+            "baseline": "persistence_or_current_best",
+            "contrast": "candidate_disabled",
+        },
+        "promotion_criteria": {
+            "min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+            "requires_ablation": True,
+        },
+        "risk_controls": ["blocked until a bounded executor is designed"],
+        "source_grounding": {
+            "source_ids": card["source_ids"],
+            "algorithm_card_id": card["algorithm_card_id"],
+        },
+    }
+
+
+def _executor_spec(cli_command: str) -> dict[str, Any]:
+    if cli_command == "run-checkpoint-family-sandbox":
+        return {
+            "cli_command": cli_command,
+            "required_options": [
+                "--checkpoint-path",
+                "--task-id",
+                "--test-path",
+                "--target-path",
+                "--output-dir",
+            ],
+        }
+    if cli_command == "execute-fno-finetune-candidate":
+        return {
+            "cli_command": cli_command,
+            "required_options": [
+                "--candidate-plan-path",
+                "--windows-path",
+                "--checkpoint-path",
+                "--max-train-steps",
+            ],
+        }
+    return {
+        "cli_command": cli_command,
+        "required_options": [
+            "--blueprint-path",
+            "--test-path",
+            "--target-path",
+            "--output-dir",
+        ],
+    }
+
+
+def _default_parameter_grid(candidate_family: str) -> dict[str, Any]:
+    if candidate_family == "official_checkpoint_family":
+        return {
+            "calibration_weights": [0.0, 0.25, 0.5, 0.75, 1.0],
+            "fno_finetune_steps": [0, 1],
+        }
+    if candidate_family == "lightweight_residual_corrector":
+        return {"residual_shrinkage": [0.25, 0.5, 0.75], "horizon_decay": [40.0, 80.0]}
+    if candidate_family == "spectral_rollout_stabilization":
+        return {"spectral_strength": [0.25, 0.5, 1.0], "cutoff_ratio": [0.5, 0.75]}
+    return {"candidate_enabled": [True]}
+
+
+def _sandbox_level(candidate_family: str) -> int:
+    if candidate_family in {
+        "lightweight_residual_corrector",
+        "spectral_rollout_stabilization",
+    }:
+        return 0
+    if candidate_family in {
+        "official_checkpoint_family",
+        "physics_residual_regularization",
+        "scheduled_rollout_training",
+    }:
+        return 1
+    return 2
 
 
 def _section_index(markdown: str) -> dict[str, int]:

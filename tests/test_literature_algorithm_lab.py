@@ -200,3 +200,114 @@ def test_extract_algorithm_cards_reads_operational_markdown(
     assert card["implementation_hooks"] == ["learned_residual_correction"]
     assert card["evidence_status"] == "extracted"
     assert report["next_command"] == "compile-algorithm-candidates"
+
+
+def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
+
+    cards_path = tmp_path / "algorithm_cards.json"
+    cards_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_checkpoint",
+                        "source_ids": ["source_checkpoint"],
+                        "claim": "Official checkpoints may beat persistence.",
+                        "core_mechanism": "Use official checkpoint rollout and calibrate it.",
+                        "operation": "evaluate checkpoint rollout with calibration weights",
+                        "preconditions": ["checkpoint file available"],
+                        "implementation_hooks": ["official_checkpoint_calibration"],
+                        "expected_observables": ["higher local judge score"],
+                        "failure_modes": ["checkpoint adapter mismatch"],
+                        "minimal_experiment": "run checkpoint family sandbox",
+                        "evidence_status": "extracted",
+                    },
+                    {
+                        "algorithm_card_id": "card_residual",
+                        "source_ids": ["source_residual"],
+                        "claim": "Residual correction reduces rollout bias.",
+                        "core_mechanism": "Fit horizon residual correction.",
+                        "operation": "train a small residual corrector",
+                        "preconditions": ["validation target available"],
+                        "implementation_hooks": ["learned_residual_correction"],
+                        "expected_observables": ["lower Rel-MSE"],
+                        "failure_modes": ["overfit"],
+                        "minimal_experiment": "run residual proxy sandbox",
+                        "evidence_status": "extracted",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = compile_algorithm_candidates(
+        algorithm_cards_path=cards_path,
+        output_path=tmp_path / "algorithm_candidates.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CANDIDATES_COMPILED"
+    assert report["algorithm_candidate_count"] == 2
+    by_family = {
+        item["candidate_family"]: item for item in report["algorithm_candidates"]
+    }
+    checkpoint = by_family["official_checkpoint_family"]
+    assert checkpoint["executor_spec"]["cli_command"] == (
+        "run-checkpoint-family-sandbox"
+    )
+    assert checkpoint["target_problem"] == "PDE_Burgers"
+    residual = by_family["lightweight_residual_corrector"]
+    assert residual["executor_spec"]["cli_command"] == "run-blueprint-sandbox"
+    assert residual["promotion_criteria"]["requires_ablation"] is True
+    assert report["next_command"] == "plan-algorithm-candidate-sandbox"
+
+
+def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import plan_candidate_sandbox
+
+    candidate_path = tmp_path / "algorithm_candidates.json"
+    candidate_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_checkpoint",
+                        "candidate_family": "official_checkpoint_family",
+                        "executor_spec": {
+                            "cli_command": "run-checkpoint-family-sandbox",
+                            "required_options": [
+                                "--checkpoint-path",
+                                "--task-id",
+                                "--test-path",
+                                "--target-path",
+                                "--output-dir",
+                            ],
+                        },
+                        "risk_controls": ["do not execute external repo code"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = plan_candidate_sandbox(
+        algorithm_candidates_path=candidate_path,
+        algorithm_candidate_id="candidate_checkpoint",
+        output_path=tmp_path / "sandbox_plan.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
+    assert report["algorithm_candidate_id"] == "candidate_checkpoint"
+    assert report["sandbox_level"] == 1
+    assert report["executor"]["cli_command"] == "run-checkpoint-family-sandbox"
+    assert report["next_command"] == "run-checkpoint-family-sandbox"
