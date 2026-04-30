@@ -216,6 +216,9 @@ from pde_agent.commands.run_hermes_convergence_loop import (
     run_hermes_convergence_loop_command,
 )
 from pde_agent.commands.run_hermes_heartbeat import run_hermes_heartbeat_command
+from pde_agent.commands.run_hermes_literature_strategy_expansion import (
+    run_hermes_literature_strategy_expansion_command,
+)
 from pde_agent.commands.run_hermes_three_stage_policy import (
     run_hermes_three_stage_policy_command,
 )
@@ -1400,6 +1403,27 @@ def run_hermes_heartbeat_cmd(
                 postprocess_blend_weights=postprocess_blend_weights,
                 postprocess_adaptive_step=postprocess_adaptive_step,
                 submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-literature-strategy-expansion")
+def run_hermes_literature_strategy_expansion_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option(...),
+    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_literature_strategy_expansion_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                workspace_dir=workspace_dir,
+                checkpoint_paths=checkpoint_paths,
                 force=force,
             )
         )
