@@ -175,6 +175,7 @@ from pde_agent.commands.run_fno_evidence_sweep import (
 from pde_agent.commands.run_hermes_batch_optimization_loop import (
     run_hermes_batch_optimization_loop_command,
 )
+from pde_agent.commands.run_hypothesis_lab import run_hypothesis_lab_command
 from pde_agent.commands.run_hermes_local_strategy_loop import (
     run_hermes_local_strategy_loop_command,
 )
@@ -770,6 +771,31 @@ def run_hermes_batch_optimization_loop_cmd(
                 checkpoint_every=checkpoint_every,
                 memory_json_path=memory_json_path,
                 avoid_repeating=avoid_repeating,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hypothesis-lab")
+def run_hypothesis_lab_cmd(
+    manual_report_paths: list[str] = typer.Option([], "--manual-report-path"),
+    context_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option("team_hermes"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hypothesis_lab_command(
+                manual_report_paths=manual_report_paths,
+                context_path=context_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
                 force=force,
             )
         )

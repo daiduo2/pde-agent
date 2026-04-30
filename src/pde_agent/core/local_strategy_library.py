@@ -479,6 +479,48 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=40,
         ),
         _entry(
+            strategy_id="data_inference_linear_trend_spectral_v0",
+            title="Damped trend plus spectral smoothing for Burgers persistence plateau",
+            model_families=["DataInference", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "persistence_plateau",
+                "long_horizon_drift",
+                "late_window_rmse",
+            ],
+            hypothesis=(
+                "When trained neural operators underperform persistence, a small "
+                "damped negative trend extrapolation followed by spectral smoothing "
+                "can recover late-window Burgers score at negligible runtime cost."
+            ),
+            mechanism=(
+                "Estimate the context-window slope, apply a small negative "
+                "exponential trend to future steps, and smooth the future in "
+                "Fourier space while preserving the first 10 context frames."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "linear_trend_spectral",
+                "run-hermes-batch-optimization-loop",
+            ],
+            expected_observables=[
+                "higher local segment score than persistence plateau",
+                "lower late-window RMSE",
+                "inference time remains far below 120 seconds",
+            ],
+            known_risks=[
+                "validation-specific trend parameters may overfit hidden tests",
+                "strong smoothing may damp real shocks",
+                "early Rel-MSE can remain weak",
+            ],
+            acceptance_criteria=[
+                "sandbox verifier promotes the blueprint",
+                "Hermes batch loop improves over prior best",
+                "submission audit confirms exact context preservation",
+            ],
+            priority=5,
+        ),
+        _entry(
             strategy_id="nu_inference_context_classifier_v0",
             title="Task 2 viscosity inference from context",
             model_families=["DataInference", "FNO", "UNet"],

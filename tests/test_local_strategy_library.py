@@ -98,6 +98,33 @@ def test_lookup_local_strategies_prioritizes_unet_runtime_tuning(
     ]
 
 
+def test_lookup_local_strategies_exposes_hypothesis_lab_linear_trend_spectral(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="1D Burgers",
+        model_family="DataInference",
+        failure_modes=["persistence_plateau", "long_horizon_drift"],
+        max_results=1,
+        output_path=None,
+    )
+
+    assert result["matches"][0]["strategy_id"] == (
+        "data_inference_linear_trend_spectral_v0"
+    )
+    assert "run-hypothesis-lab" in result["matches"][0]["implementation_hooks"]
+    assert "linear_trend_spectral" in result["matches"][0]["implementation_hooks"]
+
+
 def test_local_strategy_library_cli_build_and_lookup(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner

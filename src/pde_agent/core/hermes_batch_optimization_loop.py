@@ -8,10 +8,17 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from pde_agent.core.hermes_iteration_memory import build_hermes_iteration_memory
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
 from pde_agent.core.hermes_postprocess_candidate import (
     generate_hermes_postprocess_candidate,
+)
+from pde_agent.core.manual_operator_tuning import (
+    linear_trend_prediction,
+    load_hdf5_tensor,
+    spectral_smooth_prediction,
 )
 from pde_agent.core.competition_candidate_materialization import (
     materialize_competition_candidate,
@@ -380,6 +387,15 @@ def _build_candidate_runner(
             submission_id=submission_id,
             force=force,
         )
+    if candidate_generator == "linear_trend_spectral":
+        return _linear_trend_spectral_runner(
+            task1_test_path=task1_test_path,
+            task2_test_path=task2_test_path,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            submission_id=submission_id,
+            force=force,
+        )
     raise HermesBatchOptimizationLoopError(
         f"unsupported candidate_generator: {candidate_generator}"
     )
@@ -631,6 +647,127 @@ def _hybrid_gate_runner(
         shifted = dict(kwargs)
         shifted["round_index"] = round_index - 1
         return fast_runner(**shifted)
+
+    return run_candidate
+
+
+def _linear_trend_spectral_runner(
+    *,
+    task1_test_path: str | Path | None,
+    task2_test_path: str | Path | None,
+    dataset_key: str,
+    prediction_dataset_key: str,
+    submission_id: str,
+    force: bool,
+) -> CandidateRunner:
+    task_id, test_path = _single_task_context(
+        task1_test_path=task1_test_path,
+        task2_test_path=task2_test_path,
+    )
+    schedule = [
+        {
+            "slope_window": 5,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 5,
+            "gain": -0.125,
+            "decay": 50.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 6,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 1.0,
+        },
+        {
+            "slope_window": 5,
+            "gain": -0.1,
+            "decay": 60.0,
+            "spectral_strength": 0.75,
+        },
+    ]
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        round_index = int(kwargs["round_index"])
+        if round_index > len(schedule):
+            return None
+        params = schedule[round_index - 1]
+        output_dir = Path(kwargs["output_dir"])
+        context = load_hdf5_tensor(test_path, dataset_key=dataset_key)
+        if context.shape[1] != 10:
+            context = context[:, :10, :]
+        clip = (float(np.min(context)), float(np.max(context)))
+        start = time.perf_counter()
+        prediction = linear_trend_prediction(
+            context=context,
+            gain=float(params["gain"]),
+            slope_window=int(params["slope_window"]),
+            decay=float(params["decay"]),
+            clip=clip,
+        )
+        strength = float(params["spectral_strength"])
+        if strength > 0.0:
+            prediction = spectral_smooth_prediction(
+                prediction=prediction,
+                strength=strength,
+            )
+        elapsed = time.perf_counter() - start
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prediction_path = output_dir / "linear_trend_spectral_prediction.npz"
+        np.savez_compressed(prediction_path, prediction=prediction)
+        submission = build_competition_submission(
+            task_id=task_id,
+            test_path=Path(test_path),
+            output_dir=output_dir / "submission_package",
+            submission_id=submission_id,
+            dataset_key=dataset_key,
+            prediction_dataset_key=prediction_dataset_key,
+            method="external_prediction",
+            source_prediction_path=prediction_path,
+            source_prediction_key="prediction",
+            train_time=0.0,
+            inference_time=elapsed,
+            force=force,
+        )
+        candidate_id = (
+            "linear_trend_spectral"
+            f"_w{params['slope_window']}"
+            f"_g{params['gain']:g}"
+            f"_d{params['decay']:g}"
+            f"_s{params['spectral_strength']:g}"
+        )
+        candidate_report_path = output_dir / "linear_trend_spectral_candidate.json"
+        candidate_report_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "state_hint": "LINEAR_TREND_SPECTRAL_CANDIDATE_READY",
+                    "candidate_id": candidate_id,
+                    "params": params,
+                    "artifacts": {
+                        "candidate_prediction_path": str(prediction_path),
+                        "submission_dir": submission["artifacts"]["submission_dir"],
+                    },
+                    "inference": {"elapsed_seconds": elapsed},
+                },
+                allow_nan=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "candidate_id": candidate_id,
+            "submission_dir": submission["artifacts"]["submission_dir"],
+            "source": "linear_trend_spectral_generator",
+            "params": params,
+            "candidate_report_path": str(candidate_report_path),
+        }
 
     return run_candidate
 

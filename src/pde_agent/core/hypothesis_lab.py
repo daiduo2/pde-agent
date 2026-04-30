@@ -1,0 +1,583 @@
+"""Audited local hypothesis lab for PDE operator strategy generation."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from pde_agent.core.competition_submission import build_competition_submission
+from pde_agent.core.hermes_local_judge import judge_hermes_submission
+from pde_agent.core.manual_operator_tuning import (
+    linear_trend_prediction,
+    load_hdf5_tensor,
+    make_persistence_prediction,
+    score_prediction_arrays,
+    spectral_smooth_prediction,
+)
+
+
+CARDS_STATE_HINT = "HYPOTHESIS_LAB_KNOWLEDGE_CARDS_BUILT"
+HYPOTHESES_STATE_HINT = "HYPOTHESIS_LAB_HYPOTHESES_GENERATED"
+BLUEPRINTS_STATE_HINT = "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED"
+SANDBOX_STATE_HINT = "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
+RUN_STATE_HINT = "HYPOTHESIS_LAB_RAN"
+
+
+class HypothesisLabError(RuntimeError):
+    pass
+
+
+def build_knowledge_cards(
+    *,
+    manual_report_paths: list[str | Path],
+    output_path: str | Path | None,
+    force: bool,
+) -> dict[str, Any]:
+    output_file = Path(output_path) if output_path is not None else None
+    _guard_output(output_file, force=force)
+    cards: list[dict[str, Any]] = []
+    for report_path in manual_report_paths:
+        report_file = Path(report_path)
+        report = _read_json(report_file)
+        seen_candidate_ids: set[str] = set()
+        for candidate in _manual_candidates(report):
+            candidate_id = str(candidate.get("candidate_id", ""))
+            if candidate_id in seen_candidate_ids:
+                continue
+            seen_candidate_ids.add(candidate_id)
+            family = str(candidate.get("family", ""))
+            if family == "linear_trend_spectral":
+                cards.append(_linear_trend_spectral_card(report_file, candidate))
+            elif family == "external_blend":
+                cards.append(_external_blend_card(report_file, candidate))
+    result = {
+        "schema_version": 1,
+        "state_hint": CARDS_STATE_HINT,
+        "card_count": len(cards),
+        "cards": cards,
+        "next_command": "generate-hypotheses",
+    }
+    _write_optional_json(output_file, result)
+    return result
+
+
+def _manual_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    best = report.get("best_candidate")
+    if isinstance(best, dict):
+        candidates.append(best)
+    top = report.get("top_candidates")
+    if isinstance(top, list):
+        candidates.extend([item for item in top if isinstance(item, dict)])
+    return candidates
+
+
+def generate_hypotheses(
+    *,
+    cards: dict[str, Any],
+    output_path: str | Path | None,
+    force: bool,
+) -> dict[str, Any]:
+    _require_state(cards, CARDS_STATE_HINT)
+    output_file = Path(output_path) if output_path is not None else None
+    _guard_output(output_file, force=force)
+    grouped_cards: dict[str, list[dict[str, Any]]] = {}
+    for card in cards.get("cards", []):
+        if not isinstance(card, dict):
+            continue
+        hooks = set(card.get("implementation_hooks", []))
+        if "linear_trend_spectral" in hooks:
+            grouped_cards.setdefault("linear_trend_spectral", []).append(card)
+        if "external_residual_blend" in hooks:
+            grouped_cards.setdefault("external_residual_blend", []).append(card)
+    hypotheses = []
+    if "linear_trend_spectral" in grouped_cards:
+        source_cards = grouped_cards["linear_trend_spectral"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_burgers_damped_trend_spectral_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "linear_trend_spectral",
+                "mechanism": (
+                    "Use a small negative trend extrapolation from the context "
+                    "window, then damp high-frequency modes to improve late "
+                    "Burgers stability without copying future data."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": 1,
+            }
+        )
+    if "external_residual_blend" in grouped_cards:
+        source_cards = grouped_cards["external_residual_blend"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_burgers_weak_model_residual_blend_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "external_residual_blend",
+                "mechanism": (
+                    "Treat a weak neural operator as a low-weight residual "
+                    "corrector over persistence rather than as the full rollout."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": 2,
+            }
+        )
+    result = {
+        "schema_version": 1,
+        "state_hint": HYPOTHESES_STATE_HINT,
+        "hypothesis_count": len(hypotheses),
+        "hypotheses": sorted(hypotheses, key=lambda item: int(item["priority"])),
+        "next_command": "design-algorithm-blueprints",
+    }
+    _write_optional_json(output_file, result)
+    return result
+
+
+def _merge_card_list(cards: list[dict[str, Any]], key: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for card in cards:
+        raw = card.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, str) or item in seen:
+                continue
+            values.append(item)
+            seen.add(item)
+    return values
+
+
+def design_algorithm_blueprints(
+    *,
+    hypotheses: dict[str, Any],
+    output_path: str | Path | None,
+    force: bool,
+) -> dict[str, Any]:
+    _require_state(hypotheses, HYPOTHESES_STATE_HINT)
+    output_file = Path(output_path) if output_path is not None else None
+    _guard_output(output_file, force=force)
+    blueprints = []
+    for hypothesis in hypotheses.get("hypotheses", []):
+        if not isinstance(hypothesis, dict):
+            continue
+        if hypothesis.get("candidate_family") == "linear_trend_spectral":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_linear_trend_spectral_grid_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "linear_trend_spectral",
+                    "algorithm": {
+                        "summary": (
+                            "Estimate a damped negative linear trend from the "
+                            "context window and optionally apply spectral smoothing "
+                            "to the predicted future."
+                        ),
+                        "pseudocode": [
+                            "slope = (u[-1] - u[-1-window]) / window",
+                            "future[t] = u[-1] + gain * t * exp(-t/decay) * slope",
+                            "future = spectral_smooth(future, strength)",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "slope_window": [4, 5, 6],
+                        "gain": [-0.15, -0.125, -0.1, -0.075],
+                        "decay": [40.0, 50.0, 60.0, 70.0],
+                        "spectral_strength": [0.5, 0.75, 1.0],
+                    },
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_operator",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+    result = {
+        "schema_version": 1,
+        "state_hint": BLUEPRINTS_STATE_HINT,
+        "blueprint_count": len(blueprints),
+        "blueprints": blueprints,
+        "next_command": "run-blueprint-sandbox",
+    }
+    _write_optional_json(output_file, result)
+    return result
+
+
+def run_blueprint_sandbox(
+    *,
+    blueprint: dict[str, Any],
+    context_path: str | Path,
+    target_path: str | Path,
+    output_dir: str | Path,
+    submission_id: str,
+    force: bool,
+) -> dict[str, Any]:
+    if blueprint.get("candidate_family") != "linear_trend_spectral":
+        raise HypothesisLabError(
+            f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
+        )
+    root = Path(output_dir)
+    report_path = root / "hypothesis_lab_sandbox_report.json"
+    _guard_output(report_path, force=force)
+    root.mkdir(parents=True, exist_ok=True)
+    context = load_hdf5_tensor(context_path)
+    if context.shape[1] != 10:
+        context = context[:, :10, :]
+    target = load_hdf5_tensor(target_path)
+    baseline_prediction = make_persistence_prediction(context)
+    baseline_score = score_prediction_arrays(
+        prediction=baseline_prediction,
+        target=target,
+    )
+    rows = []
+    for params in _iter_parameter_grid(blueprint["parameter_grid"]):
+        start = time.perf_counter()
+        prediction = _prediction_from_linear_trend_spectral(
+            context=context,
+            params=params,
+        )
+        elapsed = time.perf_counter() - start
+        score = score_prediction_arrays(prediction=prediction, target=target)
+        rows.append(
+            {
+                "candidate_id": _candidate_id(params),
+                "params": params,
+                "elapsed_seconds": elapsed,
+                "segment_score": score["segment_score"],
+                "task1_prediction_score": score["task1_prediction_score"],
+                "task1_total_score_proxy": _task1_total_score_proxy(
+                    prediction_score=score["task1_prediction_score"],
+                    inference_seconds=elapsed,
+                ),
+                "segments": score["segments"],
+                "_prediction": prediction,
+            }
+        )
+    rows.sort(key=lambda item: float(item["task1_total_score_proxy"]), reverse=True)
+    best = rows[0]
+    prediction_path = root / "best_prediction.npz"
+    np.savez_compressed(prediction_path, prediction=best["_prediction"])
+    submission = build_competition_submission(
+        task_id=1,
+        test_path=context_path,
+        output_dir=root / "submission_package",
+        submission_id=submission_id,
+        method="external_prediction",
+        source_prediction_path=prediction_path,
+        source_prediction_key="prediction",
+        train_time=0.0,
+        inference_time=float(best["elapsed_seconds"]),
+        force=force,
+    )
+    judge = judge_hermes_submission(
+        submission_dir=submission["artifacts"]["submission_dir"],
+        output_path=root / "judge_report.json",
+        task1_test_path=context_path,
+        task1_target_path=target_path,
+    )
+    context_preserved = _context_preserved(
+        prediction=best["_prediction"],
+        context=context,
+    )
+    delta = (
+        float(judge["total_score_proxy"])
+        - _task1_total_score_proxy(
+            prediction_score=float(baseline_score["task1_prediction_score"]),
+            inference_seconds=0.0,
+        )
+    )
+    verifier = {
+        "decision": "promote_to_strategy_proposal"
+        if judge["rules_passed"]
+        and context_preserved
+        and delta >= float(blueprint["sandbox"]["promotion_min_score_delta"])
+        else "reject_or_revise",
+        "rules_passed": bool(judge["rules_passed"]),
+        "context_preserved": context_preserved,
+        "score_delta_vs_baseline": delta,
+        "baseline_segment_score": baseline_score["segment_score"],
+        "best_segment_score": judge["tasks"]["1"]["score"]["segment_score"],
+        "inference_time": float(best["elapsed_seconds"]),
+        "judge_decision": judge["decision"],
+    }
+    serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
+    report = {
+        "schema_version": 1,
+        "state_hint": SANDBOX_STATE_HINT,
+        "blueprint_id": blueprint["blueprint_id"],
+        "baseline": {
+            "segment_score": baseline_score["segment_score"],
+            "task1_prediction_score": baseline_score["task1_prediction_score"],
+            "task1_total_score_proxy": _task1_total_score_proxy(
+                prediction_score=baseline_score["task1_prediction_score"],
+                inference_seconds=0.0,
+            ),
+        },
+        "best_candidate": {k: v for k, v in best.items() if k != "_prediction"},
+        "verifier": verifier,
+        "top_candidates": serializable_rows[:20],
+        "artifacts": {
+            "sandbox_report_path": str(report_path),
+            "best_prediction_path": str(prediction_path),
+            "best_submission_dir": submission["artifacts"]["submission_dir"],
+            "judge_report_path": str(root / "judge_report.json"),
+        },
+        "next_command": "record-strategy-proposal"
+        if verifier["decision"] == "promote_to_strategy_proposal"
+        else "revise-hypothesis",
+    }
+    _write_json(report_path, report)
+    return report
+
+
+def run_hypothesis_lab(
+    *,
+    manual_report_paths: list[str | Path],
+    context_path: str | Path,
+    target_path: str | Path,
+    output_dir: str | Path,
+    submission_id: str,
+    force: bool,
+) -> dict[str, Any]:
+    root = Path(output_dir)
+    report_path = root / "hypothesis_lab_report.json"
+    _guard_output(report_path, force=force)
+    root.mkdir(parents=True, exist_ok=True)
+    cards = build_knowledge_cards(
+        manual_report_paths=manual_report_paths,
+        output_path=root / "knowledge_cards.json",
+        force=force,
+    )
+    hypotheses = generate_hypotheses(
+        cards=cards,
+        output_path=root / "hypotheses.json",
+        force=force,
+    )
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=root / "blueprints.json",
+        force=force,
+    )
+    if not blueprints["blueprints"]:
+        raise HypothesisLabError("no executable blueprints generated")
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprints["blueprints"][0],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=root / "sandbox",
+        submission_id=submission_id,
+        force=force,
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": RUN_STATE_HINT,
+        "cards": {
+            "count": cards["card_count"],
+            "path": str(root / "knowledge_cards.json"),
+        },
+        "hypotheses": {
+            "count": hypotheses["hypothesis_count"],
+            "path": str(root / "hypotheses.json"),
+        },
+        "blueprints": {
+            "count": blueprints["blueprint_count"],
+            "path": str(root / "blueprints.json"),
+        },
+        "sandbox": sandbox,
+        "artifacts": {
+            "hypothesis_lab_report_path": str(report_path),
+            "sandbox_report_path": sandbox["artifacts"]["sandbox_report_path"],
+            "best_submission_dir": sandbox["artifacts"]["best_submission_dir"],
+        },
+        "next_command": sandbox["next_command"],
+    }
+    _write_json(report_path, report)
+    return report
+
+
+def _linear_trend_spectral_card(
+    report_file: Path,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    params = candidate.get("params") if isinstance(candidate.get("params"), dict) else {}
+    return {
+        "card_id": f"manual_{candidate.get('candidate_id', 'linear_trend_spectral')}",
+        "source_type": "manual_tuning_report",
+        "source_path": str(report_file),
+        "claim": (
+            "Damped negative linear trend extrapolation followed by spectral "
+            "smoothing can improve long-horizon 1D Burgers score over persistence."
+        ),
+        "procedural_heuristic": (
+            "Use the last context slope with a small negative gain, exponential "
+            "decay, and spectral smoothing on predicted future steps only."
+        ),
+        "preconditions": [
+            "1D Burgers",
+            "persistence plateau",
+            "late-window RMSE dominates local objective",
+        ],
+        "implementation_hooks": ["linear_trend_spectral"],
+        "expected_observables": [
+            "higher segment score",
+            "lower late RMSE",
+            "context copy remains exact",
+        ],
+        "known_risks": [
+            "can overfit validation viscosity",
+            "early Rel-MSE may remain poor",
+            "strong smoothing can suppress shocks",
+        ],
+        "evidence_status": "tested",
+        "evidence": {
+            "candidate_id": candidate.get("candidate_id"),
+            "params": params,
+            "segment_score": candidate.get("segment_score"),
+            "task1_total_fast_proxy": candidate.get("task1_total_fast_proxy"),
+            "late_rmse": candidate.get("segments", {}).get("late", {}).get("rmse")
+            if isinstance(candidate.get("segments"), dict)
+            else None,
+        },
+    }
+
+
+def _external_blend_card(report_file: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "card_id": f"manual_{candidate.get('candidate_id', 'external_blend')}",
+        "source_type": "manual_tuning_report",
+        "source_path": str(report_file),
+        "claim": (
+            "A weak neural operator can still provide useful low-weight residual "
+            "signal when blended with persistence."
+        ),
+        "procedural_heuristic": (
+            "Blend only a small fraction of the weak model rollout into the fast "
+            "baseline and account for full upstream inference time."
+        ),
+        "preconditions": ["weak model exists", "runtime budget remains feasible"],
+        "implementation_hooks": ["external_residual_blend"],
+        "expected_observables": ["lower late RMSE", "runtime tradeoff visible"],
+        "known_risks": ["upstream model inference can erase score gains"],
+        "evidence_status": "seeded",
+        "evidence": {
+            "candidate_id": candidate.get("candidate_id"),
+            "params": candidate.get("params"),
+            "segment_score": candidate.get("segment_score"),
+            "task1_total_fast_proxy": candidate.get("task1_total_fast_proxy"),
+        },
+    }
+
+
+def _prediction_from_linear_trend_spectral(
+    *,
+    context: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    clip = (float(np.min(context)), float(np.max(context)))
+    prediction = linear_trend_prediction(
+        context=context,
+        gain=float(params["gain"]),
+        slope_window=int(params["slope_window"]),
+        decay=float(params["decay"]),
+        clip=clip,
+    )
+    strength = float(params.get("spectral_strength", 0.0))
+    if strength > 0.0:
+        prediction = spectral_smooth_prediction(
+            prediction=prediction,
+            strength=strength,
+        )
+    return prediction
+
+
+def _iter_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for slope_window in grid["slope_window"]:
+        for gain in grid["gain"]:
+            for decay in grid["decay"]:
+                for strength in grid["spectral_strength"]:
+                    rows.append(
+                        {
+                            "slope_window": int(slope_window),
+                            "gain": float(gain),
+                            "decay": float(decay),
+                            "spectral_strength": float(strength),
+                        }
+                    )
+    return rows
+
+
+def _candidate_id(params: dict[str, Any]) -> str:
+    return (
+        "linear_trend_spectral"
+        f"_w{params['slope_window']}"
+        f"_g{params['gain']:g}"
+        f"_d{params['decay']:g}"
+        f"_s{params['spectral_strength']:g}"
+    )
+
+
+def _context_preserved(*, prediction: np.ndarray, context: np.ndarray) -> bool:
+    return bool(np.allclose(prediction[:, : context.shape[1], :], context, atol=1e-6))
+
+
+def _task1_total_score_proxy(
+    *,
+    prediction_score: float,
+    inference_seconds: float,
+) -> float:
+    inference_score = 0.0
+    if inference_seconds <= 120.0:
+        inference_score = 40.0 * max(0.0, 1.0 - inference_seconds / 120.0)
+    return float(prediction_score + 35.0 + inference_score)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise HypothesisLabError(f"JSON artifact not found: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HypothesisLabError(f"invalid JSON artifact: {path}") from exc
+    if not isinstance(value, dict):
+        raise HypothesisLabError(f"expected JSON object: {path}")
+    return value
+
+
+def _require_state(payload: dict[str, Any], state_hint: str) -> None:
+    if payload.get("state_hint") != state_hint:
+        raise HypothesisLabError(f"expected state_hint {state_hint}")
+
+
+def _guard_output(path: Path | None, *, force: bool) -> None:
+    if path is not None and path.exists() and not force:
+        raise HypothesisLabError(f"artifact already exists: {path}")
+
+
+def _write_optional_json(path: Path | None, payload: dict[str, Any]) -> None:
+    if path is not None:
+        _write_json(path, payload)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
