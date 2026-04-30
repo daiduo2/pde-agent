@@ -826,6 +826,106 @@ def test_hermes_batch_optimization_loop_hybrid_gate_tries_runtime_then_fast_base
     assert report["best_candidate"]["metadata"]["source"] == "fast_baseline_family"
 
 
+def test_hermes_batch_optimization_loop_hypothesis_lab_generates_candidate(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from pde_agent.core.hermes_batch_optimization_loop import (
+        run_hermes_batch_optimization_loop,
+    )
+    import pde_agent.core.hermes_batch_optimization_loop as loop_module
+
+    calls: list[tuple[str, Path]] = []
+
+    def fake_library_builder(**kwargs: Any) -> dict[str, Any]:
+        output_path = Path(kwargs["output_path"])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("{}", encoding="utf-8")
+        calls.append(("library", output_path))
+        return {"state_hint": "LOCAL_STRATEGY_LIBRARY_BUILT", "library_path": str(output_path)}
+
+    def fake_candidate_builder(**kwargs: Any) -> dict[str, Any]:
+        output_path = Path(kwargs["output_path"])
+        output_path.write_text("{}", encoding="utf-8")
+        calls.append(("candidates", output_path))
+        return {
+            "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+            "algorithm_candidates_path": str(output_path),
+        }
+
+    def fake_hypothesis_lab(**kwargs: Any) -> dict[str, Any]:
+        output_dir = Path(kwargs["output_dir"])
+        submission_dir = output_dir / "sandbox" / "submission_package" / "submission"
+        submission_dir.mkdir(parents=True)
+        calls.append(("hypothesis_lab", output_dir))
+        assert kwargs["algorithm_candidate_paths"] == [
+            output_dir / "local_asset_candidates.json"
+        ]
+        assert kwargs["context_path"] == Path("task1_test.hdf5")
+        assert kwargs["target_path"] == Path("task1_val.hdf5")
+        return {
+            "state_hint": "HYPOTHESIS_LAB_RAN",
+            "artifacts": {
+                "best_submission_dir": str(submission_dir),
+                "hypothesis_lab_report_path": str(output_dir / "hypothesis_lab_report.json"),
+            },
+            "sandbox": {
+                "best_candidate": {
+                    "candidate_id": "task1_retrieval_prior_k20_affine",
+                    "params": {"k": 20, "mode": "affine"},
+                },
+                "verifier": {
+                    "score_delta_vs_baseline": 23.0,
+                    "decision": "promote_to_strategy_proposal",
+                },
+            },
+        }
+
+    def fake_judge(**kwargs: Any) -> dict[str, Any]:
+        score = 86.0
+        if "submission_package" in str(kwargs["submission_dir"]):
+            score = 109.0
+        report_path = Path(kwargs["output_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {
+            "judge_report_path": str(report_path),
+            "rules_passed": True,
+            "total_score_proxy": score,
+            "tasks": {"1": {"score": {"task_total_score": score}}},
+        }
+
+    monkeypatch.setattr(loop_module, "build_local_strategy_library", fake_library_builder)
+    monkeypatch.setattr(
+        loop_module,
+        "build_local_asset_algorithm_candidates",
+        fake_candidate_builder,
+    )
+    monkeypatch.setattr(loop_module, "run_hypothesis_lab", fake_hypothesis_lab)
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    report = run_hermes_batch_optimization_loop(
+        output_dir=tmp_path / "loop",
+        initial_submission_dir=initial_dir,
+        max_rounds=1,
+        patience=1,
+        min_score_improvement=1.0,
+        submit_score_threshold=120.0,
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        candidate_generator="hypothesis_lab",
+        judge=fake_judge,
+        force=False,
+    )
+
+    assert [name for name, _ in calls] == ["library", "candidates", "hypothesis_lab"]
+    assert report["best_candidate"]["candidate_id"] == "task1_retrieval_prior_k20_affine"
+    assert report["best_candidate"]["score"] == 109.0
+    assert report["best_candidate"]["metadata"]["source"] == "hypothesis_lab"
+    assert report["best_candidate"]["metadata"]["score_delta_vs_baseline"] == 23.0
+
+
 def test_hermes_batch_optimization_loop_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,

@@ -223,6 +223,70 @@ def test_hermes_heartbeat_uses_objective_score_for_batch_stagnation(
     assert report["stop_reason"] == "max_batches_exhausted"
 
 
+def test_hermes_heartbeat_can_route_batches_to_hypothesis_lab(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_heartbeat import run_hermes_heartbeat
+
+    batch_calls: list[dict[str, Any]] = []
+
+    def fake_batch_runner(**kwargs: Any) -> dict[str, Any]:
+        batch_calls.append(kwargs)
+        report_path = Path(kwargs["output_dir"]) / "hermes_batch_optimization_loop.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        best_dir = tmp_path / "retrieval_best"
+        best_dir.mkdir(exist_ok=True)
+        return {
+            "state_hint": "HERMES_BATCH_OPTIMIZATION_LOOP_RAN",
+            "loop_report_path": str(report_path),
+            "round_count": 2,
+            "best_candidate": {
+                "candidate_id": "task1_retrieval_prior_k20_affine",
+                "score": 109.0,
+                "submission_dir": str(best_dir),
+                "rules_passed": True,
+            },
+            "stop_reason": "candidate_runner_exhausted",
+            "decision": "iterate_more",
+        }
+
+    def fake_memory_builder(**kwargs: Any) -> dict[str, Any]:
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_text("memory", encoding="utf-8")
+        Path(kwargs["memory_json_path"]).write_text("{}", encoding="utf-8")
+        return {
+            "state_hint": "HERMES_ITERATION_MEMORY_BUILT",
+            "artifacts": {
+                "memory_markdown_path": str(kwargs["output_path"]),
+                "memory_json_path": str(kwargs["memory_json_path"]),
+                "updated_log_paths": [],
+            },
+            "metrics": {},
+        }
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+    report = run_hermes_heartbeat(
+        output_dir=tmp_path / "heartbeat",
+        initial_submission_dir=initial_dir,
+        max_batches=1,
+        batch_deadline_seconds=5.0,
+        max_rounds_per_batch=2,
+        candidate_generator="hypothesis_lab",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        batch_runner=fake_batch_runner,
+        memory_builder=fake_memory_builder,
+        force=False,
+    )
+
+    assert batch_calls[0]["candidate_generator"] == "hypothesis_lab"
+    assert batch_calls[0]["task1_target_path"] == Path("task1_val.hdf5")
+    assert report["best_candidate"]["candidate_id"] == "task1_retrieval_prior_k20_affine"
+    assert report["parameters"]["candidate_generator"] == "hypothesis_lab"
+
+
 def test_hermes_heartbeat_cli_returns_payload(
     tmp_path: Path,
     monkeypatch: object,

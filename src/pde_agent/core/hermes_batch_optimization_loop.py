@@ -15,6 +15,11 @@ from pde_agent.core.hermes_local_judge import judge_hermes_submission
 from pde_agent.core.hermes_postprocess_candidate import (
     generate_hermes_postprocess_candidate,
 )
+from pde_agent.core.hermes_literature_expansion import (
+    build_local_asset_algorithm_candidates,
+)
+from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+from pde_agent.core.local_strategy_library import build_local_strategy_library
 from pde_agent.core.manual_operator_tuning import (
     linear_trend_prediction,
     load_hdf5_tensor,
@@ -113,6 +118,7 @@ def run_hermes_batch_optimization_loop(
         hypothesis_blueprint_path=hypothesis_blueprint_path,
         initial_submission_dir=Path(initial_submission_dir),
         task1_test_path=task1_test_path,
+        task1_target_path=task1_target_path,
         task2_test_path=task2_test_path,
         unet_checkpoint_path=unet_checkpoint_path,
         dataset_key=dataset_key,
@@ -333,6 +339,7 @@ def _build_candidate_runner(
     hypothesis_blueprint_path: str | Path | None,
     initial_submission_dir: Path,
     task1_test_path: str | Path | None,
+    task1_target_path: str | Path | None,
     task2_test_path: str | Path | None,
     unet_checkpoint_path: str | Path | None,
     dataset_key: str,
@@ -400,6 +407,13 @@ def _build_candidate_runner(
             hypothesis_blueprint_path=hypothesis_blueprint_path,
             dataset_key=dataset_key,
             prediction_dataset_key=prediction_dataset_key,
+            submission_id=submission_id,
+            force=force,
+        )
+    if candidate_generator == "hypothesis_lab":
+        return _hypothesis_lab_runner(
+            task1_test_path=task1_test_path,
+            task1_target_path=task1_target_path,
             submission_id=submission_id,
             force=force,
         )
@@ -771,6 +785,64 @@ def _linear_trend_spectral_runner(
             if hypothesis_blueprint_path is not None
             else None,
             "candidate_report_path": str(candidate_report_path),
+        }
+
+    return run_candidate
+
+
+def _hypothesis_lab_runner(
+    *,
+    task1_test_path: str | Path | None,
+    task1_target_path: str | Path | None,
+    submission_id: str,
+    force: bool,
+) -> CandidateRunner:
+    if task1_test_path is None:
+        raise HermesBatchOptimizationLoopError(
+            "hypothesis_lab candidate generator requires task1_test_path"
+        )
+    if task1_target_path is None:
+        raise HermesBatchOptimizationLoopError(
+            "hypothesis_lab candidate generator requires task1_target_path"
+        )
+    used = False
+
+    def run_candidate(**kwargs: Any) -> dict[str, Any] | None:
+        nonlocal used
+        if used:
+            return None
+        used = True
+        output_dir = Path(kwargs["output_dir"])
+        library_path = output_dir / "local_strategy_library.json"
+        candidates_path = output_dir / "local_asset_candidates.json"
+        build_local_strategy_library(output_path=library_path, force=force)
+        build_local_asset_algorithm_candidates(
+            local_strategy_library_path=library_path,
+            checkpoint_paths=[],
+            output_path=candidates_path,
+            max_strategy_candidates=5,
+            force=force,
+        )
+        lab = run_hypothesis_lab(
+            manual_report_paths=[],
+            algorithm_candidate_paths=[candidates_path],
+            context_path=Path(task1_test_path),
+            target_path=Path(task1_target_path),
+            output_dir=output_dir,
+            submission_id=submission_id,
+            force=force,
+        )
+        sandbox = lab["sandbox"]
+        best = sandbox["best_candidate"]
+        verifier = sandbox.get("verifier", {})
+        return {
+            "candidate_id": str(best["candidate_id"]),
+            "submission_dir": lab["artifacts"]["best_submission_dir"],
+            "source": "hypothesis_lab",
+            "candidate_report_path": lab["artifacts"]["hypothesis_lab_report_path"],
+            "score_delta_vs_baseline": verifier.get("score_delta_vs_baseline"),
+            "hypothesis_lab_decision": verifier.get("decision"),
+            "params": best.get("params"),
         }
 
     return run_candidate
