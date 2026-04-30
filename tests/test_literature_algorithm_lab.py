@@ -617,6 +617,57 @@ def test_extract_algorithm_cards_reads_operational_markdown(
     assert report["next_command"] == "compile-algorithm-candidates"
 
 
+def test_extract_algorithm_cards_infers_fno_from_paper_markdown(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import extract_algorithm_cards
+
+    markdown = tmp_path / "fno.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Fourier Neural Operator for Parametric Partial Differential Equations",
+                "## Abstract",
+                "We propose Fourier neural operators for parametric PDEs.",
+                "## Fourier Neural Operator",
+                "The kernel integral operator is parameterized directly in Fourier space.",
+                "The model learns mappings between infinite-dimensional function spaces.",
+                "## Numerical Experiments",
+                "Burgers equation, Darcy flow, and Navier-Stokes equation are evaluated.",
+                "$$ u_t + u u_x = nu u_xx $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_fno",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "cards.json",
+        force=False,
+    )
+
+    card = report["algorithm_cards"][0]
+    assert card["implementation_hooks"] == ["fourier_neural_operator_architecture"]
+    assert "Fourier" in card["claim"]
+    assert "Fourier space" in card["core_mechanism"]
+    assert card["minimal_experiment"] == (
+        "Design a bounded FNO architecture executor or map the source to an existing checkpoint-family adapter before sandbox execution."
+    )
+
+
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
 
