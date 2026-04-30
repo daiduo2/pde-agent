@@ -134,6 +134,9 @@ from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_c
 from pde_agent.commands.materialize_competition_candidate import (
     materialize_competition_candidate_command,
 )
+from pde_agent.commands.merge_competition_submissions import (
+    merge_competition_submissions_command,
+)
 from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_fno_competition import (
     predict_fno_competition_command,
@@ -3545,6 +3548,27 @@ def materialize_competition_candidate_cmd(
                 prediction_dataset_key=prediction_dataset_key,
                 source_prediction_key=source_prediction_key,
                 train_time=train_time,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("merge-competition-submissions")
+def merge_competition_submissions_cmd(
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option(...),
+    task_submission_dirs: list[str] = typer.Option(..., "--task-submission-dir"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            merge_competition_submissions_command(
+                output_dir=output_dir,
+                submission_id=submission_id,
+                task_submission_dirs=task_submission_dirs,
                 force=force,
             )
         )
