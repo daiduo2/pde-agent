@@ -112,6 +112,13 @@ from pde_agent.commands.local_strategy_scheduler import (
 from pde_agent.commands.local_strategy_leaderboard import (
     record_local_strategy_result_command,
 )
+from pde_agent.commands.literature_algorithm_lab import (
+    build_literature_source_records_command,
+    compile_algorithm_candidates_command,
+    extract_algorithm_cards_command,
+    ingest_mineru_parse_command,
+    plan_candidate_sandbox_command,
+)
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
     materialize_competition_candidate_command,
@@ -812,6 +819,109 @@ def run_hypothesis_lab_cmd(
                 target_path=target_path,
                 output_dir=output_dir,
                 submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-literature-source-records")
+def build_literature_source_records_cmd(
+    source_fixture_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_literature_source_records_command(
+                source_fixture_path=source_fixture_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("ingest-mineru-parse")
+def ingest_mineru_parse_cmd(
+    source_records_path: str = typer.Option(...),
+    source_id: str = typer.Option(...),
+    markdown_path: str = typer.Option(...),
+    asset_dir: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            ingest_mineru_parse_command(
+                source_records_path=source_records_path,
+                source_id=source_id,
+                markdown_path=markdown_path,
+                asset_dir=asset_dir,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("extract-algorithm-cards")
+def extract_algorithm_cards_cmd(
+    paper_parse_paths: list[str] = typer.Option(..., "--paper-parse-path"),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            extract_algorithm_cards_command(
+                paper_parse_paths=paper_parse_paths,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("compile-algorithm-candidates")
+def compile_algorithm_candidates_cmd(
+    algorithm_cards_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            compile_algorithm_candidates_command(
+                algorithm_cards_path=algorithm_cards_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("plan-algorithm-candidate-sandbox")
+def plan_algorithm_candidate_sandbox_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    algorithm_candidate_id: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            plan_candidate_sandbox_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                algorithm_candidate_id=algorithm_candidate_id,
+                output_path=output_path,
                 force=force,
             )
         )

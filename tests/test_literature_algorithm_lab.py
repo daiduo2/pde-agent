@@ -311,3 +311,50 @@ def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(
     assert report["sandbox_level"] == 1
     assert report["executor"]["cli_command"] == "run-checkpoint-family-sandbox"
     assert report["next_command"] == "run-checkpoint-family-sandbox"
+
+
+def test_literature_algorithm_lab_cli_source_records(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    raw_pdf = tmp_path / "paper.pdf"
+    raw_pdf.write_bytes(b"paper")
+    fixture = tmp_path / "sources.json"
+    output_path = tmp_path / "source_records.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "query": "operator learning",
+                "sources": [
+                    {
+                        "source_type": "arxiv_paper",
+                        "title": "Operator Learning Paper",
+                        "url": "https://arxiv.org/abs/2601.00002",
+                        "local_raw_path": str(raw_pdf),
+                        "license_note": "arXiv research use",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-literature-source-records",
+            "--source-fixture-path",
+            str(fixture),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["state_hint"] == "LITERATURE_SOURCE_RECORDS_BUILT"
+    assert payload["artifacts"]["source_records_path"] == str(output_path)
+    assert payload["metrics"]["source_count"] == 1
+    assert payload["next_hint"] == "ingest-mineru-parse"
