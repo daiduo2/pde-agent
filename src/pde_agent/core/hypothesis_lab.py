@@ -21,6 +21,7 @@ from pde_agent.core.manual_operator_tuning import (
     score_prediction_arrays,
     spectral_smooth_prediction,
 )
+from pde_agent.core.strategy_growth import record_strategy_proposal
 
 
 CARDS_STATE_HINT = "HYPOTHESIS_LAB_KNOWLEDGE_CARDS_BUILT"
@@ -798,6 +799,14 @@ def run_hypothesis_lab(
         failure_memory_output_path=failure_memory_output_path,
         force=force,
     )
+    strategy_growth = _record_hypothesis_strategy_growth_artifacts(
+        cards=cards,
+        hypotheses=hypotheses,
+        executable_blueprint=executable_blueprint,
+        sandbox=sandbox,
+        output_dir=root,
+        force=force,
+    )
     report = {
         "schema_version": 1,
         "state_hint": RUN_STATE_HINT,
@@ -820,8 +829,13 @@ def run_hypothesis_lab(
             "best_submission_dir": sandbox["artifacts"]["best_submission_dir"],
             "verified_blueprint_path": str(verified_blueprints_path),
         },
-        "next_command": sandbox["next_command"],
+        "next_command": strategy_growth["next_command"]
+        if strategy_growth is not None
+        else sandbox["next_command"],
     }
+    if strategy_growth is not None:
+        report["strategy_growth"] = strategy_growth
+        report["artifacts"].update(strategy_growth["artifacts"])
     if candidate_outcome is not None:
         report["candidate_outcome"] = candidate_outcome
     _write_json(report_path, report)
@@ -1268,7 +1282,141 @@ def _record_algorithm_candidate_outcome(
     }
 
 
+def _record_hypothesis_strategy_growth_artifacts(
+    *,
+    cards: dict[str, Any],
+    hypotheses: dict[str, Any],
+    executable_blueprint: dict[str, Any],
+    sandbox: dict[str, Any],
+    output_dir: Path,
+    force: bool,
+) -> dict[str, Any] | None:
+    verifier = sandbox.get("verifier") if isinstance(sandbox.get("verifier"), dict) else {}
+    if verifier.get("decision") != "promote_to_strategy_proposal":
+        return None
+    card = _executed_algorithm_candidate_card(
+        cards=cards,
+        hypotheses=hypotheses,
+        executable_blueprint=executable_blueprint,
+    )
+    if card is None:
+        return None
+    evidence = card["evidence"]
+    proposal_path = _fresh_output(output_dir / "strategy_proposal.json", force=force)
+    evidence_path = _fresh_output(
+        output_dir / "strategy_evidence_summary.json",
+        force=force,
+    )
+    strategy_id = str(evidence["algorithm_candidate_id"])
+    proposal = record_strategy_proposal(
+        strategy_id=strategy_id,
+        title=f"Hypothesis Lab verified {strategy_id}",
+        source_type="agent_hypothesis",
+        problem_context=(
+            "Hypothesis Lab promoted a Hermes algorithm candidate after "
+            "bounded 1D Burgers sandbox verification."
+        ),
+        hypothesis=str(card["claim"]),
+        mechanism=str(card["procedural_heuristic"]),
+        implementation_plan={
+            "allowed_commands": ["run-hypothesis-lab"],
+            "expected_artifacts": [
+                "hypothesis_lab_report.json",
+                "hypothesis_lab_sandbox_report.json",
+                "verified_blueprints.json",
+            ],
+            "algorithm_candidate_id": strategy_id,
+            "candidate_key": evidence["candidate_key"],
+            "blueprint_id": executable_blueprint.get("blueprint_id"),
+            "sandbox_report_path": sandbox["artifacts"]["sandbox_report_path"],
+            "verified_blueprint_path": str(output_dir / "verified_blueprints.json"),
+        },
+        expected_observables=_candidate_string_list(card.get("expected_observables"))
+        or ["sandbox score improves"],
+        known_risks=_candidate_string_list(card.get("known_risks"))
+        or ["single-window sandbox evidence may not generalize"],
+        output_path=proposal_path,
+    )
+    summary = _hypothesis_lab_strategy_evidence_summary(
+        strategy_id=strategy_id,
+        evidence_path=evidence_path,
+        sandbox=sandbox,
+    )
+    _write_json(evidence_path, summary)
+    return {
+        "strategy_id": strategy_id,
+        "state_hint": proposal["state_hint"],
+        "artifacts": {
+            "strategy_proposal_path": str(proposal_path),
+            "strategy_evidence_summary_path": str(evidence_path),
+        },
+        "next_command": proposal["next_command"],
+    }
+
+
+def _hypothesis_lab_strategy_evidence_summary(
+    *,
+    strategy_id: str,
+    evidence_path: Path,
+    sandbox: dict[str, Any],
+) -> dict[str, Any]:
+    verifier = sandbox["verifier"]
+    score_delta = float(verifier["score_delta_vs_baseline"])
+    best = sandbox["best_candidate"]
+    return {
+        "schema_version": 1,
+        "state_hint": "STRATEGY_EVIDENCE_SUMMARY_BUILT",
+        "source_state_hint": SANDBOX_STATE_HINT,
+        "source_sandbox_report_path": sandbox["artifacts"]["sandbox_report_path"],
+        "evidence_summary_path": str(evidence_path),
+        "best_strategy_id": strategy_id,
+        "evaluation_window_count": 1,
+        "mean_score_delta": score_delta,
+        "score_delta_std": 0.0,
+        "long_window_score_delta": score_delta,
+        "physics_residual_delta": 0.0,
+        "inference_time_regression": float(verifier["inference_time"]),
+        "failure_rate": 0.0
+        if verifier["decision"] == "promote_to_strategy_proposal"
+        else 1.0,
+        "candidate_records": [
+            {
+                "strategy_id": strategy_id,
+                "candidate_id": best["candidate_id"],
+                "score": best["task1_total_score_proxy"],
+                "score_delta": score_delta,
+                "segment_score": best["segment_score"],
+                "params": best["params"],
+            }
+        ],
+        "provenance_notes": [
+            "single_window_hypothesis_lab_sandbox",
+            "requires_multi_window_promotion_before_skill_candidate",
+        ],
+        "next_command": "evaluate-strategy-promotion",
+    }
+
+
 def _executed_algorithm_candidate_evidence(
+    *,
+    cards: dict[str, Any],
+    hypotheses: dict[str, Any],
+    executable_blueprint: dict[str, Any],
+) -> dict[str, Any] | None:
+    card = _executed_algorithm_candidate_card(
+        cards=cards,
+        hypotheses=hypotheses,
+        executable_blueprint=executable_blueprint,
+    )
+    if card is None:
+        return None
+    evidence = card.get("evidence")
+    if not isinstance(evidence, dict):
+        return None
+    return evidence
+
+
+def _executed_algorithm_candidate_card(
     *,
     cards: dict[str, Any],
     hypotheses: dict[str, Any],
@@ -1297,8 +1445,14 @@ def _executed_algorithm_candidate_evidence(
         if not isinstance(evidence, dict):
             continue
         if evidence.get("algorithm_candidate_id") and evidence.get("candidate_key"):
-            return evidence
+            return card
     return None
+
+
+def _fresh_output(path: Path, *, force: bool) -> Path:
+    if path.exists() and force:
+        path.unlink()
+    return path
 
 
 def _adaptive_plateau_card(

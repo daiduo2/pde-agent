@@ -857,6 +857,102 @@ def test_hypothesis_lab_records_algorithm_candidate_outcome(
     assert memory["failed_algorithm_candidate_ids"] == []
 
 
+def test_hypothesis_lab_promoted_candidate_records_strategy_growth_artifacts(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] += np.float32(0.01 * step)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    for step in range(190):
+        target[:, 10 + step, :] = context[:, 9, :] - np.float32(0.002 * (step + 1))
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _local_asset_algorithm_candidates(tmp_path / "local_asset_candidates.json")
+        ],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    proposal_path = Path(report["artifacts"]["strategy_proposal_path"])
+    evidence_path = Path(report["artifacts"]["strategy_evidence_summary_path"])
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert report["strategy_growth"]["strategy_id"] == (
+        "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+    )
+    assert report["next_command"] == "build-strategy-rubric"
+    assert proposal["state_hint"] == "STRATEGY_PROPOSAL_RECORDED"
+    assert proposal["source_type"] == "agent_hypothesis"
+    assert "run-hypothesis-lab" in proposal["implementation_plan"]["allowed_commands"]
+    assert evidence["state_hint"] == "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+    assert evidence["evaluation_window_count"] == 1
+    assert evidence["mean_score_delta"] > 0.0
+    assert evidence["next_command"] == "evaluate-strategy-promotion"
+
+
+def test_hypothesis_lab_single_window_evidence_does_not_promote_to_ledger(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+    from pde_agent.core.strategy_growth import (
+        build_strategy_rubric,
+        evaluate_strategy_promotion,
+    )
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] += np.float32(0.01 * step)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    for step in range(190):
+        target[:, 10 + step, :] = context[:, 9, :] - np.float32(0.002 * (step + 1))
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _local_asset_algorithm_candidates(tmp_path / "local_asset_candidates.json")
+        ],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    rubric_path = tmp_path / "rubric.json"
+    promotion_path = tmp_path / "promotion.json"
+    build_strategy_rubric(
+        proposal_path=Path(report["artifacts"]["strategy_proposal_path"]),
+        output_path=rubric_path,
+        min_evaluation_windows=2,
+        max_inference_time_regression=120.0,
+    )
+    promotion = evaluate_strategy_promotion(
+        proposal_path=Path(report["artifacts"]["strategy_proposal_path"]),
+        rubric_path=rubric_path,
+        evidence_summary_path=Path(
+            report["artifacts"]["strategy_evidence_summary_path"]
+        ),
+        output_path=promotion_path,
+    )
+
+    assert promotion["decision"] == "reject"
+    assert promotion["promote_to_skill_candidate"] is False
+    assert "insufficient_evaluation_windows" in promotion["reason_codes"]
+
+
 def test_hypothesis_lab_cli_accepts_algorithm_candidates_and_memory_output(
     tmp_path: Path,
 ) -> None:
