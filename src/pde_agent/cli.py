@@ -175,6 +175,9 @@ from pde_agent.commands.run_fno_evidence_sweep import (
 from pde_agent.commands.run_hermes_batch_optimization_loop import (
     run_hermes_batch_optimization_loop_command,
 )
+from pde_agent.commands.run_checkpoint_family_sandbox import (
+    run_checkpoint_family_sandbox_command,
+)
 from pde_agent.commands.run_hypothesis_lab import run_hypothesis_lab_command
 from pde_agent.commands.run_hermes_adaptive_heartbeat import (
     run_hermes_adaptive_heartbeat_command,
@@ -809,6 +812,41 @@ def run_hypothesis_lab_cmd(
                 target_path=target_path,
                 output_dir=output_dir,
                 submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-checkpoint-family-sandbox")
+def run_checkpoint_family_sandbox_cmd(
+    checkpoint_paths: list[str] = typer.Option(..., "--checkpoint-path"),
+    task_id: int = typer.Option(...),
+    test_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option("team_hermes"),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    calibration_weights: list[float] = typer.Option([1.0], "--calibration-weight"),
+    fno_finetune_steps: int = typer.Option(0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_checkpoint_family_sandbox_command(
+                checkpoint_paths=checkpoint_paths,
+                task_id=task_id,
+                test_path=test_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                calibration_weights=calibration_weights,
+                fno_finetune_steps=fno_finetune_steps,
                 force=force,
             )
         )

@@ -403,6 +403,31 @@ def design_algorithm_blueprints(
                         "max_inference_seconds": 120.0,
                         "executable_in_hypothesis_lab": False,
                     },
+                    "execution_plan": {
+                        "cli_command": "run-checkpoint-family-sandbox",
+                        "required_options": [
+                            "--checkpoint-path",
+                            "--task-id",
+                            "--test-path",
+                            "--target-path",
+                            "--output-dir",
+                        ],
+                        "optional_options": [
+                            "--calibration-weight",
+                            "--fno-finetune-steps",
+                            "--submission-id",
+                            "--dataset-key",
+                            "--prediction-dataset-key",
+                            "--force",
+                        ],
+                        "handoff_reason": (
+                            "Checkpoint candidates require the audited Torch "
+                            "checkpoint adapters and may run short FNO fine-tuning, "
+                            "so Hypothesis Lab emits an executable handoff instead "
+                            "of running them inside the lightweight numpy sandbox."
+                        ),
+                    },
+                    "next_command": "run-checkpoint-family-sandbox",
                     "risks": hypothesis.get("known_risks", []),
                 }
             )

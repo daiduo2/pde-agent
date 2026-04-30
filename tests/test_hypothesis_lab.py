@@ -481,6 +481,13 @@ def test_hypothesis_lab_designs_checkpoint_and_residual_blueprints(
     assert checkpoint_blueprint["sandbox"]["allowed_executor"] == (
         "official_checkpoint_candidate_pipeline"
     )
+    assert checkpoint_blueprint["next_command"] == "run-checkpoint-family-sandbox"
+    assert checkpoint_blueprint["execution_plan"]["cli_command"] == (
+        "run-checkpoint-family-sandbox"
+    )
+    assert "--checkpoint-path" in checkpoint_blueprint["execution_plan"][
+        "required_options"
+    ]
     assert checkpoint_blueprint["checkpoint_candidates"][0]["model_family"] == "FNO"
     residual_blueprint = by_family["learned_residual_correction"]
     assert residual_blueprint["sandbox"]["allowed_executor"] == (
