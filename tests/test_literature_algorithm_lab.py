@@ -128,6 +128,57 @@ def test_normalize_github_search_results_builds_repo_candidates(
     assert candidate["external_ids"]["full_name"] == "neuraloperator/neuraloperator"
 
 
+def test_download_source_document_uses_cache_and_hashes_content(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import download_source_document
+
+    candidates_path = tmp_path / "source_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "EXTERNAL_SOURCE_SEARCH_NORMALIZED",
+                "source_candidates": [
+                    {
+                        "source_id": "arxiv_paper_fno",
+                        "source_type": "arxiv_paper",
+                        "title": "Fourier Neural Operator",
+                        "url": "https://arxiv.org/abs/2010.08895",
+                        "document_url": "https://arxiv.org/pdf/2010.08895",
+                        "retrieval_query": "FNO",
+                        "discovery_provider": "arxiv",
+                        "license_note": "arXiv paper",
+                        "external_ids": {"arxiv_id": "2010.08895"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_downloader(url: str) -> bytes:
+        calls.append(url)
+        return b"%PDF fixture"
+
+    report = download_source_document(
+        source_candidates_path=candidates_path,
+        source_id="arxiv_paper_fno",
+        output_path=tmp_path / "downloaded_source.json",
+        cache_dir=tmp_path / "cache",
+        downloader=fake_downloader,
+        force=False,
+    )
+
+    assert calls == ["https://arxiv.org/pdf/2010.08895"]
+    assert report["state_hint"] == "SOURCE_DOCUMENT_DOWNLOADED"
+    assert Path(report["source_record"]["local_raw_path"]).exists()
+    assert report["source_record"]["content_hash"]
+    assert report["source_record"]["download_url"] == "https://arxiv.org/pdf/2010.08895"
+    assert report["next_command"] == "submit-mineru-parse"
+
+
 def test_build_source_records_normalizes_fixture_sources(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,

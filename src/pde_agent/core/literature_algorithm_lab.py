@@ -9,10 +9,12 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 
 
 SOURCE_RECORDS_STATE_HINT = "LITERATURE_SOURCE_RECORDS_BUILT"
 SOURCE_SEARCH_STATE_HINT = "EXTERNAL_SOURCE_SEARCH_NORMALIZED"
+SOURCE_DOCUMENT_STATE_HINT = "SOURCE_DOCUMENT_DOWNLOADED"
 PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
@@ -262,6 +264,69 @@ def build_literature_source_records(
         "source_count": len(records),
         "source_records": records,
         "next_command": "ingest-mineru-parse",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def download_source_document(
+    *,
+    source_candidates_path: str | Path,
+    source_id: str,
+    output_path: str | Path,
+    cache_dir: str | Path,
+    downloader: Any | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    candidates_report = _read_json(
+        _require_file(Path(source_candidates_path), "source candidates")
+    )
+    if candidates_report.get("state_hint") != SOURCE_SEARCH_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "source candidates report has invalid state_hint"
+        )
+    selected_id = _nonempty_text(source_id, "source_id")
+    candidate = _find_by_id(
+        candidates_report.get("source_candidates"),
+        selected_id,
+        "source_id",
+    )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    download_url = _nonempty_text(candidate.get("document_url"), "document_url")
+    extension = _extension_for_url(download_url)
+    local_raw_path = Path(cache_dir) / f"{_slug(selected_id)}{extension}"
+    if local_raw_path.exists() and not force:
+        content = local_raw_path.read_bytes()
+    else:
+        fetch = downloader or _download_bytes
+        content = fetch(download_url)
+        if not isinstance(content, bytes) or not content:
+            raise LiteratureAlgorithmLabError("downloaded content must be non-empty bytes")
+        local_raw_path.parent.mkdir(parents=True, exist_ok=True)
+        local_raw_path.write_bytes(content)
+
+    source_record = {
+        "source_id": candidate["source_id"],
+        "source_type": candidate["source_type"],
+        "title": candidate["title"],
+        "url": candidate["url"],
+        "retrieved_at": _utc_now(),
+        "license_note": candidate["license_note"],
+        "local_raw_path": str(local_raw_path),
+        "content_hash": hashlib.sha256(content).hexdigest(),
+        "related_source_ids": [],
+        "retrieval_query": candidate["retrieval_query"],
+        "download_url": download_url,
+        "discovery_provider": candidate["discovery_provider"],
+        "external_ids": candidate.get("external_ids", {}),
+    }
+    report = {
+        "schema_version": 1,
+        "state_hint": SOURCE_DOCUMENT_STATE_HINT,
+        "downloaded_source_path": str(output_file),
+        "source_record": source_record,
+        "next_command": "submit-mineru-parse",
     }
     _write_json(output_file, report)
     return report
@@ -688,6 +753,32 @@ def _write_source_search_report(
     }
     _write_json(output_file, report)
     return report
+
+
+def _find_by_id(value: Any, selected_id: str, id_key: str) -> dict[str, Any]:
+    for item in _object_list(value, "items"):
+        if item.get(id_key) == selected_id:
+            return item
+    raise LiteratureAlgorithmLabError(f"{id_key} not found: {selected_id}")
+
+
+def _extension_for_url(url: str) -> str:
+    lowered = url.lower().split("?", 1)[0].rstrip("/")
+    for extension in [".pdf", ".zip", ".md", ".html", ".docx", ".doc", ".pptx", ".ppt"]:
+        if lowered.endswith(extension):
+            return extension
+    if "/pdf/" in lowered or "arxiv.org/pdf" in lowered:
+        return ".pdf"
+    return ".bin"
+
+
+def _download_bytes(url: str) -> bytes:
+    request = Request(
+        url,
+        headers={"User-Agent": "pde-agent-literature-algorithm-lab/0.1"},
+    )
+    with urlopen(request, timeout=60) as response:
+        return response.read()
 
 
 def _source_candidate(
