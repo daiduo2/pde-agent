@@ -176,6 +176,9 @@ from pde_agent.commands.run_hermes_batch_optimization_loop import (
     run_hermes_batch_optimization_loop_command,
 )
 from pde_agent.commands.run_hypothesis_lab import run_hypothesis_lab_command
+from pde_agent.commands.run_hermes_adaptive_heartbeat import (
+    run_hermes_adaptive_heartbeat_command,
+)
 from pde_agent.commands.run_hermes_local_strategy_loop import (
     run_hermes_local_strategy_loop_command,
 )
@@ -856,6 +859,78 @@ def build_hermes_iteration_memory_cmd(
                 memory_json_path=memory_json_path,
                 submission_dir=submission_dir,
                 task_ids=task_ids,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-hermes-adaptive-heartbeat")
+def run_hermes_adaptive_heartbeat_cmd(
+    output_dir: str = typer.Option(...),
+    initial_submission_dir: str = typer.Option(...),
+    verified_blueprint_path: str | None = typer.Option(None),
+    max_policy_stages: int = typer.Option(2),
+    max_batches: int = typer.Option(1),
+    batch_deadline_seconds: float = typer.Option(16800.0),
+    max_rounds_per_batch: int = typer.Option(50),
+    checkpoint_every: int = typer.Option(5),
+    max_stagnant_batches: int = typer.Option(1),
+    min_batch_score_improvement: float = typer.Option(1.0),
+    min_score_improvement: float = typer.Option(1.0),
+    submit_score_threshold: float = typer.Option(120.0),
+    learning_objective: str = typer.Option("score"),
+    patience: int = typer.Option(10),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
+    task2_test_path: str | None = typer.Option(None),
+    task2_target_path: str | None = typer.Option(None),
+    unet_checkpoint_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    initial_candidate_generator: str = typer.Option("postprocess"),
+    postprocess_search_mode: str = typer.Option("adaptive"),
+    postprocess_strategies: list[str] = typer.Option([], "--postprocess-strategy"),
+    postprocess_blend_weights: list[float] = typer.Option(
+        [],
+        "--postprocess-blend-weight",
+    ),
+    postprocess_adaptive_step: float = typer.Option(0.125),
+    submission_id: str = typer.Option("team_hermes"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_hermes_adaptive_heartbeat_command(
+                output_dir=output_dir,
+                initial_submission_dir=initial_submission_dir,
+                verified_blueprint_path=verified_blueprint_path,
+                max_policy_stages=max_policy_stages,
+                max_batches=max_batches,
+                batch_deadline_seconds=batch_deadline_seconds,
+                max_rounds_per_batch=max_rounds_per_batch,
+                checkpoint_every=checkpoint_every,
+                max_stagnant_batches=max_stagnant_batches,
+                min_batch_score_improvement=min_batch_score_improvement,
+                min_score_improvement=min_score_improvement,
+                submit_score_threshold=submit_score_threshold,
+                learning_objective=learning_objective,
+                patience=patience,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
+                task2_test_path=task2_test_path,
+                task2_target_path=task2_target_path,
+                unet_checkpoint_path=unet_checkpoint_path,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                initial_candidate_generator=initial_candidate_generator,
+                postprocess_search_mode=postprocess_search_mode,
+                postprocess_strategies=postprocess_strategies,
+                postprocess_blend_weights=postprocess_blend_weights,
+                postprocess_adaptive_step=postprocess_adaptive_step,
+                submission_id=submission_id,
                 force=force,
             )
         )

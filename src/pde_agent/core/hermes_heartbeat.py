@@ -178,6 +178,7 @@ def run_hermes_heartbeat(
             "checkpoint_every": checkpoint_every,
             "max_stagnant_batches": max_stagnant_batches,
             "learning_objective": learning_objective,
+            "candidate_generator": candidate_generator,
             "unet_checkpoint_path": str(unet_checkpoint_path)
             if unet_checkpoint_path is not None
             else None,

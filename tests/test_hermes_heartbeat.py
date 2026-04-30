@@ -85,6 +85,7 @@ def test_hermes_heartbeat_runs_batches_and_carries_best_and_memory(
     assert report["best_candidate"]["candidate_id"] == "best_2"
     assert report["best_score"] == 90.0
     assert report["stop_reason"] == "max_batches_exhausted"
+    assert report["parameters"]["candidate_generator"] == "postprocess"
     assert Path(report["heartbeat_report_path"]).exists()
 
 
