@@ -998,7 +998,11 @@ def _checkpoint_family(checkpoint_file: Path) -> str:
 def _literature_note_card(note_file: Path) -> dict[str, Any] | None:
     if not note_file.exists():
         raise HypothesisLabError(f"literature artifact not found: {note_file}")
-    fields = _parse_literature_note(note_file.read_text(encoding="utf-8"))
+    text = note_file.read_text(encoding="utf-8")
+    expansion_card = _literature_expansion_report_card(note_file, text)
+    if expansion_card is not None:
+        return expansion_card
+    fields = _parse_literature_note(text)
     hook = fields.get("hook")
     claim = fields.get("claim")
     if not hook or not claim:
@@ -1031,6 +1035,74 @@ def _parse_literature_note(text: str) -> dict[str, str]:
         if normalized in {"title", "claim", "mechanism", "hook", "observable", "risk"}:
             fields[normalized] = value.strip()
     return fields
+
+
+def _literature_expansion_report_card(
+    note_file: Path,
+    text: str,
+) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("state_hint") != "HERMES_LITERATURE_STRATEGY_EXPANSION_RAN":
+        return None
+    skipped = [
+        item
+        for item in payload.get("skipped_candidates", [])
+        if isinstance(item, dict)
+    ]
+    blocked = [
+        item
+        for item in payload.get("actions", [])
+        if isinstance(item, dict) and item.get("executable") is False
+    ]
+    if not skipped and not blocked:
+        return None
+    skipped_ids = [
+        str(item.get("algorithm_candidate_id"))
+        for item in skipped
+        if item.get("algorithm_candidate_id")
+    ]
+    blocked_ids = [
+        str(item.get("algorithm_candidate_id"))
+        for item in blocked
+        if item.get("algorithm_candidate_id")
+    ]
+    return {
+        "card_id": f"literature_expansion_{note_file.stem}",
+        "source_type": "literature_expansion_report",
+        "source_path": str(note_file),
+        "claim": (
+            "Hermes literature expansion should avoid failed literature "
+            "candidates and prioritize candidates that can enter a bounded sandbox."
+        ),
+        "procedural_heuristic": (
+            "Convert failed or blocked literature-candidate outcomes into "
+            "negative memory before generating another hypothesis batch."
+        ),
+        "preconditions": [
+            "Hermes literature expansion has produced skipped or blocked candidates"
+        ],
+        "implementation_hooks": ["avoid_failed_literature_candidate"],
+        "expected_observables": [
+            "future candidate rankings skip remembered failures",
+            "Hermes does not repeat the same literature-candidate failure",
+        ],
+        "known_risks": [
+            "skipped="
+            + ",".join(skipped_ids or ["none"])
+            + "; blocked="
+            + ",".join(blocked_ids or ["none"])
+        ],
+        "evidence_status": "negative_memory",
+        "evidence": {
+            "skipped_candidate_ids": skipped_ids,
+            "blocked_candidate_ids": blocked_ids,
+        },
+    }
 
 
 def _adaptive_plateau_card(

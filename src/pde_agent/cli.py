@@ -217,6 +217,7 @@ from pde_agent.commands.run_hermes_convergence_loop import (
 )
 from pde_agent.commands.run_hermes_heartbeat import run_hermes_heartbeat_command
 from pde_agent.commands.run_hermes_literature_strategy_expansion import (
+    record_hermes_literature_candidate_outcome_command,
     run_hermes_literature_strategy_expansion_command,
 )
 from pde_agent.commands.run_hermes_three_stage_policy import (
@@ -1414,6 +1415,7 @@ def run_hermes_literature_strategy_expansion_cmd(
     algorithm_candidates_path: str = typer.Option(...),
     workspace_dir: str = typer.Option(...),
     checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
+    failure_memory_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1424,6 +1426,32 @@ def run_hermes_literature_strategy_expansion_cmd(
                 algorithm_candidates_path=algorithm_candidates_path,
                 workspace_dir=workspace_dir,
                 checkpoint_paths=checkpoint_paths,
+                failure_memory_path=failure_memory_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("record-hermes-literature-candidate-outcome")
+def record_hermes_literature_candidate_outcome_cmd(
+    algorithm_candidate_id: str = typer.Option(...),
+    candidate_key: str = typer.Option(...),
+    outcome: str = typer.Option(...),
+    reason_codes: list[str] = typer.Option([], "--reason-code"),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_hermes_literature_candidate_outcome_command(
+                algorithm_candidate_id=algorithm_candidate_id,
+                candidate_key=candidate_key,
+                outcome=outcome,
+                reason_codes=reason_codes,
+                output_path=output_path,
                 force=force,
             )
         )

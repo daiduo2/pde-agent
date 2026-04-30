@@ -18,6 +18,7 @@ from pde_agent.core.strategy_growth import record_strategy_proposal
 
 
 STATE_HINT = "HERMES_LITERATURE_STRATEGY_EXPANSION_RAN"
+FAILURE_MEMORY_STATE_HINT = "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED"
 
 
 class HermesLiteratureExpansionError(RuntimeError):
@@ -29,6 +30,7 @@ def run_hermes_literature_strategy_expansion(
     algorithm_candidates_path: str | Path,
     workspace_dir: str | Path,
     checkpoint_paths: list[str | Path] | None = None,
+    failure_memory_path: str | Path | None = None,
     force: bool,
 ) -> dict[str, Any]:
     candidates_file = Path(algorithm_candidates_path)
@@ -50,8 +52,30 @@ def run_hermes_literature_strategy_expansion(
     )
 
     checkpoints = [Path(path) for path in checkpoint_paths or []]
+    failure_memory = (
+        _read_failure_memory(Path(failure_memory_path))
+        if failure_memory_path is not None
+        else {}
+    )
+    candidate_rankings = _rank_candidates(
+        _candidate_list(candidates_report),
+        checkpoint_paths=checkpoints,
+        failure_memory=failure_memory,
+    )
+    skipped_candidates = [
+        ranking
+        for ranking in candidate_rankings
+        if ranking.get("skip_reason") == "failed_memory"
+    ]
     actions: list[dict[str, Any]] = []
-    for candidate in _candidate_list(candidates_report):
+    candidates_by_id = {
+        candidate["algorithm_candidate_id"]: candidate
+        for candidate in _candidate_list(candidates_report)
+    }
+    for ranking in candidate_rankings:
+        if ranking.get("skip_reason"):
+            continue
+        candidate = candidates_by_id[str(ranking["algorithm_candidate_id"])]
         action = _expand_candidate(
             candidate=candidate,
             candidates_file=candidates_file,
@@ -65,6 +89,16 @@ def run_hermes_literature_strategy_expansion(
     proposal_count = sum(
         1 for action in actions if action.get("strategy_proposal_path")
     )
+    sandbox_queue = [
+        str(action["sandbox_plan_path"])
+        for action in actions
+        if action.get("sandbox_plan_path")
+    ]
+    strategy_growth_queue = [
+        str(action["strategy_proposal_path"])
+        for action in actions
+        if action.get("strategy_proposal_path")
+    ]
     report = {
         "schema_version": 1,
         "state_hint": STATE_HINT,
@@ -74,11 +108,142 @@ def run_hermes_literature_strategy_expansion(
         "action_count": len(actions),
         "executable_count": executable_count,
         "proposal_count": proposal_count,
+        "skipped_count": len(skipped_candidates),
+        "candidate_rankings": candidate_rankings,
+        "skipped_candidates": skipped_candidates,
+        "sandbox_queue": sandbox_queue,
+        "strategy_growth_queue": strategy_growth_queue,
+        "selection_policy": {
+            "ordered_by": [
+                "skip failed-memory candidates",
+                "prefer checkpoint adapters when a resource is available",
+                "then existing bounded executors",
+                "then executor-design proposals",
+            ],
+            "failure_memory_path": str(failure_memory_path)
+            if failure_memory_path is not None
+            else None,
+        },
         "actions": actions,
         "next_command": _next_command(actions),
     }
     _write_json(report_path, report)
     return report
+
+
+def record_hermes_literature_candidate_outcome(
+    *,
+    algorithm_candidate_id: str,
+    candidate_key: str,
+    outcome: str,
+    reason_codes: list[str],
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    output_file = Path(output_path)
+    if output_file.exists() and not force:
+        memory = _read_failure_memory(output_file)
+    else:
+        memory = {
+            "schema_version": 1,
+            "state_hint": FAILURE_MEMORY_STATE_HINT,
+            "failed_algorithm_candidate_ids": [],
+            "failed_candidate_keys": [],
+            "outcomes": [],
+        }
+    selected_id = _text(algorithm_candidate_id, "algorithm_candidate_id")
+    selected_key = _text(candidate_key, "candidate_key")
+    normalized_outcome = _text(outcome, "outcome")
+    if normalized_outcome not in {"failed", "passed", "blocked"}:
+        raise HermesLiteratureExpansionError(f"unsupported outcome: {outcome}")
+    outcomes = memory.setdefault("outcomes", [])
+    if not isinstance(outcomes, list):
+        outcomes = []
+        memory["outcomes"] = outcomes
+    outcomes.append(
+        {
+            "algorithm_candidate_id": selected_id,
+            "candidate_key": selected_key,
+            "outcome": normalized_outcome,
+            "reason_codes": [item for item in reason_codes if isinstance(item, str)],
+        }
+    )
+    if normalized_outcome == "failed":
+        _append_unique(memory, "failed_algorithm_candidate_ids", selected_id)
+        _append_unique(memory, "failed_candidate_keys", selected_key)
+    _write_json(output_file, memory)
+    return memory
+
+
+def _rank_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    checkpoint_paths: list[Path],
+    failure_memory: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rankings = []
+    failed_ids = set(_string_list(failure_memory.get("failed_algorithm_candidate_ids")))
+    failed_keys = set(_string_list(failure_memory.get("failed_candidate_keys")))
+    for index, candidate in enumerate(candidates):
+        candidate_id = _text(
+            candidate.get("algorithm_candidate_id"),
+            "algorithm_candidate_id",
+        )
+        route, score = _candidate_route(candidate, checkpoint_paths=checkpoint_paths)
+        key = _candidate_key(candidate)
+        ranking = {
+            "algorithm_candidate_id": candidate_id,
+            "candidate_key": key,
+            "route": route,
+            "selection_score": score,
+            "source_order": index,
+        }
+        if candidate_id in failed_ids or key in failed_keys:
+            ranking["skip_reason"] = "failed_memory"
+            ranking["selection_score"] = -1
+        rankings.append(ranking)
+    return sorted(
+        rankings,
+        key=lambda item: (
+            1 if item.get("skip_reason") else 0,
+            -float(item["selection_score"]),
+            int(item["source_order"]),
+        ),
+    )
+
+
+def _candidate_route(
+    candidate: dict[str, Any],
+    *,
+    checkpoint_paths: list[Path],
+) -> tuple[str, float]:
+    executor = candidate.get("executor_spec")
+    if not isinstance(executor, dict):
+        return "invalid", 0.0
+    cli_command = executor.get("cli_command")
+    if (
+        cli_command == "blocked_requires_executor_design"
+        and executor.get("unsupported_hook") == "fourier_neural_operator_architecture"
+        and checkpoint_paths
+    ):
+        return "checkpoint_adapter", 100.0
+    if cli_command == "blocked_requires_executor_design":
+        return "executor_design", 10.0
+    return "existing_executor", 80.0
+
+
+def _candidate_key(candidate: dict[str, Any]) -> str:
+    grounding = candidate.get("source_grounding")
+    if not isinstance(grounding, dict):
+        grounding = {}
+    card_id = grounding.get("algorithm_card_id")
+    executor = candidate.get("executor_spec")
+    hook = executor.get("unsupported_hook") if isinstance(executor, dict) else None
+    family = candidate.get("candidate_family")
+    return "|".join(
+        str(part)
+        for part in [card_id or "unknown_card", hook or family or "unknown_family"]
+    )
 
 
 def _expand_candidate(
@@ -239,6 +404,22 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _append_unique(memory: dict[str, Any], key: str, value: str) -> None:
+    values = memory.setdefault(key, [])
+    if not isinstance(values, list):
+        values = []
+        memory[key] = values
+    if value not in values:
+        values.append(value)
+
+
+def _read_failure_memory(path: Path) -> dict[str, Any]:
+    memory = _read_json(path)
+    if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
+        raise HermesLiteratureExpansionError("failure memory has invalid state_hint")
+    return memory
 
 
 def _read_json(path: Path) -> dict[str, Any]:
