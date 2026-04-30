@@ -479,6 +479,50 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=40,
         ),
         _entry(
+            strategy_id="task1_retrieval_prior_v0",
+            title="Task 1 affine kNN trajectory retrieval prior",
+            model_families=["DataInference", "RetrievalPrior", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "task1_accuracy_plateau",
+                "persistence_plateau",
+                "long_horizon_drift",
+                "late_window_rmse",
+            ],
+            hypothesis=(
+                "The provided Task 1 validation trajectories contain reusable "
+                "long-horizon Burgers solution patterns; matching the first 10 "
+                "frames to a reference library and affine-normalizing retrieved "
+                "futures can improve accuracy without expensive model training."
+            ),
+            mechanism=(
+                "Build a z-normalized context nearest-neighbor index over full "
+                "reference trajectories, average the top-k future windows, and "
+                "affine-map neighbor futures to the query context statistics."
+            ),
+            implementation_hooks=[
+                "predict-task1-retrieval-prior",
+                "materialize-competition-candidate",
+                "judge-hermes-submission",
+            ],
+            expected_observables=[
+                "large Task 1 segment score improvement under leave-one-out validation",
+                "early and middle Rel-MSE improve compared with persistence",
+                "inference remains far below 120 seconds",
+            ],
+            known_risks=[
+                "nearest-neighbor validation can overestimate hidden-test transfer",
+                "reference library distribution may not cover all hidden contexts",
+                "affine normalization can smooth rare shock amplitudes",
+            ],
+            acceptance_criteria=[
+                "leave-one-out validation beats the current Task 1 plateau",
+                "candidate materialization and submission audit pass",
+                "hidden-test inference uses only the first 10 test frames and the reference library",
+            ],
+            priority=1,
+        ),
+        _entry(
             strategy_id="data_inference_linear_trend_spectral_v0",
             title="Damped trend plus spectral smoothing for Burgers persistence plateau",
             model_families=["DataInference", "all"],

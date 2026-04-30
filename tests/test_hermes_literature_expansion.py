@@ -375,6 +375,7 @@ def test_build_local_asset_algorithm_candidates_from_library_and_checkpoints(
         if candidate["candidate_family"] == "local_strategy_skill"
     )
     assert strategy_candidate["executor_spec"]["cli_command"] in (
+        "predict-task1-retrieval-prior",
         "run-hypothesis-lab",
         "run-hermes-operator-tuning-loop",
         "run-burgers-spectral-viscosity-benchmark",

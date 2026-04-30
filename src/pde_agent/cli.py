@@ -141,6 +141,9 @@ from pde_agent.commands.predict_fno_local import predict_fno_local
 from pde_agent.commands.predict_fno_competition import (
     predict_fno_competition_command,
 )
+from pde_agent.commands.predict_task1_retrieval_prior import (
+    predict_task1_retrieval_prior_command,
+)
 from pde_agent.commands.predict_unet_local import predict_unet_local
 from pde_agent.commands.predict_unet_competition import (
     predict_unet_competition_command,
@@ -3704,6 +3707,35 @@ def predict_fno_competition_cmd(
                 checkpoint_path=checkpoint_path,
                 output_dir=output_dir,
                 dataset_key=dataset_key,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("predict-task1-retrieval-prior")
+def predict_task1_retrieval_prior_cmd(
+    reference_path: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    k: int = typer.Option(20),
+    mode: str = typer.Option("affine"),
+    leave_one_out: bool = typer.Option(False, "--leave-one-out"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            predict_task1_retrieval_prior_command(
+                reference_path=reference_path,
+                test_path=test_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                k=k,
+                mode=mode,
+                leave_one_out=leave_one_out,
                 force=force,
             )
         )
