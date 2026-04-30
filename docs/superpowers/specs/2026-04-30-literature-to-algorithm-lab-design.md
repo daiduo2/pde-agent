@@ -445,3 +445,12 @@ Phase 1 is intentionally offline. It validates artifact contracts and candidate
 handoff semantics with local fixture data before adding live source retrieval or
 MinerU runtime execution. Network retrieval and parser invocation remain smoke
 test concerns for later phases.
+
+## Phase 2a Implementation Note
+
+Phase 2a adds network-capable retrieval and MinerU task commands while keeping
+ordinary tests fixture-only. OpenAlex, arXiv, and GitHub search results are
+normalized into source candidates before any document is downloaded. MinerU
+precise parsing reads credentials only from the `MINERU_API_TOKEN` environment
+variable; the token must not be written into source records, task reports, logs,
+or commits.
