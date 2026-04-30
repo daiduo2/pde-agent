@@ -19,6 +19,7 @@ from pde_agent.core.strategy_growth import record_strategy_proposal
 
 STATE_HINT = "HERMES_LITERATURE_STRATEGY_EXPANSION_RAN"
 FAILURE_MEMORY_STATE_HINT = "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED"
+LOCAL_ASSET_CANDIDATES_STATE_HINT = "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT"
 
 
 class HermesLiteratureExpansionError(RuntimeError):
@@ -125,9 +126,68 @@ def run_hermes_literature_strategy_expansion(
             else None,
         },
         "actions": actions,
-        "next_command": _next_command(actions),
+        "next_command": _next_command(
+            actions,
+            skipped_count=len(skipped_candidates),
+        ),
     }
+    recovery_plan = _recovery_plan(actions=actions, skipped_candidates=skipped_candidates)
+    if recovery_plan is not None:
+        report["recovery_plan"] = recovery_plan
     _write_json(report_path, report)
+    return report
+
+
+def build_local_asset_algorithm_candidates(
+    *,
+    local_strategy_library_path: str | Path,
+    checkpoint_paths: list[str | Path] | None,
+    output_path: str | Path,
+    max_strategy_candidates: int,
+    force: bool,
+) -> dict[str, Any]:
+    if max_strategy_candidates < 0:
+        raise HermesLiteratureExpansionError("max_strategy_candidates must be >= 0")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    library = _read_json(Path(local_strategy_library_path))
+    if library.get("state_hint") != "LOCAL_STRATEGY_LIBRARY_BUILT":
+        raise HermesLiteratureExpansionError(
+            "local strategy library has invalid state_hint"
+        )
+    entries = library.get("entries")
+    if not isinstance(entries, list):
+        raise HermesLiteratureExpansionError(
+            "local strategy library entries must be a list"
+        )
+    candidates = []
+    for checkpoint_path in checkpoint_paths or []:
+        checkpoint_file = _require_file(Path(checkpoint_path), "checkpoint")
+        candidates.append(_checkpoint_asset_candidate(checkpoint_file))
+    ranked_entries = sorted(
+        [entry for entry in entries if isinstance(entry, dict)],
+        key=lambda entry: (
+            int(entry.get("priority", 999)),
+            str(entry.get("strategy_id", "")),
+        ),
+    )
+    for entry in ranked_entries[:max_strategy_candidates]:
+        candidates.append(_local_strategy_asset_candidate(entry))
+    if not candidates:
+        raise HermesLiteratureExpansionError(
+            "local asset candidate generation produced no candidates"
+        )
+    report = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": LOCAL_ASSET_CANDIDATES_STATE_HINT,
+        "algorithm_candidates_path": str(output_file),
+        "local_strategy_library_path": str(local_strategy_library_path),
+        "algorithm_candidate_count": len(candidates),
+        "algorithm_candidates": candidates,
+        "next_command": "run-hermes-literature-strategy-expansion",
+    }
+    _write_json(output_file, report)
     return report
 
 
@@ -149,6 +209,7 @@ def record_hermes_literature_candidate_outcome(
             "state_hint": FAILURE_MEMORY_STATE_HINT,
             "failed_algorithm_candidate_ids": [],
             "failed_candidate_keys": [],
+            "failed_candidate_families": [],
             "outcomes": [],
         }
     selected_id = _text(algorithm_candidate_id, "algorithm_candidate_id")
@@ -171,6 +232,11 @@ def record_hermes_literature_candidate_outcome(
     if normalized_outcome == "failed":
         _append_unique(memory, "failed_algorithm_candidate_ids", selected_id)
         _append_unique(memory, "failed_candidate_keys", selected_key)
+        for family in _failed_candidate_families_for_outcome(
+            candidate_key=selected_key,
+            reason_codes=reason_codes,
+        ):
+            _append_unique(memory, "failed_candidate_families", family)
     _write_json(output_file, memory)
     return memory
 
@@ -184,6 +250,7 @@ def _rank_candidates(
     rankings = []
     failed_ids = set(_string_list(failure_memory.get("failed_algorithm_candidate_ids")))
     failed_keys = set(_string_list(failure_memory.get("failed_candidate_keys")))
+    failed_families = set(_string_list(failure_memory.get("failed_candidate_families")))
     for index, candidate in enumerate(candidates):
         candidate_id = _text(
             candidate.get("algorithm_candidate_id"),
@@ -191,14 +258,20 @@ def _rank_candidates(
         )
         route, score = _candidate_route(candidate, checkpoint_paths=checkpoint_paths)
         key = _candidate_key(candidate)
+        family = str(candidate.get("candidate_family", "")).strip()
         ranking = {
             "algorithm_candidate_id": candidate_id,
+            "candidate_family": family,
             "candidate_key": key,
             "route": route,
             "selection_score": score,
             "source_order": index,
         }
-        if candidate_id in failed_ids or key in failed_keys:
+        if (
+            candidate_id in failed_ids
+            or key in failed_keys
+            or family in failed_families
+        ):
             ranking["skip_reason"] = "failed_memory"
             ranking["selection_score"] = -1
         rankings.append(ranking)
@@ -335,6 +408,136 @@ def _expand_candidate(
     }
 
 
+def _checkpoint_asset_candidate(checkpoint_file: Path) -> dict[str, Any]:
+    family = _checkpoint_family(checkpoint_file)
+    candidate_id = f"candidate_local_checkpoint_{_slug(checkpoint_file.stem)}"
+    return {
+        "algorithm_candidate_id": candidate_id,
+        "parent_algorithm_card_id": f"local_checkpoint_{_slug(checkpoint_file.stem)}",
+        "candidate_family": "official_checkpoint_family",
+        "target_problem": "PDE_Burgers",
+        "target_task": "task1",
+        "model_family": "checkpoint",
+        "hypothesis": (
+            f"Evaluate local {family} checkpoint as a bounded candidate family "
+            "after literature candidates are exhausted."
+        ),
+        "mechanism": (
+            "Route the local checkpoint through the audited checkpoint-family "
+            "sandbox and compare calibration weights against persistence."
+        ),
+        "executor_spec": {
+            "cli_command": "run-checkpoint-family-sandbox",
+            "required_options": [
+                "--checkpoint-path",
+                "--task-id",
+                "--test-path",
+                "--target-path",
+                "--output-dir",
+            ],
+        },
+        "parameter_grid": {
+            "calibration_weights": [0.0, 0.25, 0.5, 1.0],
+            "fno_finetune_steps": [0],
+        },
+        "resource_bindings": {"checkpoint_paths": [str(checkpoint_file)]},
+        "benchmark_plan": {
+            "judge": "hermes_local_judge",
+            "primary_metric": "task1_total_score_proxy",
+            "sandbox_level": 1,
+        },
+        "ablation_plan": {
+            "baseline": "persistence_or_current_best",
+            "contrast": "checkpoint_adapter_disabled",
+        },
+        "promotion_criteria": {
+            "min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+            "requires_ablation": True,
+        },
+        "risk_controls": [
+            "preserve first 10 context steps",
+            "verify checkpoint tensor convention before promotion",
+        ],
+        "source_grounding": {
+            "source_ids": [str(checkpoint_file)],
+            "algorithm_card_id": f"local_checkpoint_{_slug(checkpoint_file.stem)}",
+        },
+    }
+
+
+def _local_strategy_asset_candidate(entry: dict[str, Any]) -> dict[str, Any]:
+    strategy_id = _text(entry.get("strategy_id"), "strategy_id")
+    hooks = _string_list(entry.get("implementation_hooks"))
+    cli_command = _preferred_cli_hook(hooks)
+    return {
+        "algorithm_candidate_id": f"candidate_local_strategy_{_slug(strategy_id)}",
+        "parent_algorithm_card_id": f"local_strategy_{_slug(strategy_id)}",
+        "candidate_family": "local_strategy_skill",
+        "target_problem": "PDE_Burgers",
+        "target_task": "task1",
+        "model_family": _primary_model_family(entry),
+        "hypothesis": _text(entry.get("hypothesis"), "hypothesis"),
+        "mechanism": _text(entry.get("mechanism"), "mechanism"),
+        "executor_spec": {
+            "cli_command": cli_command,
+            "required_options": [],
+            "implementation_hooks": hooks,
+        },
+        "parameter_grid": {"candidate_enabled": [True]},
+        "benchmark_plan": {
+            "judge": "hermes_local_judge",
+            "primary_metric": "task1_total_score_proxy",
+            "sandbox_level": 2,
+        },
+        "ablation_plan": {
+            "baseline": "persistence_or_current_best",
+            "contrast": "local_strategy_disabled",
+        },
+        "promotion_criteria": {
+            "min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+            "requires_ablation": True,
+        },
+        "risk_controls": _string_list(entry.get("known_risks")),
+        "source_grounding": {
+            "source_ids": [strategy_id],
+            "algorithm_card_id": f"local_strategy_{_slug(strategy_id)}",
+            "source_type": entry.get("source_type"),
+            "title": entry.get("title"),
+        },
+    }
+
+
+def _preferred_cli_hook(hooks: list[str]) -> str:
+    preferred = [
+        "run-hypothesis-lab",
+        "run-hermes-operator-tuning-loop",
+        "run-burgers-spectral-viscosity-benchmark",
+        "execute-fno-finetune-candidate",
+        "predict-fno-competition",
+        "predict-unet-competition",
+    ]
+    for hook in preferred:
+        if hook in hooks:
+            return hook
+    return hooks[0] if hooks else "review-local-strategy-candidate"
+
+
+def _primary_model_family(entry: dict[str, Any]) -> str:
+    families = _string_list(entry.get("model_families"))
+    return families[0] if families else "all"
+
+
+def _checkpoint_family(checkpoint_file: Path) -> str:
+    name = checkpoint_file.name.lower()
+    if "unet" in name:
+        return "UNet"
+    if "fno" in name:
+        return "FNO"
+    return "NeuralOperator"
+
+
 def _record_design_strategy_proposal(
     *,
     request: dict[str, Any],
@@ -390,14 +593,38 @@ def _candidate_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def _next_command(actions: list[dict[str, Any]]) -> str:
+def _next_command(actions: list[dict[str, Any]], *, skipped_count: int = 0) -> str:
     for action in actions:
         if action.get("executable") is True:
             return str(action["next_command"])
     for action in actions:
         if action.get("strategy_proposal_path"):
             return str(action["next_command"])
+    if skipped_count > 0:
+        return "build-local-asset-algorithm-candidates"
     return "review-hermes-literature-expansion"
+
+
+def _recovery_plan(
+    *,
+    actions: list[dict[str, Any]],
+    skipped_candidates: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if actions or not skipped_candidates:
+        return None
+    return {
+        "reason": "candidate_pool_exhausted",
+        "next_command": "build-local-asset-algorithm-candidates",
+        "recommended_inputs": {
+            "local_strategy_library_path": "runs/local_strategy_library.json",
+            "checkpoint_paths": [
+                "data/pdebench/checkpoints/burgers_FNO.tar",
+                "data/pdebench/checkpoints/burgers_Unet.tar",
+            ],
+            "max_strategy_candidates": 5,
+        },
+        "follow_up_command": "run-hermes-literature-strategy-expansion",
+    }
 
 
 def _string_list(value: Any) -> list[str]:
@@ -415,6 +642,28 @@ def _append_unique(memory: dict[str, Any], key: str, value: str) -> None:
         values.append(value)
 
 
+def _failed_candidate_families_for_outcome(
+    *,
+    candidate_key: str,
+    reason_codes: list[str],
+) -> list[str]:
+    reason_text = " ".join(
+        code.lower() for code in reason_codes if isinstance(code, str)
+    )
+    key_text = candidate_key.lower()
+    if (
+        "checkpoint_adapter" in reason_text
+        or "checkpoint_weight" in reason_text
+        or "best_is_persistence" in reason_text
+        or (
+            "fourier_neural_operator_architecture" in key_text
+            and "checkpoint" in reason_text
+        )
+    ):
+        return ["official_checkpoint_family"]
+    return []
+
+
 def _read_failure_memory(path: Path) -> dict[str, Any]:
     memory = _read_json(path)
     if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
@@ -429,6 +678,12 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise HermesLiteratureExpansionError("JSON artifact must be an object")
     return value
+
+
+def _require_file(path: Path, label: str) -> Path:
+    if not path.is_file():
+        raise HermesLiteratureExpansionError(f"{label} not found: {path}")
+    return path
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

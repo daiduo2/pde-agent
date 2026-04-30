@@ -4,7 +4,9 @@ from pathlib import Path
 
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
+    LOCAL_ASSET_CANDIDATES_STATE_HINT,
     STATE_HINT,
+    build_local_asset_algorithm_candidates,
     record_hermes_literature_candidate_outcome,
     run_hermes_literature_strategy_expansion,
 )
@@ -38,6 +40,34 @@ def run_hermes_literature_strategy_expansion_command(
             "executable_count": report["executable_count"],
             "proposal_count": report["proposal_count"],
             "skipped_count": report["skipped_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def build_local_asset_algorithm_candidates_command(
+    *,
+    local_strategy_library_path: str,
+    checkpoint_paths: list[str] | None,
+    output_path: str,
+    max_strategy_candidates: int,
+    force: bool,
+) -> dict[str, object]:
+    report = build_local_asset_algorithm_candidates(
+        local_strategy_library_path=Path(local_strategy_library_path),
+        checkpoint_paths=[Path(path) for path in (checkpoint_paths or [])],
+        output_path=Path(output_path),
+        max_strategy_candidates=max_strategy_candidates,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="build-local-asset-algorithm-candidates",
+        state_hint="ALGORITHM_CANDIDATES_COMPILED",
+        artifacts={"algorithm_candidates_path": report["algorithm_candidates_path"]},
+        metrics={
+            "source_state_hint": LOCAL_ASSET_CANDIDATES_STATE_HINT,
+            "algorithm_candidate_count": report["algorithm_candidate_count"],
         },
         next_hint=report["next_command"],
     )

@@ -217,6 +217,7 @@ from pde_agent.commands.run_hermes_convergence_loop import (
 )
 from pde_agent.commands.run_hermes_heartbeat import run_hermes_heartbeat_command
 from pde_agent.commands.run_hermes_literature_strategy_expansion import (
+    build_local_asset_algorithm_candidates_command,
     record_hermes_literature_candidate_outcome_command,
     run_hermes_literature_strategy_expansion_command,
 )
@@ -1452,6 +1453,29 @@ def record_hermes_literature_candidate_outcome_cmd(
                 outcome=outcome,
                 reason_codes=reason_codes,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-local-asset-algorithm-candidates")
+def build_local_asset_algorithm_candidates_cmd(
+    local_strategy_library_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
+    max_strategy_candidates: int = typer.Option(5),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_local_asset_algorithm_candidates_command(
+                local_strategy_library_path=local_strategy_library_path,
+                checkpoint_paths=checkpoint_paths,
+                output_path=output_path,
+                max_strategy_candidates=max_strategy_candidates,
                 force=force,
             )
         )

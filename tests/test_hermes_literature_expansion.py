@@ -243,6 +243,54 @@ def test_record_hermes_literature_candidate_outcome_adds_failure_memory(
     ]
 
 
+def test_checkpoint_failure_memory_skips_local_checkpoint_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        build_local_asset_algorithm_candidates,
+        record_hermes_literature_candidate_outcome,
+        run_hermes_literature_strategy_expansion,
+    )
+    from pde_agent.core.local_strategy_library import build_local_strategy_library
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+    checkpoint = tmp_path / "burgers_FNO.tar"
+    checkpoint.write_bytes(b"checkpoint")
+    candidates = build_local_asset_algorithm_candidates(
+        local_strategy_library_path=library_path,
+        checkpoint_paths=[checkpoint],
+        output_path=tmp_path / "local_asset_candidates.json",
+        max_strategy_candidates=2,
+        force=False,
+    )
+    memory = record_hermes_literature_candidate_outcome(
+        algorithm_candidate_id="candidate_fno_blocked",
+        candidate_key="card_fno|fourier_neural_operator_architecture",
+        outcome="failed",
+        reason_codes=["checkpoint_adapter_best_is_persistence"],
+        output_path=tmp_path / "failure_memory.json",
+        force=False,
+    )
+
+    assert memory["failed_candidate_families"] == ["official_checkpoint_family"]
+
+    report = run_hermes_literature_strategy_expansion(
+        algorithm_candidates_path=candidates["algorithm_candidates_path"],
+        workspace_dir=tmp_path / "workspace",
+        checkpoint_paths=[checkpoint],
+        failure_memory_path=tmp_path / "failure_memory.json",
+        force=False,
+    )
+
+    assert report["skipped_candidates"][0]["candidate_family"] == (
+        "official_checkpoint_family"
+    )
+    assert report["actions"][0]["algorithm_candidate_id"].startswith(
+        "candidate_local_strategy_"
+    )
+
+
 def test_hypothesis_lab_builds_card_from_literature_expansion_failure(
     tmp_path: Path,
 ) -> None:
@@ -283,6 +331,130 @@ def test_hypothesis_lab_builds_card_from_literature_expansion_failure(
     assert card["source_type"] == "literature_expansion_report"
     assert card["implementation_hooks"] == ["avoid_failed_literature_candidate"]
     assert "candidate_old" in card["known_risks"][0]
+
+
+def test_build_local_asset_algorithm_candidates_from_library_and_checkpoints(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        build_local_asset_algorithm_candidates,
+    )
+    from pde_agent.core.local_strategy_library import build_local_strategy_library
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+    checkpoint = tmp_path / "burgers_FNO.tar"
+    checkpoint.write_bytes(b"checkpoint")
+
+    report = build_local_asset_algorithm_candidates(
+        local_strategy_library_path=library_path,
+        checkpoint_paths=[checkpoint],
+        output_path=tmp_path / "local_asset_candidates.json",
+        max_strategy_candidates=4,
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CANDIDATES_COMPILED"
+    assert report["source_state_hint"] == "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT"
+    families = {
+        candidate["candidate_family"] for candidate in report["algorithm_candidates"]
+    }
+    assert "official_checkpoint_family" in families
+    assert "local_strategy_skill" in families
+    checkpoint_candidate = next(
+        candidate
+        for candidate in report["algorithm_candidates"]
+        if candidate["candidate_family"] == "official_checkpoint_family"
+    )
+    assert checkpoint_candidate["resource_bindings"]["checkpoint_paths"] == [
+        str(checkpoint)
+    ]
+    strategy_candidate = next(
+        candidate
+        for candidate in report["algorithm_candidates"]
+        if candidate["candidate_family"] == "local_strategy_skill"
+    )
+    assert strategy_candidate["executor_spec"]["cli_command"] in (
+        "run-hypothesis-lab",
+        "run-hermes-operator-tuning-loop",
+        "run-burgers-spectral-viscosity-benchmark",
+    )
+
+
+def test_empty_literature_queue_points_to_local_asset_candidate_recovery(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        run_hermes_literature_strategy_expansion,
+    )
+
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    _blocked_fno_candidates(candidates_path)
+    checkpoint = tmp_path / "burgers_FNO.tar"
+    checkpoint.write_bytes(b"checkpoint")
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [
+                    "candidate_fno_blocked",
+                ],
+                "failed_candidate_keys": [],
+                "outcomes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_hermes_literature_strategy_expansion(
+        algorithm_candidates_path=candidates_path,
+        workspace_dir=tmp_path / "workspace",
+        checkpoint_paths=[checkpoint],
+        failure_memory_path=memory_path,
+        force=False,
+    )
+
+    assert report["action_count"] == 0
+    assert report["skipped_count"] == 1
+    assert report["next_command"] == "build-local-asset-algorithm-candidates"
+    assert report["recovery_plan"]["reason"] == "candidate_pool_exhausted"
+    assert report["recovery_plan"]["next_command"] == (
+        "build-local-asset-algorithm-candidates"
+    )
+
+
+def test_build_local_asset_algorithm_candidates_cli_returns_payload(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+    from pde_agent.core.local_strategy_library import build_local_strategy_library
+
+    library_path = tmp_path / "library.json"
+    output_path = tmp_path / "local_asset_candidates.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-local-asset-algorithm-candidates",
+            "--local-strategy-library-path",
+            str(library_path),
+            "--output-path",
+            str(output_path),
+            "--max-strategy-candidates",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "ALGORITHM_CANDIDATES_COMPILED"
+    assert payload["metrics"]["algorithm_candidate_count"] == 2
+    assert payload["next_hint"] == "run-hermes-literature-strategy-expansion"
 
 
 def test_record_hermes_literature_candidate_outcome_cli_returns_payload(
