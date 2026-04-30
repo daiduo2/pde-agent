@@ -251,6 +251,48 @@ def _local_asset_algorithm_candidates(path: Path) -> Path:
     return path
 
 
+def _retrieval_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": "candidate_local_strategy_task1_retrieval_prior_v0",
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "DataInference",
+                "hypothesis": (
+                    "Affine kNN retrieval over Task 1 validation trajectories can "
+                    "escape the persistence plateau."
+                ),
+                "mechanism": (
+                    "Match first 10 frames against a reference library and affine-map "
+                    "the retrieved futures to query context statistics."
+                ),
+                "executor_spec": {
+                    "cli_command": "predict-task1-retrieval-prior",
+                    "implementation_hooks": [
+                        "predict-task1-retrieval-prior",
+                        "materialize-competition-candidate",
+                    ],
+                },
+                "expected_observables": [
+                    "leave-one-out segment score improves over persistence"
+                ],
+                "risk_controls": ["nearest-neighbor validation can overfit"],
+                "source_grounding": {
+                    "algorithm_card_id": "local_strategy_task1_retrieval_prior_v0",
+                    "source_ids": ["task1_retrieval_prior_v0"],
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -327,6 +369,39 @@ def test_hypothesis_lab_builds_cards_from_algorithm_candidates(
     )
     hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
     assert hypotheses["hypotheses"][0]["candidate_family"] == "linear_trend_spectral"
+
+
+def test_hypothesis_lab_builds_retrieval_prior_from_algorithm_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _retrieval_asset_algorithm_candidates(tmp_path / "retrieval_candidates.json")
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == ["task1_retrieval_prior"]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == "task1_retrieval_prior"
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["candidate_family"] == "task1_retrieval_prior"
+    assert blueprint["sandbox"]["allowed_executor"] == "controlled_numpy_retrieval_prior"
+    assert blueprint["parameter_grid"]["k"] == [8, 12, 20]
+    assert blueprint["parameter_grid"]["mode"] == ["affine"]
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
@@ -784,6 +859,50 @@ def test_hypothesis_lab_sandbox_executes_learned_residual_correction(
     assert sandbox["best_candidate"]["candidate_id"].startswith("learned_residual")
     assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
     assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+
+
+def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.2, 0.4]):
+        for step in range(200):
+            target[sample, step, :] = (
+                offset
+                + np.float32(0.01 * step)
+                + np.float32(0.1) * np.sin(x + np.float32(0.01 * step))
+            )
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_retrieval_prior_001",
+        "candidate_family": "task1_retrieval_prior",
+        "search_mode": "affine_knn_trajectory_prior",
+        "parameter_grid": {"k": [1, 2], "mode": ["affine"]},
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["best_candidate"]["candidate_id"].startswith("task1_retrieval_prior")
+    assert sandbox["best_candidate"]["params"]["mode"] == "affine"
+    assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+    assert sandbox["best_candidate"]["metadata"]["leave_one_out"] is True
 
 
 def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(

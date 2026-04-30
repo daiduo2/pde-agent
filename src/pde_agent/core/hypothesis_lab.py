@@ -22,6 +22,7 @@ from pde_agent.core.manual_operator_tuning import (
     spectral_smooth_prediction,
 )
 from pde_agent.core.strategy_growth import record_strategy_proposal
+from pde_agent.core.task1_retrieval_prior import predict_retrieval_prior
 
 
 CARDS_STATE_HINT = "HYPOTHESIS_LAB_KNOWLEDGE_CARDS_BUILT"
@@ -131,7 +132,30 @@ def generate_hypotheses(
             grouped_cards.setdefault("official_checkpoint_calibration", []).append(card)
         if "learned_residual_correction" in hooks:
             grouped_cards.setdefault("learned_residual_correction", []).append(card)
+        if "task1_retrieval_prior" in hooks:
+            grouped_cards.setdefault("task1_retrieval_prior", []).append(card)
     hypotheses = []
+    if "task1_retrieval_prior" in grouped_cards:
+        source_cards = grouped_cards["task1_retrieval_prior"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_retrieval_prior_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_retrieval_prior",
+                "mechanism": (
+                    "Use affine-normalized nearest-neighbor trajectory retrieval "
+                    "from a Task 1 reference library to escape the persistence "
+                    "and postprocessing plateau without model training."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -3,
+            }
+        )
     if "official_checkpoint_calibration" in grouped_cards:
         source_cards = grouped_cards["official_checkpoint_calibration"]
         hypotheses.append(
@@ -341,6 +365,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         priority = int(item.get("priority", 10))
         novelty_bonus = {
             "official_checkpoint_calibration": 45.0,
+            "task1_retrieval_prior": 43.0,
             "learned_residual_correction": 40.0,
             "linear_trend_late_spectral_ramp": 25.0,
             "linear_trend_spectral_escape": 20.0,
@@ -435,6 +460,40 @@ def design_algorithm_blueprints(
                         ),
                     },
                     "next_command": "run-checkpoint-family-sandbox",
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_retrieval_prior":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_retrieval_prior_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_retrieval_prior",
+                    "search_mode": "affine_knn_trajectory_prior",
+                    "algorithm": {
+                        "summary": (
+                            "Retrieve full Burgers trajectories whose first 10 "
+                            "frames match the query context, then affine-normalize "
+                            "their future windows to the query statistics."
+                        ),
+                        "pseudocode": [
+                            "reference = validation trajectories",
+                            "neighbors = top-k z-normalized context matches",
+                            "future = affine_denormalize(weighted_neighbor_futures)",
+                            "prediction = concat(query_context, future)",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "k": [8, 12, 20],
+                        "mode": ["affine"],
+                    },
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_retrieval_prior",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
                     "risks": hypothesis.get("known_risks", []),
                 }
             )
@@ -602,7 +661,11 @@ def run_blueprint_sandbox(
     force: bool,
 ) -> dict[str, Any]:
     family = str(blueprint.get("candidate_family"))
-    if family not in {"linear_trend_spectral", "learned_residual_correction"}:
+    if family not in {
+        "linear_trend_spectral",
+        "learned_residual_correction",
+        "task1_retrieval_prior",
+    }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
         )
@@ -634,6 +697,12 @@ def run_blueprint_sandbox(
             {
                 "candidate_id": _candidate_id(params),
                 "params": params,
+                "metadata": _candidate_metadata(
+                    family=family,
+                    context=context,
+                    target=target,
+                    params=params,
+                ),
                 "elapsed_seconds": elapsed,
                 "segment_score": score["segment_score"],
                 "task1_prediction_score": score["task1_prediction_score"],
@@ -854,6 +923,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
         if blueprint.get("candidate_family") in {
             "linear_trend_spectral",
             "learned_residual_correction",
+            "task1_retrieval_prior",
         }:
             return blueprint
     return None
@@ -1214,7 +1284,11 @@ def _algorithm_candidate_card(
 
 
 def _candidate_hypothesis_hooks(value: Any) -> list[str]:
+    aliases = {
+        "predict-task1-retrieval-prior": "task1_retrieval_prior",
+    }
     supported = {
+        "task1_retrieval_prior",
         "linear_trend_spectral",
         "linear_trend_spectral_escape",
         "linear_trend_late_spectral_ramp",
@@ -1224,6 +1298,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
     hooks = []
     seen: set[str] = set()
     for item in _candidate_string_list(value):
+        item = aliases.get(item, item)
         if item not in supported or item in seen:
             continue
         hooks.append(item)
@@ -1602,7 +1677,55 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_retrieval_prior":
+        return _prediction_from_task1_retrieval_prior(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
+
+
+def _prediction_from_task1_retrieval_prior(
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    leave_one_out = bool(
+        context.shape[0] == target.shape[0]
+        and np.allclose(context, target[:, : context.shape[1], :], atol=1e-6)
+    )
+    retrieval = predict_retrieval_prior(
+        reference=target,
+        context=context,
+        k=int(params["k"]),
+        mode=str(params.get("mode", "affine")),
+        leave_one_out=leave_one_out,
+    )
+    prediction = make_persistence_prediction(context)
+    prediction[:, context.shape[1] :, :] = retrieval.prediction
+    return prediction.astype(np.float32, copy=False)
+
+
+def _candidate_metadata(
+    *,
+    family: str,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    if family != "task1_retrieval_prior":
+        return {}
+    return {
+        "leave_one_out": bool(
+            context.shape[0] == target.shape[0]
+            and np.allclose(context, target[:, : context.shape[1], :], atol=1e-6)
+        ),
+        "reference_count": int(target.shape[0]),
+        "k": int(params["k"]),
+        "mode": str(params.get("mode", "affine")),
+    }
 
 
 def _prediction_from_linear_trend_spectral(
@@ -1666,6 +1789,8 @@ def _iter_parameter_grid(
 ) -> list[dict[str, Any]]:
     if family == "learned_residual_correction":
         return _residual_parameter_grid(grid)
+    if family == "task1_retrieval_prior":
+        return _retrieval_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
     late_starts = grid.get("late_start", [None])
@@ -1708,7 +1833,19 @@ def _residual_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]
     ]
 
 
+def _retrieval_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    ks = grid.get("k")
+    modes = grid.get("mode", ["affine"])
+    if not isinstance(ks, list) or not ks:
+        raise HypothesisLabError("retrieval blueprint missing k list")
+    if not isinstance(modes, list) or not modes:
+        raise HypothesisLabError("retrieval blueprint mode must be a list")
+    return [{"k": int(k), "mode": str(mode)} for k in ks for mode in modes]
+
+
 def _candidate_id(params: dict[str, Any]) -> str:
+    if "k" in params and "mode" in params:
+        return f"task1_retrieval_prior_k{int(params['k'])}_{params['mode']}"
     if "residual_shrinkage" in params:
         return (
             "learned_residual"
