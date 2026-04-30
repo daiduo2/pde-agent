@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 
 SOURCE_RECORDS_STATE_HINT = "LITERATURE_SOURCE_RECORDS_BUILT"
+SOURCE_SEARCH_STATE_HINT = "EXTERNAL_SOURCE_SEARCH_NORMALIZED"
 PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
@@ -60,6 +62,148 @@ HOOK_TO_FAMILY = {
 
 class LiteratureAlgorithmLabError(ValueError):
     """Raised when literature algorithm lab artifacts are invalid."""
+
+
+def normalize_openalex_search_results(
+    *,
+    search_results_path: str | Path,
+    query: str,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    payload = _read_json(_require_file(Path(search_results_path), "OpenAlex results"))
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    retrieval_query = _nonempty_text(query, "query")
+    candidates = []
+    for item in _object_list(payload.get("results"), "results"):
+        title = _nonempty_text(item.get("display_name"), "display_name")
+        open_access = item.get("open_access") if isinstance(item.get("open_access"), dict) else {}
+        primary = (
+            item.get("primary_location")
+            if isinstance(item.get("primary_location"), dict)
+            else {}
+        )
+        url = _first_text(
+            primary.get("landing_page_url"),
+            item.get("doi"),
+            item.get("id"),
+        )
+        document_url = _first_text(open_access.get("oa_url"), url)
+        source_id = f"openalex_work_{_slug(title)}"
+        candidates.append(
+            _source_candidate(
+                source_id=source_id,
+                source_type="openalex_work",
+                title=title,
+                url=url,
+                document_url=document_url,
+                retrieval_query=retrieval_query,
+                discovery_provider="openalex",
+                license_note="OpenAlex metadata; document license must be checked at source",
+                external_ids={
+                    "openalex": item.get("id"),
+                    "doi": item.get("doi"),
+                    "publication_year": item.get("publication_year"),
+                    "cited_by_count": item.get("cited_by_count"),
+                },
+            )
+        )
+    return _write_source_search_report(
+        provider="openalex",
+        retrieval_query=retrieval_query,
+        candidates=candidates,
+        output_file=output_file,
+    )
+
+
+def normalize_arxiv_search_results(
+    *,
+    search_results_path: str | Path,
+    query: str,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    xml_file = _require_file(Path(search_results_path), "arXiv results")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    retrieval_query = _nonempty_text(query, "query")
+    root = ET.fromstring(xml_file.read_text(encoding="utf-8"))
+    namespace = {"atom": "http://www.w3.org/2005/Atom"}
+    candidates = []
+    for entry in root.findall("atom:entry", namespace):
+        title = _nonempty_text(_xml_text(entry, "atom:title", namespace), "title")
+        entry_id = _nonempty_text(_xml_text(entry, "atom:id", namespace), "id")
+        pdf_url = None
+        for link in entry.findall("atom:link", namespace):
+            if link.attrib.get("title") == "pdf" or link.attrib.get("type") == "application/pdf":
+                pdf_url = link.attrib.get("href")
+                break
+        document_url = _nonempty_text(pdf_url or entry_id.replace("/abs/", "/pdf/"), "document_url")
+        arxiv_id = entry_id.rstrip("/").split("/")[-1]
+        candidates.append(
+            _source_candidate(
+                source_id=f"arxiv_paper_{_slug(title)}",
+                source_type="arxiv_paper",
+                title=" ".join(title.split()),
+                url=entry_id,
+                document_url=document_url,
+                retrieval_query=retrieval_query,
+                discovery_provider="arxiv",
+                license_note="arXiv paper; check entry license before reuse",
+                external_ids={
+                    "arxiv_id": arxiv_id,
+                    "published": _xml_text(entry, "atom:published", namespace),
+                    "updated": _xml_text(entry, "atom:updated", namespace),
+                },
+            )
+        )
+    return _write_source_search_report(
+        provider="arxiv",
+        retrieval_query=retrieval_query,
+        candidates=candidates,
+        output_file=output_file,
+    )
+
+
+def normalize_github_search_results(
+    *,
+    search_results_path: str | Path,
+    query: str,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    payload = _read_json(_require_file(Path(search_results_path), "GitHub results"))
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    retrieval_query = _nonempty_text(query, "query")
+    candidates = []
+    for item in _object_list(payload.get("items"), "items"):
+        full_name = _nonempty_text(item.get("full_name"), "full_name")
+        url = _nonempty_text(item.get("html_url"), "html_url")
+        candidates.append(
+            _source_candidate(
+                source_id=f"github_repo_{_slug(full_name)}",
+                source_type="github_repo",
+                title=full_name,
+                url=url,
+                document_url=url,
+                retrieval_query=retrieval_query,
+                discovery_provider="github",
+                license_note="GitHub repository metadata; inspect repository license before reuse",
+                external_ids={
+                    "full_name": full_name,
+                    "default_branch": item.get("default_branch"),
+                    "stargazers_count": item.get("stargazers_count"),
+                },
+            )
+        )
+    return _write_source_search_report(
+        provider="github",
+        retrieval_query=retrieval_query,
+        candidates=candidates,
+        output_file=output_file,
+    )
 
 
 def build_literature_source_records(
@@ -521,6 +665,81 @@ def _source_type(value: Any) -> str:
     if text not in VALID_SOURCE_TYPES:
         raise LiteratureAlgorithmLabError(f"unsupported source_type: {text}")
     return text
+
+
+def _write_source_search_report(
+    *,
+    provider: str,
+    retrieval_query: str,
+    candidates: list[dict[str, Any]],
+    output_file: Path,
+) -> dict[str, Any]:
+    if not candidates:
+        raise LiteratureAlgorithmLabError("source search produced no candidates")
+    report = {
+        "schema_version": 1,
+        "state_hint": SOURCE_SEARCH_STATE_HINT,
+        "provider": provider,
+        "retrieval_query": retrieval_query,
+        "source_candidate_count": len(candidates),
+        "source_candidates": candidates,
+        "source_candidates_path": str(output_file),
+        "next_command": "download-source-document",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def _source_candidate(
+    *,
+    source_id: str,
+    source_type: str,
+    title: str,
+    url: str,
+    document_url: str,
+    retrieval_query: str,
+    discovery_provider: str,
+    license_note: str,
+    external_ids: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "source_id": source_id,
+        "source_type": source_type,
+        "title": title,
+        "url": url,
+        "document_url": document_url,
+        "retrieval_query": retrieval_query,
+        "discovery_provider": discovery_provider,
+        "license_note": license_note,
+        "external_ids": {
+            key: value for key, value in external_ids.items() if value is not None
+        },
+    }
+
+
+def _object_list(value: Any, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise LiteratureAlgorithmLabError(f"{label} must be a list")
+    result = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise LiteratureAlgorithmLabError(f"{label} items must be objects")
+        result.append(item)
+    return result
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    raise LiteratureAlgorithmLabError("expected at least one non-empty text value")
+
+
+def _xml_text(element: ET.Element, path: str, namespace: dict[str, str]) -> str | None:
+    child = element.find(path, namespace)
+    if child is None or child.text is None:
+        return None
+    return child.text.strip()
 
 
 def _dedupe_id(base: str, seen: set[str]) -> str:

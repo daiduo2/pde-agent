@@ -4,6 +4,130 @@ import json
 from pathlib import Path
 
 
+def test_normalize_openalex_search_results_builds_source_candidates(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        normalize_openalex_search_results,
+    )
+
+    fixture = tmp_path / "openalex.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "meta": {"count": 1},
+                "results": [
+                    {
+                        "id": "https://openalex.org/W123",
+                        "doi": "https://doi.org/10.48550/arXiv.2010.08895",
+                        "display_name": "Fourier Neural Operator for Parametric PDEs",
+                        "publication_year": 2021,
+                        "cited_by_count": 1000,
+                        "open_access": {
+                            "is_oa": True,
+                            "oa_url": "https://arxiv.org/pdf/2010.08895",
+                        },
+                        "primary_location": {
+                            "landing_page_url": "https://arxiv.org/abs/2010.08895"
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = normalize_openalex_search_results(
+        search_results_path=fixture,
+        query="Fourier neural operator Burgers",
+        output_path=tmp_path / "source_candidates.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "EXTERNAL_SOURCE_SEARCH_NORMALIZED"
+    assert report["provider"] == "openalex"
+    candidate = report["source_candidates"][0]
+    assert candidate["source_type"] == "openalex_work"
+    assert candidate["source_id"].startswith("openalex_work_fourier")
+    assert candidate["document_url"] == "https://arxiv.org/pdf/2010.08895"
+    assert candidate["external_ids"]["openalex"] == "https://openalex.org/W123"
+    assert report["next_command"] == "download-source-document"
+
+
+def test_normalize_arxiv_search_results_extracts_pdf_url(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import normalize_arxiv_search_results
+
+    fixture = tmp_path / "arxiv.xml"
+    fixture.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2010.08895v3</id>
+    <updated>2021-01-01T00:00:00Z</updated>
+    <published>2020-10-17T00:00:00Z</published>
+    <title>Fourier Neural Operator for Parametric Partial Differential Equations</title>
+    <summary>We propose Fourier neural operators.</summary>
+    <link href="http://arxiv.org/abs/2010.08895v3" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2010.08895v3" rel="related" type="application/pdf"/>
+  </entry>
+</feed>
+""",
+        encoding="utf-8",
+    )
+
+    report = normalize_arxiv_search_results(
+        search_results_path=fixture,
+        query="Fourier neural operator",
+        output_path=tmp_path / "source_candidates.json",
+        force=False,
+    )
+
+    candidate = report["source_candidates"][0]
+    assert report["provider"] == "arxiv"
+    assert candidate["source_type"] == "arxiv_paper"
+    assert candidate["document_url"] == "http://arxiv.org/pdf/2010.08895v3"
+    assert candidate["external_ids"]["arxiv_id"] == "2010.08895v3"
+
+
+def test_normalize_github_search_results_builds_repo_candidates(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import normalize_github_search_results
+
+    fixture = tmp_path / "github.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "total_count": 1,
+                "items": [
+                    {
+                        "full_name": "neuraloperator/neuraloperator",
+                        "html_url": "https://github.com/neuraloperator/neuraloperator",
+                        "description": "Learning neural operators in PyTorch.",
+                        "stargazers_count": 1234,
+                        "default_branch": "main",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = normalize_github_search_results(
+        search_results_path=fixture,
+        query="FNO PDEBench checkpoint",
+        output_path=tmp_path / "source_candidates.json",
+        force=False,
+    )
+
+    candidate = report["source_candidates"][0]
+    assert report["provider"] == "github"
+    assert candidate["source_type"] == "github_repo"
+    assert candidate["url"] == "https://github.com/neuraloperator/neuraloperator"
+    assert candidate["document_url"] == "https://github.com/neuraloperator/neuraloperator"
+    assert candidate["external_ids"]["full_name"] == "neuraloperator/neuraloperator"
+
+
 def test_build_source_records_normalizes_fixture_sources(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,
