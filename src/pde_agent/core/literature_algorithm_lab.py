@@ -22,6 +22,9 @@ PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
 SANDBOX_PLAN_STATE_HINT = "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
+EXECUTOR_TAXONOMY_STATE_HINT = "EXECUTOR_TAXONOMY_BUILT"
+EXECUTOR_DESIGN_REQUEST_STATE_HINT = "EXECUTOR_DESIGN_REQUEST_CREATED"
+BLOCKED_CANDIDATE_HANDOFF_STATE_HINT = "BLOCKED_CANDIDATE_HANDOFF_BUILT"
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -66,6 +69,18 @@ HOOK_TO_FAMILY = {
         "cli_command": "execute-fno-finetune-candidate",
         "sandbox_level": 1,
     },
+}
+
+EXECUTOR_DESIGN_HOOKS = {
+    "fourier_neural_operator_architecture": {
+        "route": "requires_executor_design",
+        "requested_executor_id": "bounded_fno_architecture_executor",
+        "fallback_route": "official_checkpoint_family",
+        "rationale": (
+            "A paper-level FNO architecture claim needs bounded local implementation "
+            "or an official-checkpoint adapter before sandbox execution."
+        ),
+    }
 }
 
 
@@ -746,7 +761,192 @@ def plan_candidate_sandbox(
         "blocked": blocked,
         "reason_codes": ["requires_new_bounded_executor"] if blocked else [],
         "risk_controls": selected.get("risk_controls", []),
-        "next_command": "design-bounded-executor" if blocked else cli_command,
+        "next_command": "create-executor-design-request" if blocked else cli_command,
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def build_executor_taxonomy(
+    *,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    hook_mappings: dict[str, dict[str, Any]] = {}
+    for hook, family_spec in HOOK_TO_FAMILY.items():
+        hook_mappings[hook] = {
+            "route": "existing_executor",
+            "candidate_family": family_spec["candidate_family"],
+            "model_family": family_spec["model_family"],
+            "cli_command": family_spec["cli_command"],
+            "sandbox_level": family_spec["sandbox_level"],
+        }
+    hook_mappings.update(EXECUTOR_DESIGN_HOOKS)
+    report = {
+        "schema_version": 1,
+        "state_hint": EXECUTOR_TAXONOMY_STATE_HINT,
+        "executor_taxonomy_path": str(output_file),
+        "hook_mappings": hook_mappings,
+        "route_counts": {
+            "existing_executor": len(HOOK_TO_FAMILY),
+            "requires_executor_design": len(EXECUTOR_DESIGN_HOOKS),
+        },
+        "next_command": "create-executor-design-request",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def create_executor_design_request(
+    *,
+    algorithm_candidates_path: str | Path,
+    algorithm_candidate_id: str,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    candidates_report = _read_json(
+        _require_file(Path(algorithm_candidates_path), "algorithm candidates")
+    )
+    if candidates_report.get("state_hint") != ALGORITHM_CANDIDATES_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "algorithm candidates report has invalid state_hint"
+        )
+    candidate = _find_by_id(
+        candidates_report.get("algorithm_candidates"),
+        _nonempty_text(algorithm_candidate_id, "algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    executor = candidate.get("executor_spec")
+    if not isinstance(executor, dict):
+        raise LiteratureAlgorithmLabError("candidate executor_spec must be an object")
+    if executor.get("cli_command") != "blocked_requires_executor_design":
+        raise LiteratureAlgorithmLabError(
+            "executor design request requires a blocked candidate"
+        )
+    hook = _nonempty_text(executor.get("unsupported_hook"), "unsupported_hook")
+    hook_spec = EXECUTOR_DESIGN_HOOKS.get(hook, {})
+    requested_executor_id = str(
+        hook_spec.get("requested_executor_id", f"bounded_{_slug(hook)}_executor")
+    )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    strategy_id = f"external_fno_executor_design_{_slug(str(candidate['algorithm_candidate_id']))}"
+    hypothesis = _nonempty_text(candidate.get("hypothesis"), "hypothesis")
+    mechanism = _nonempty_text(candidate.get("mechanism"), "mechanism")
+    source_grounding = candidate.get("source_grounding")
+    if not isinstance(source_grounding, dict):
+        source_grounding = {}
+    report = {
+        "schema_version": 1,
+        "state_hint": EXECUTOR_DESIGN_REQUEST_STATE_HINT,
+        "executor_design_request_path": str(output_file),
+        "algorithm_candidate_id": candidate["algorithm_candidate_id"],
+        "candidate_family": candidate.get("candidate_family"),
+        "unsupported_hook": hook,
+        "requested_executor_id": requested_executor_id,
+        "hypothesis": hypothesis,
+        "mechanism": mechanism,
+        "source_grounding": source_grounding,
+        "reason_codes": [
+            "unsupported_algorithm_hook",
+            "requires_bounded_executor",
+        ],
+        "executor_contract": {
+            "inputs": [
+                "algorithm_candidate_path",
+                "validation_windows_path",
+                "optional_checkpoint_path",
+                "output_dir",
+            ],
+            "outputs": [
+                "candidate_prediction_path",
+                "candidate_execution_report_path",
+                "sandbox_result_path",
+            ],
+            "forbidden_actions": [
+                "execute external repository code directly",
+                "mutate source training data",
+                "skip first-10-step identity validation",
+            ],
+        },
+        "minimal_experiment": {
+            "level": 2,
+            "description": (
+                "Implement a bounded executor adapter, run it on local Burgers "
+                "validation windows, then compare against persistence and current best."
+            ),
+        },
+        "risk_controls": list(candidate.get("risk_controls", []))
+        + [
+            "require local sandbox score before promotion",
+            "record failure even when executor design is abandoned",
+        ],
+        "recommended_intermediate_actions": [
+            "search official FNO checkpoint resource",
+            "map checkpoint resource to run-checkpoint-family-sandbox when available",
+            "otherwise design bounded_fno_architecture_executor",
+        ],
+        "strategy_proposal_fields": {
+            "strategy_id": strategy_id,
+            "title": "Design bounded FNO executor from literature candidate",
+            "rationale": hypothesis,
+            "implementation_plan": [
+                "Translate the literature FNO mechanism into a bounded local executor contract.",
+                "Prefer official checkpoint-family execution if a compatible checkpoint is available.",
+                "Run a local Burgers sandbox and require score, runtime, and first-context identity evidence before promotion.",
+            ],
+            "expected_observables": [
+                "higher local judge score than persistence or current best",
+                "stable inference under the two-minute task budget",
+            ],
+            "known_risks": [
+                "FNO tensor conventions may not match official checkpoints",
+                "architecture reproduction may consume budget without improving long-horizon score",
+            ],
+            "source_type": "external_retrieval",
+            "source_grounding": source_grounding,
+        },
+        "next_command": "build-blocked-candidate-handoff",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def build_blocked_candidate_handoff(
+    *,
+    executor_design_request_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    request = _read_json(
+        _require_file(Path(executor_design_request_path), "executor design request")
+    )
+    if request.get("state_hint") != EXECUTOR_DESIGN_REQUEST_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "executor design request has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    proposal_fields = request.get("strategy_proposal_fields")
+    if not isinstance(proposal_fields, dict):
+        raise LiteratureAlgorithmLabError(
+            "executor design request missing strategy_proposal_fields"
+        )
+    report = {
+        "schema_version": 1,
+        "state_hint": BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
+        "blocked_candidate_handoff_path": str(output_file),
+        "algorithm_candidate_id": request.get("algorithm_candidate_id"),
+        "record_strategy_proposal_fields": proposal_fields,
+        "blocked_evidence_summary": {
+            "blocked": True,
+            "requires_executor": request.get("requested_executor_id"),
+            "reason_codes": request.get("reason_codes", []),
+            "source_grounding": request.get("source_grounding", {}),
+        },
+        "next_command": "record-strategy-proposal",
     }
     _write_json(output_file, report)
     return report

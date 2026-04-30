@@ -779,6 +779,203 @@ def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(
     assert report["next_command"] == "run-checkpoint-family-sandbox"
 
 
+def test_build_executor_taxonomy_marks_fno_architecture_as_design_required(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import build_executor_taxonomy
+
+    report = build_executor_taxonomy(
+        output_path=tmp_path / "executor_taxonomy.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "EXECUTOR_TAXONOMY_BUILT"
+    mapping = report["hook_mappings"]["fourier_neural_operator_architecture"]
+    assert mapping["route"] == "requires_executor_design"
+    assert mapping["requested_executor_id"] == "bounded_fno_architecture_executor"
+    assert mapping["fallback_route"] == "official_checkpoint_family"
+    assert report["next_command"] == "create-executor-design-request"
+
+
+def test_create_executor_design_request_from_blocked_fno_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        create_executor_design_request,
+    )
+
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_fno_blocked",
+                        "parent_algorithm_card_id": "card_fno",
+                        "candidate_family": "unsupported",
+                        "hypothesis": "FNO improves Burgers rollout.",
+                        "mechanism": "Fourier kernels learn global modes.",
+                        "executor_spec": {
+                            "cli_command": "blocked_requires_executor_design",
+                            "unsupported_hook": "fourier_neural_operator_architecture",
+                            "required_options": [],
+                        },
+                        "benchmark_plan": {"sandbox_level": 2},
+                        "risk_controls": [
+                            "blocked until a bounded executor is designed"
+                        ],
+                        "source_grounding": {
+                            "source_ids": ["source_fno"],
+                            "algorithm_card_id": "card_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = create_executor_design_request(
+        algorithm_candidates_path=candidates_path,
+        algorithm_candidate_id="candidate_fno_blocked",
+        output_path=tmp_path / "executor_design_request.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "EXECUTOR_DESIGN_REQUEST_CREATED"
+    assert report["algorithm_candidate_id"] == "candidate_fno_blocked"
+    assert report["requested_executor_id"] == "bounded_fno_architecture_executor"
+    assert "unsupported_algorithm_hook" in report["reason_codes"]
+    assert report["executor_contract"]["inputs"] == [
+        "algorithm_candidate_path",
+        "validation_windows_path",
+        "optional_checkpoint_path",
+        "output_dir",
+    ]
+    assert "sandbox_result_path" in report["executor_contract"]["outputs"]
+    assert report["strategy_proposal_fields"]["strategy_id"].startswith(
+        "external_fno_executor_design_"
+    )
+    assert report["next_command"] == "build-blocked-candidate-handoff"
+
+
+def test_build_blocked_candidate_handoff_exposes_strategy_proposal_fields(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        build_blocked_candidate_handoff,
+    )
+
+    request_path = tmp_path / "executor_design_request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "EXECUTOR_DESIGN_REQUEST_CREATED",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "requested_executor_id": "bounded_fno_architecture_executor",
+                "hypothesis": "FNO improves Burgers rollout.",
+                "mechanism": "Fourier kernels learn global modes.",
+                "source_grounding": {
+                    "source_ids": ["source_fno"],
+                    "algorithm_card_id": "card_fno",
+                },
+                "strategy_proposal_fields": {
+                    "strategy_id": "external_fno_executor_design_candidate_fno_blocked",
+                    "title": "Design bounded FNO executor",
+                    "rationale": "FNO improves Burgers rollout.",
+                    "implementation_plan": [
+                        "Implement a bounded executor without external repo code.",
+                        "Evaluate on local Burgers validation windows.",
+                    ],
+                    "expected_observables": ["higher local judge score"],
+                    "known_risks": ["tensor convention mismatch"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_blocked_candidate_handoff(
+        executor_design_request_path=request_path,
+        output_path=tmp_path / "handoff.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "BLOCKED_CANDIDATE_HANDOFF_BUILT"
+    assert report["record_strategy_proposal_fields"]["strategy_id"] == (
+        "external_fno_executor_design_candidate_fno_blocked"
+    )
+    assert report["blocked_evidence_summary"]["blocked"] is True
+    assert report["blocked_evidence_summary"]["requires_executor"] == (
+        "bounded_fno_architecture_executor"
+    )
+    assert report["next_command"] == "record-strategy-proposal"
+
+
+def test_literature_algorithm_lab_cli_create_executor_design_request(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    output_path = tmp_path / "executor_design_request.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_fno_blocked",
+                        "candidate_family": "unsupported",
+                        "hypothesis": "FNO improves Burgers rollout.",
+                        "mechanism": "Fourier kernels learn global modes.",
+                        "executor_spec": {
+                            "cli_command": "blocked_requires_executor_design",
+                            "unsupported_hook": "fourier_neural_operator_architecture",
+                            "required_options": [],
+                        },
+                        "risk_controls": [
+                            "blocked until a bounded executor is designed"
+                        ],
+                        "source_grounding": {
+                            "source_ids": ["source_fno"],
+                            "algorithm_card_id": "card_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "create-executor-design-request",
+            "--algorithm-candidates-path",
+            str(candidates_path),
+            "--algorithm-candidate-id",
+            "candidate_fno_blocked",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "EXECUTOR_DESIGN_REQUEST_CREATED"
+    assert payload["metrics"]["requested_executor_id"] == (
+        "bounded_fno_architecture_executor"
+    )
+    assert payload["next_hint"] == "build-blocked-candidate-handoff"
+
+
 def test_literature_algorithm_lab_cli_source_records(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 

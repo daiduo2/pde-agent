@@ -7,6 +7,9 @@ from pde_agent.core.json_output import success_payload
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATES_STATE_HINT,
     ALGORITHM_CARDS_STATE_HINT,
+    BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
+    EXECUTOR_DESIGN_REQUEST_STATE_HINT,
+    EXECUTOR_TAXONOMY_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
     MINERU_TASK_POLLED_STATE_HINT,
     MINERU_TASK_SUBMITTED_STATE_HINT,
@@ -15,8 +18,11 @@ from pde_agent.core.literature_algorithm_lab import (
     SOURCE_DOCUMENT_STATE_HINT,
     SOURCE_SEARCH_STATE_HINT,
     SOURCE_RECORDS_STATE_HINT,
+    build_blocked_candidate_handoff,
+    build_executor_taxonomy,
     build_literature_source_records,
     compile_algorithm_candidates,
+    create_executor_design_request,
     download_mineru_parse_result,
     download_source_document,
     extract_algorithm_cards,
@@ -326,6 +332,83 @@ def plan_candidate_sandbox_command(
             "algorithm_candidate_id": report["algorithm_candidate_id"],
             "sandbox_level": report["sandbox_level"],
             "blocked": report["blocked"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def build_executor_taxonomy_command(
+    *,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = build_executor_taxonomy(
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="build-executor-taxonomy",
+        state_hint=EXECUTOR_TAXONOMY_STATE_HINT,
+        artifacts={"executor_taxonomy_path": report["executor_taxonomy_path"]},
+        metrics=report["route_counts"],
+        next_hint=report["next_command"],
+    )
+
+
+def create_executor_design_request_command(
+    *,
+    algorithm_candidates_path: str,
+    algorithm_candidate_id: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = create_executor_design_request(
+        algorithm_candidates_path=Path(algorithm_candidates_path),
+        algorithm_candidate_id=algorithm_candidate_id,
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="create-executor-design-request",
+        state_hint=EXECUTOR_DESIGN_REQUEST_STATE_HINT,
+        artifacts={
+            "executor_design_request_path": report["executor_design_request_path"]
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "requested_executor_id": report["requested_executor_id"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def build_blocked_candidate_handoff_command(
+    *,
+    executor_design_request_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = build_blocked_candidate_handoff(
+        executor_design_request_path=Path(executor_design_request_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="build-blocked-candidate-handoff",
+        state_hint=BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
+        artifacts={
+            "blocked_candidate_handoff_path": report[
+                "blocked_candidate_handoff_path"
+            ]
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "requires_executor": report["blocked_evidence_summary"][
+                "requires_executor"
+            ],
         },
         next_hint=report["next_command"],
     )

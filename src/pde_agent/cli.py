@@ -113,8 +113,11 @@ from pde_agent.commands.local_strategy_leaderboard import (
     record_local_strategy_result_command,
 )
 from pde_agent.commands.literature_algorithm_lab import (
+    build_blocked_candidate_handoff_command,
+    build_executor_taxonomy_command,
     build_literature_source_records_command,
     compile_algorithm_candidates_command,
+    create_executor_design_request_command,
     download_mineru_result_command,
     download_source_document_command,
     extract_algorithm_cards_command,
@@ -1077,6 +1080,63 @@ def plan_algorithm_candidate_sandbox_cmd(
             plan_candidate_sandbox_command(
                 algorithm_candidates_path=algorithm_candidates_path,
                 algorithm_candidate_id=algorithm_candidate_id,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-executor-taxonomy")
+def build_executor_taxonomy_cmd(
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_executor_taxonomy_command(
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("create-executor-design-request")
+def create_executor_design_request_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    algorithm_candidate_id: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            create_executor_design_request_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                algorithm_candidate_id=algorithm_candidate_id,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-blocked-candidate-handoff")
+def build_blocked_candidate_handoff_cmd(
+    executor_design_request_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_blocked_candidate_handoff_command(
+                executor_design_request_path=executor_design_request_path,
                 output_path=output_path,
                 force=force,
             )
