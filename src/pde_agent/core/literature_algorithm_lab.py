@@ -15,6 +15,9 @@ from urllib.request import Request, urlopen
 SOURCE_RECORDS_STATE_HINT = "LITERATURE_SOURCE_RECORDS_BUILT"
 SOURCE_SEARCH_STATE_HINT = "EXTERNAL_SOURCE_SEARCH_NORMALIZED"
 SOURCE_DOCUMENT_STATE_HINT = "SOURCE_DOCUMENT_DOWNLOADED"
+MINERU_TASK_SUBMITTED_STATE_HINT = "MINERU_PARSE_TASK_SUBMITTED"
+MINERU_TASK_POLLED_STATE_HINT = "MINERU_PARSE_TASK_POLLED"
+MINERU_RESULT_DOWNLOADED_STATE_HINT = "MINERU_PARSE_RESULT_DOWNLOADED"
 PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
@@ -27,6 +30,10 @@ VALID_SOURCE_TYPES = {
     "competition_resource",
     "manual_source",
 }
+
+MINERU_AGENT_URL_ENDPOINT = "https://mineru.net/api/v1/agent/parse/url"
+MINERU_AGENT_POLL_ENDPOINT = "https://mineru.net/api/v1/agent/parse"
+MINERU_PRECISE_URL_ENDPOINT = "https://mineru.net/api/v4/extract/task"
 
 HOOK_TO_FAMILY = {
     "official_checkpoint_calibration": {
@@ -327,6 +334,169 @@ def download_source_document(
         "downloaded_source_path": str(output_file),
         "source_record": source_record,
         "next_command": "submit-mineru-parse",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def submit_mineru_parse_task(
+    *,
+    downloaded_source_path: str | Path,
+    output_path: str | Path,
+    mode: str,
+    token: str | None,
+    model_version: str,
+    client: Any | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    downloaded = _read_json(
+        _require_file(Path(downloaded_source_path), "downloaded source")
+    )
+    if downloaded.get("state_hint") != SOURCE_DOCUMENT_STATE_HINT:
+        raise LiteratureAlgorithmLabError("downloaded source has invalid state_hint")
+    source_record = downloaded.get("source_record")
+    if not isinstance(source_record, dict):
+        raise LiteratureAlgorithmLabError("downloaded source missing source_record")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    mineru_mode = _mineru_mode(mode)
+    http = client or MinerUHttpClient()
+    download_url = _nonempty_text(source_record.get("download_url"), "download_url")
+    if mineru_mode == "agent_url":
+        endpoint = MINERU_AGENT_URL_ENDPOINT
+        payload = {
+            "url": download_url,
+            "language": "en",
+            "enable_table": True,
+            "is_ocr": False,
+            "enable_formula": True,
+        }
+        auth_token = None
+    else:
+        endpoint = MINERU_PRECISE_URL_ENDPOINT
+        payload = {
+            "url": download_url,
+            "model_version": _nonempty_text(model_version, "model_version"),
+            "enable_formula": True,
+            "enable_table": True,
+            "is_ocr": False,
+            "data_id": source_record["source_id"],
+        }
+        auth_token = _nonempty_text(token, "MINERU_API_TOKEN")
+    response = http.post_json(endpoint, payload, auth_token)
+    data = _mineru_data(response)
+    task_id = _nonempty_text(data.get("task_id"), "task_id")
+    report = {
+        "schema_version": 1,
+        "state_hint": MINERU_TASK_SUBMITTED_STATE_HINT,
+        "mineru_task_path": str(output_file),
+        "source_id": source_record["source_id"],
+        "source_title": source_record.get("title"),
+        "source_content_hash": source_record.get("content_hash"),
+        "mineru_mode": mineru_mode,
+        "submit_endpoint": endpoint,
+        "model_version": model_version,
+        "task_id": task_id,
+        "request_payload": payload,
+        "token_source": "MINERU_API_TOKEN" if auth_token else None,
+        "next_command": "poll-mineru-parse",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def poll_mineru_parse_task(
+    *,
+    mineru_task_path: str | Path,
+    output_path: str | Path,
+    token: str | None,
+    client: Any | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    task = _read_json(_require_file(Path(mineru_task_path), "MinerU task"))
+    if task.get("state_hint") != MINERU_TASK_SUBMITTED_STATE_HINT:
+        raise LiteratureAlgorithmLabError("MinerU task has invalid state_hint")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    http = client or MinerUHttpClient()
+    task_id = _nonempty_text(task.get("task_id"), "task_id")
+    mode = _mineru_mode(task.get("mineru_mode"))
+    endpoint = (
+        f"{MINERU_AGENT_POLL_ENDPOINT}/{task_id}"
+        if mode == "agent_url"
+        else f"{MINERU_PRECISE_URL_ENDPOINT}/{task_id}"
+    )
+    response = http.get_json(endpoint, None if mode == "agent_url" else token)
+    data = _mineru_data(response)
+    state = _nonempty_text(data.get("state"), "state")
+    report = {
+        "schema_version": 1,
+        "state_hint": MINERU_TASK_POLLED_STATE_HINT,
+        "mineru_poll_path": str(output_file),
+        "mineru_task_path": str(Path(mineru_task_path)),
+        "source_id": task.get("source_id"),
+        "mineru_mode": mode,
+        "task_id": task_id,
+        "poll_endpoint": endpoint,
+        "state": state,
+        "markdown_url": data.get("markdown_url"),
+        "full_zip_url": data.get("full_zip_url"),
+        "err_msg": data.get("err_msg"),
+        "err_code": data.get("err_code"),
+        "next_command": "download-mineru-result"
+        if state == "done"
+        else "poll-mineru-parse",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def download_mineru_parse_result(
+    *,
+    mineru_poll_path: str | Path,
+    output_path: str | Path,
+    output_dir: str | Path,
+    client: Any | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    poll = _read_json(_require_file(Path(mineru_poll_path), "MinerU poll"))
+    if poll.get("state_hint") != MINERU_TASK_POLLED_STATE_HINT:
+        raise LiteratureAlgorithmLabError("MinerU poll has invalid state_hint")
+    if poll.get("state") != "done":
+        raise LiteratureAlgorithmLabError("MinerU task is not done")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    http = client or MinerUHttpClient()
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    markdown_url = poll.get("markdown_url")
+    full_zip_url = poll.get("full_zip_url")
+    local_markdown_path = None
+    local_zip_path = None
+    if isinstance(markdown_url, str) and markdown_url.strip():
+        local_markdown_path = root / "full.md"
+        local_markdown_path.write_bytes(http.download_bytes(markdown_url))
+    if isinstance(full_zip_url, str) and full_zip_url.strip():
+        local_zip_path = root / "mineru_result.zip"
+        local_zip_path.write_bytes(http.download_bytes(full_zip_url))
+    if local_markdown_path is None and local_zip_path is None:
+        raise LiteratureAlgorithmLabError(
+            "MinerU result has neither markdown_url nor full_zip_url"
+        )
+    report = {
+        "schema_version": 1,
+        "state_hint": MINERU_RESULT_DOWNLOADED_STATE_HINT,
+        "mineru_result_path": str(output_file),
+        "mineru_poll_path": str(Path(mineru_poll_path)),
+        "source_id": poll.get("source_id"),
+        "task_id": poll.get("task_id"),
+        "local_markdown_path": str(local_markdown_path)
+        if local_markdown_path is not None
+        else None,
+        "local_zip_path": str(local_zip_path) if local_zip_path is not None else None,
+        "markdown_url": markdown_url,
+        "full_zip_url": full_zip_url,
+        "next_command": "ingest-mineru-parse",
     }
     _write_json(output_file, report)
     return report
@@ -753,6 +923,56 @@ def _write_source_search_report(
     }
     _write_json(output_file, report)
     return report
+
+
+class MinerUHttpClient:
+    def post_json(
+        self,
+        endpoint: str,
+        payload: dict[str, object],
+        token: str | None,
+    ) -> dict[str, Any]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def get_json(self, endpoint: str, token: str | None) -> dict[str, Any]:
+        headers = {"Accept": "*/*"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = Request(endpoint, headers=headers, method="GET")
+        with urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def download_bytes(self, url: str) -> bytes:
+        return _download_bytes(url)
+
+
+def _mineru_mode(value: Any) -> str:
+    mode = _nonempty_text(value, "mineru_mode")
+    if mode not in {"agent_url", "precise_url"}:
+        raise LiteratureAlgorithmLabError(f"unsupported MinerU mode: {mode}")
+    return mode
+
+
+def _mineru_data(response: dict[str, Any]) -> dict[str, Any]:
+    if response.get("code") != 0:
+        raise LiteratureAlgorithmLabError(f"MinerU API error: {response.get('msg')}")
+    data = response.get("data")
+    if not isinstance(data, dict):
+        raise LiteratureAlgorithmLabError("MinerU response missing data object")
+    return data
 
 
 def _find_by_id(value: Any, selected_id: str, id_key: str) -> dict[str, Any]:

@@ -179,6 +179,153 @@ def test_download_source_document_uses_cache_and_hashes_content(
     assert report["next_command"] == "submit-mineru-parse"
 
 
+def test_submit_mineru_precise_url_redacts_token(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import submit_mineru_parse_task
+
+    source_path = tmp_path / "downloaded_source.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {
+                    "source_id": "arxiv_paper_fno",
+                    "title": "FNO",
+                    "download_url": "https://arxiv.org/pdf/2010.08895",
+                    "local_raw_path": str(tmp_path / "fno.pdf"),
+                    "content_hash": "abc123",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeMinerUClient:
+        def post_json(self, endpoint: str, payload: dict[str, object], token: str | None) -> dict[str, object]:
+            calls.append({"endpoint": endpoint, "payload": payload, "token": token})
+            return {"code": 0, "msg": "ok", "data": {"task_id": "task-123"}}
+
+    report = submit_mineru_parse_task(
+        downloaded_source_path=source_path,
+        output_path=tmp_path / "mineru_task.json",
+        mode="precise_url",
+        token="secret-token",
+        model_version="vlm",
+        client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert calls[0]["token"] == "secret-token"
+    assert calls[0]["endpoint"] == "https://mineru.net/api/v4/extract/task"
+    assert report["state_hint"] == "MINERU_PARSE_TASK_SUBMITTED"
+    assert report["task_id"] == "task-123"
+    assert report["mineru_mode"] == "precise_url"
+    assert "secret-token" not in json.dumps(report)
+    assert report["next_command"] == "poll-mineru-parse"
+
+
+def test_submit_mineru_agent_url_does_not_require_token(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import submit_mineru_parse_task
+
+    source_path = tmp_path / "downloaded_source.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {
+                    "source_id": "arxiv_paper_fno",
+                    "title": "FNO",
+                    "download_url": "https://example.test/fno.pdf",
+                    "local_raw_path": str(tmp_path / "fno.pdf"),
+                    "content_hash": "abc123",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeMinerUClient:
+        def post_json(self, endpoint: str, payload: dict[str, object], token: str | None) -> dict[str, object]:
+            assert token is None
+            return {"code": 0, "msg": "ok", "data": {"task_id": "agent-task"}}
+
+    report = submit_mineru_parse_task(
+        downloaded_source_path=source_path,
+        output_path=tmp_path / "mineru_task.json",
+        mode="agent_url",
+        token=None,
+        model_version="pipeline",
+        client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert report["task_id"] == "agent-task"
+    assert report["submit_endpoint"] == "https://mineru.net/api/v1/agent/parse/url"
+
+
+def test_poll_and_download_mineru_result(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        download_mineru_parse_result,
+        poll_mineru_parse_task,
+    )
+
+    task_path = tmp_path / "mineru_task.json"
+    task_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "MINERU_PARSE_TASK_SUBMITTED",
+                "task_id": "task-123",
+                "mineru_mode": "agent_url",
+                "source_id": "arxiv_paper_fno",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeMinerUClient:
+        def get_json(self, endpoint: str, token: str | None) -> dict[str, object]:
+            assert endpoint == "https://mineru.net/api/v1/agent/parse/task-123"
+            assert token is None
+            return {
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "task_id": "task-123",
+                    "state": "done",
+                    "markdown_url": "https://cdn.example/full.md",
+                },
+            }
+
+        def download_bytes(self, url: str) -> bytes:
+            assert url == "https://cdn.example/full.md"
+            return b"# Parsed paper\n\n## Abstract\nText\n\n## Method\nText\n$$x$$"
+
+    poll_report = poll_mineru_parse_task(
+        mineru_task_path=task_path,
+        output_path=tmp_path / "mineru_poll.json",
+        token=None,
+        client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert poll_report["state_hint"] == "MINERU_PARSE_TASK_POLLED"
+    assert poll_report["state"] == "done"
+    assert poll_report["markdown_url"] == "https://cdn.example/full.md"
+    assert poll_report["next_command"] == "download-mineru-result"
+
+    download_report = download_mineru_parse_result(
+        mineru_poll_path=tmp_path / "mineru_poll.json",
+        output_path=tmp_path / "mineru_result.json",
+        output_dir=tmp_path / "mineru_result",
+        client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert download_report["state_hint"] == "MINERU_PARSE_RESULT_DOWNLOADED"
+    assert Path(download_report["local_markdown_path"]).exists()
+    assert download_report["next_command"] == "ingest-mineru-parse"
+
+
 def test_build_source_records_normalizes_fixture_sources(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,
