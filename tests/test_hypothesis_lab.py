@@ -172,6 +172,24 @@ def _late_ramp_scientific_log(path: Path) -> Path:
     return path
 
 
+def _literature_note(path: Path) -> Path:
+    path.write_text(
+        "\n".join(
+            [
+                "Title: Residual correction for neural operator rollouts",
+                "Claim: Horizon-conditioned residual correction can repair systematic rollout bias after a coarse operator prediction.",
+                "Mechanism: Fit a lightweight residual map over persistence or checkpoint rollouts and apply shrinkage by forecast horizon.",
+                "Hook: learned_residual_correction",
+                "Observable: lower early and middle Rel-MSE without changing context steps",
+                "Risk: residual correction can overfit validation windows",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -190,6 +208,56 @@ def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path)
     assert "spectral" in card["procedural_heuristic"].lower()
     assert card["evidence_status"] == "tested"
     assert card["implementation_hooks"] == ["linear_trend_spectral"]
+
+
+def test_hypothesis_lab_builds_cards_from_checkpoint_paths(tmp_path: Path) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    fno_checkpoint = tmp_path / "1D_Burgers_Sols_Nu0.001_FNO.pt"
+    unet_checkpoint = tmp_path / "1D_Burgers_Sols_Nu0.001_Unet-PF-20.pt"
+    fno_checkpoint.write_bytes(b"fno")
+    unet_checkpoint.write_bytes(b"unet")
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        checkpoint_paths=[fno_checkpoint, unet_checkpoint],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 2
+    assert {card["evidence"]["model_family"] for card in cards["cards"]} == {
+        "FNO",
+        "UNet",
+    }
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "official_checkpoint_calibration"
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert "official_checkpoint_calibration" in [
+        item["candidate_family"] for item in hypotheses["hypotheses"]
+    ]
+
+
+def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        literature_paths=[_literature_note(tmp_path / "residual_note.md")],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "literature_note"
+    assert card["implementation_hooks"] == ["learned_residual_correction"]
+    assert "Horizon-conditioned residual correction" in card["claim"]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "learned_residual_correction"
+    )
 
 
 def test_hypothesis_lab_extracts_internalizable_top_candidate_not_only_best(
@@ -383,6 +451,77 @@ def test_hypothesis_lab_generates_late_spectral_ramp_after_escape_plateau(
     assert 80 in blueprint["parameter_grid"]["late_start"]
 
 
+def test_hypothesis_lab_designs_checkpoint_and_residual_blueprints(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    checkpoint = tmp_path / "burgers_FNO.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        checkpoint_paths=[checkpoint],
+        literature_paths=[_literature_note(tmp_path / "residual_note.md")],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    by_family = {item["candidate_family"]: item for item in blueprints["blueprints"]}
+    checkpoint_blueprint = by_family["official_checkpoint_calibration"]
+    assert checkpoint_blueprint["sandbox"]["allowed_executor"] == (
+        "official_checkpoint_candidate_pipeline"
+    )
+    assert checkpoint_blueprint["checkpoint_candidates"][0]["model_family"] == "FNO"
+    residual_blueprint = by_family["learned_residual_correction"]
+    assert residual_blueprint["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_residual_operator"
+    )
+    assert residual_blueprint["parameter_grid"]["residual_shrinkage"] == [
+        0.25,
+        0.5,
+        0.75,
+    ]
+
+
+def test_hypothesis_lab_ranks_hypotheses_by_evidence_budget_and_novelty(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    checkpoint = tmp_path / "burgers_FNO.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    cards = build_knowledge_cards(
+        manual_report_paths=[_manual_report(tmp_path / "manual.json")],
+        checkpoint_paths=[checkpoint],
+        literature_paths=[_literature_note(tmp_path / "residual_note.md")],
+        output_path=None,
+        force=False,
+    )
+
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+
+    families = [item["candidate_family"] for item in hypotheses["hypotheses"]]
+    assert families.index("learned_residual_correction") < families.index(
+        "linear_trend_spectral"
+    )
+    assert families.index("official_checkpoint_calibration") < families.index(
+        "linear_trend_spectral"
+    )
+    for hypothesis in hypotheses["hypotheses"]:
+        assert "ranking_score" in hypothesis
+        assert "ranking_reasons" in hypothesis
+
+
 def test_hypothesis_lab_groups_duplicate_cards_by_candidate_family(
     tmp_path: Path,
 ) -> None:
@@ -506,6 +645,48 @@ def test_hypothesis_lab_sandbox_executes_late_spectral_ramp_params(
     assert sandbox["best_candidate"]["params"]["late_spectral_strength"] == 2.0
     assert sandbox["best_candidate"]["params"]["late_start"] == 80
     assert "_ls2" in sandbox["best_candidate"]["candidate_id"]
+
+
+def test_hypothesis_lab_sandbox_executes_learned_residual_correction(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    base = np.sin(x)[None, None, :]
+    context = np.repeat(base, 10, axis=1).astype(np.float32)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    for step in range(190):
+        target[:, 10 + step, :] = context[:, -1, :] + np.float32(0.1)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_learned_residual_correction_001",
+        "candidate_family": "learned_residual_correction",
+        "search_mode": "horizon_mean_residual",
+        "parameter_grid": {
+            "residual_shrinkage": [0.25, 0.5, 0.75, 1.0],
+            "residual_spectral_strength": [0.0],
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["best_candidate"]["candidate_id"].startswith("learned_residual")
+    assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
 
 
 def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
