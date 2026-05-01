@@ -451,6 +451,11 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
                 "segment_score": evidence.get("segment_score"),
                 "source_kind": evidence.get("source_kind"),
+                "outcome": evidence.get("outcome"),
+                "pareto_status": evidence.get("pareto_status"),
+                "effective_axes": evidence.get("effective_axes", []),
+                "retry_directives": evidence.get("retry_directives", []),
+                "avoid_directives": evidence.get("avoid_directives", []),
                 "search_directives": evidence.get("search_directives", []),
                 "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
             }
@@ -3265,6 +3270,7 @@ def _early_refinement_params(
 ) -> list[dict[str, Any]]:
     center = _retrieval_refinement_center(evidence_params)
     signals = _early_refinement_signals(evidence_params)
+    memory_policy = _early_memory_policy(evidence_params)
     k0 = int(center["k"])
     mode0 = str(center["mode"])
     strength0 = float(center["spectral_strength"])
@@ -3450,7 +3456,142 @@ def _early_refinement_params(
             continue
         seen.add(key)
         deduped.append(normalized)
-    return deduped[:160]
+    return _apply_early_memory_policy(
+        params=deduped,
+        memory_policy=memory_policy,
+    )[:160]
+
+
+def _early_memory_policy(
+    evidence_params: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    retry_directives: list[str] = []
+    avoid_directives: list[str] = []
+    effective_axes: list[str] = []
+    avoid_exact_params: list[dict[str, Any]] = []
+    promoted_params: list[dict[str, Any]] = []
+    for item in evidence_params or []:
+        if not isinstance(item, dict):
+            continue
+        params = item.get("params")
+        if not isinstance(params, dict):
+            continue
+        normalized = _normalize_evidence_params(params)
+        if normalized is None:
+            continue
+        retry_directives.extend(_string_list_from_any(item.get("retry_directives")))
+        avoid_directives.extend(_string_list_from_any(item.get("avoid_directives")))
+        effective_axes.extend(_string_list_from_any(item.get("effective_axes")))
+        outcome = str(item.get("outcome", ""))
+        if outcome == "promoted":
+            promoted_params.append(normalized)
+        if _should_avoid_exact_memory_params(item):
+            avoid_exact_params.append(normalized)
+    return {
+        "retry_directives": _dedupe_strings(retry_directives),
+        "avoid_directives": _dedupe_strings(avoid_directives),
+        "effective_axes": _dedupe_strings(effective_axes),
+        "avoid_exact_params": avoid_exact_params,
+        "promoted_params": promoted_params,
+    }
+
+
+def _should_avoid_exact_memory_params(item: dict[str, Any]) -> bool:
+    avoid_directives = set(_string_list_from_any(item.get("avoid_directives")))
+    return bool(
+        avoid_directives
+        & {
+            "do_not_promote_primary_axis_without_total_score",
+            "do_not_repeat_guardrail_regressing_params",
+            "do_not_repeat_without_new_mechanism",
+        }
+    )
+
+
+def _apply_early_memory_policy(
+    *,
+    params: list[dict[str, Any]],
+    memory_policy: dict[str, Any],
+) -> list[dict[str, Any]]:
+    avoid_exact_params = [
+        item
+        for item in memory_policy.get("avoid_exact_params", [])
+        if isinstance(item, dict)
+    ]
+    filtered = [
+        row
+        for row in params
+        if not any(_early_params_match(row=row, avoided=avoided) for avoided in avoid_exact_params)
+    ]
+    if not filtered:
+        filtered = params
+    promoted_params = [
+        item
+        for item in memory_policy.get("promoted_params", [])
+        if isinstance(item, dict)
+    ]
+    effective_axes = set(_string_list_from_any(memory_policy.get("effective_axes")))
+    filtered.sort(
+        key=lambda row: _early_memory_rank_key(
+            row=row,
+            promoted_params=promoted_params,
+            effective_axes=effective_axes,
+        )
+    )
+    return filtered
+
+
+def _early_params_match(*, row: dict[str, Any], avoided: dict[str, Any]) -> bool:
+    for key, value in avoided.items():
+        if key not in row:
+            return False
+        if row[key] != value:
+            return False
+    return True
+
+
+def _early_memory_rank_key(
+    *,
+    row: dict[str, Any],
+    promoted_params: list[dict[str, Any]],
+    effective_axes: set[str],
+) -> tuple[int, int, int, int, str]:
+    exact_promoted = any(_early_params_match(row=row, avoided=item) for item in promoted_params)
+    early_axis_reuse = (
+        "early_rel_mse" in effective_axes
+        and str(row.get("early_anchor", "")) in {
+            "persistence",
+            "phase_aligned_retrieval",
+            "retrieval_derivative_match",
+            "second_order_velocity",
+        }
+    )
+    guardrail_candidate = str(row.get("early_anchor", "")) in {
+        "persistence",
+        "retrieval",
+    }
+    return (
+        0 if exact_promoted else 1,
+        0 if early_axis_reuse else 1,
+        0 if guardrail_candidate else 1,
+        int(row.get("k", 0)),
+        _early_param_sort_key(row),
+    )
+
+
+def _early_param_sort_key(row: dict[str, Any]) -> str:
+    return json.dumps(row, sort_keys=True)
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped = []
+    seen = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _early_refinement_signals(
@@ -3556,6 +3697,7 @@ def _early_refinement_experiment_plan(
 ) -> dict[str, Any]:
     center = _retrieval_refinement_center(evidence_params)
     signals = _early_refinement_signals(evidence_params)
+    memory_policy = _early_memory_policy(evidence_params)
     axis_plan_by_bottleneck: dict[str, dict[str, Any]] = {}
     if signals["expand_phase_alignment"]:
         axis_plan_by_bottleneck["phase_alignment"] = {
@@ -3650,6 +3792,13 @@ def _early_refinement_experiment_plan(
             },
         ],
         "axis_plan_by_bottleneck": axis_plan_by_bottleneck,
+        "memory_policy": {
+            "retry_directives": memory_policy["retry_directives"],
+            "avoid_directives": memory_policy["avoid_directives"],
+            "effective_axes": memory_policy["effective_axes"],
+            "avoid_exact_count": len(memory_policy["avoid_exact_params"]),
+            "promoted_seed_count": len(memory_policy["promoted_params"]),
+        },
         "guardrails": [
             "middle_score_non_regression",
             "late_rmse_non_regression",

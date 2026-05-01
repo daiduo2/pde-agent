@@ -2402,6 +2402,95 @@ def test_hypothesis_lab_memory_readback_changes_early_candidate_blueprint(
     ]["reason"] == "phase_shift diagnosis requires transport-aware early anchors"
 
 
+def test_hypothesis_lab_memory_directives_filter_repeated_evidence_only_params(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    repeated_params = {
+        "k": 92,
+        "mode": "affine",
+        "early_blend_steps": 24,
+        "persistence_weight_start": 0.55,
+        "spectral_strength": 0.5,
+        "early_anchor": "phase_aligned_retrieval",
+    }
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_phase_probe",
+                        "candidate_params": repeated_params,
+                        "decision": "keep_as_evidence",
+                        "pareto_status": "tradeoff_evidence",
+                        "outcome": "evidence_only",
+                        "bottleneck_type": "phase_shift",
+                        "action_directives": [
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                        "retry_directives": ["continue_guarded_local_search"],
+                        "avoid_directives": [
+                            "do_not_promote_primary_axis_without_total_score"
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    early = blueprints["blueprints"][0]
+    candidate_params = early["parameter_grid"]["candidate_params"]
+    assert repeated_params not in [
+        {key: row[key] for key in repeated_params}
+        for row in candidate_params
+        if all(key in row for key in repeated_params)
+    ]
+    assert any(
+        row["early_anchor"] == "phase_aligned_retrieval"
+        for row in candidate_params
+    )
+    assert any(
+        row["early_anchor"] == "phase_aligned_retrieval"
+        and row["persistence_weight_start"]
+        < repeated_params["persistence_weight_start"]
+        for row in candidate_params
+    )
+    memory_policy = early["experiment_plan"]["memory_policy"]
+    assert memory_policy["avoid_exact_count"] == 1
+    assert "continue_guarded_local_search" in memory_policy["retry_directives"]
+    assert "do_not_promote_primary_axis_without_total_score" in memory_policy[
+        "avoid_directives"
+    ]
+
+
 def test_hypothesis_lab_run_accepts_failure_memory_input(
     tmp_path: Path,
 ) -> None:
