@@ -4,6 +4,13 @@ import json
 from pathlib import Path
 
 
+def _write_hdf5(path: Path, data: object, key: str = "tensor") -> Path:
+    h5py = __import__("h5py")
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset(key, data=data)
+    return path
+
+
 def test_normalize_openalex_search_results_builds_source_candidates(
     tmp_path: Path,
 ) -> None:
@@ -730,6 +737,211 @@ def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> No
     assert residual["executor_spec"]["cli_command"] == "run-blueprint-sandbox"
     assert residual["promotion_criteria"]["requires_ablation"] is True
     assert report["next_command"] == "plan-algorithm-candidate-sandbox"
+
+
+def test_literature_residual_candidate_runs_in_hypothesis_lab_sandbox(
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+        run_blueprint_sandbox,
+    )
+    from pde_agent.core.literature_algorithm_lab import (
+        compile_algorithm_candidates,
+        extract_algorithm_cards,
+    )
+
+    markdown = tmp_path / "residual_operator.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Residual-Corrected Neural Operators for Burgers Rollout",
+                "## Abstract",
+                "We use residual corrections to reduce autoregressive rollout bias.",
+                "## Algorithm",
+                "Claim: Horizon residual correction can reduce Burgers rollout bias.",
+                "Mechanism: Estimate a horizon-conditioned residual from local validation windows.",
+                "Operation: Apply a bounded residual correction to a persistence rollout.",
+                "Hook: learned_residual_correction",
+                "Observable: local sandbox score improves over persistence",
+                "Risk: residual correction can overfit a small validation split",
+                "Minimal Experiment: run a lightweight residual correction sandbox",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_residual_operator",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards_report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    candidates_report = compile_algorithm_candidates(
+        algorithm_cards_path=cards_report["algorithm_cards_path"],
+        output_path=tmp_path / "algorithm_candidates.json",
+        force=False,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[candidates_report["algorithm_candidates_path"]],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["source_type"] == "algorithm_candidate"
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "learned_residual_correction"
+    ]
+    assert blueprints["blueprints"][0]["candidate_family"] == (
+        "learned_residual_correction"
+    )
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    base = np.sin(x)[None, None, :]
+    context = np.repeat(base, 10, axis=1).astype(np.float32)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    target[:, 10:, :] = context[:, -1:, :] + np.float32(0.1)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprints["blueprints"][0],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes_literature_sandbox",
+        force=False,
+    )
+
+    assert sandbox["state_hint"] == "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
+    assert sandbox["verifier"]["decision"] == "promote_to_strategy_proposal"
+    assert sandbox["best_candidate"]["candidate_id"].startswith("learned_residual")
+
+
+def test_literature_spectral_candidate_maps_to_bounded_hypothesis_sandbox(
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+        run_blueprint_sandbox,
+    )
+    from pde_agent.core.literature_algorithm_lab import (
+        compile_algorithm_candidates,
+        extract_algorithm_cards,
+    )
+
+    markdown = tmp_path / "spectral_operator.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Spectral Stabilization for Neural Operator Rollouts",
+                "## Abstract",
+                "We damp high frequency modes to stabilize Burgers rollouts.",
+                "## Algorithm",
+                "Claim: Spectral rollout stabilization can reduce late-horizon Burgers drift.",
+                "Mechanism: Damp high-frequency Fourier modes during rollout postprocessing.",
+                "Operation: Apply bounded spectral smoothing to predicted futures.",
+                "Hook: spectral_rollout_stabilization",
+                "Observable: late RMSE improves without changing the context prefix",
+                "Risk: spectral damping can oversmooth shocks",
+                "Minimal Experiment: run a bounded spectral rollout sandbox",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_spectral_operator",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards_report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    candidates_report = compile_algorithm_candidates(
+        algorithm_cards_path=cards_report["algorithm_cards_path"],
+        output_path=tmp_path / "algorithm_candidates.json",
+        force=False,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[candidates_report["algorithm_candidates_path"]],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == ["linear_trend_spectral"]
+    assert blueprints["blueprints"][0]["candidate_family"] == "linear_trend_spectral"
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    context = np.repeat(np.sin(x)[None, None, :], 10, axis=1).astype(np.float32)
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprints["blueprints"][0],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes_literature_spectral_sandbox",
+        force=False,
+    )
+
+    assert sandbox["state_hint"] == "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "linear_trend_spectral"
+    )
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
 
 
 def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(

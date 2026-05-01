@@ -1406,12 +1406,10 @@ def _algorithm_candidate_card(
     candidate_file: Path,
     candidate: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if candidate.get("candidate_family") != "local_strategy_skill":
-        return None
     executor = candidate.get("executor_spec")
     if not isinstance(executor, dict):
         return None
-    hooks = _candidate_hypothesis_hooks(executor.get("implementation_hooks"))
+    hooks = _algorithm_candidate_hypothesis_hooks(candidate)
     if not hooks:
         return None
     candidate_id = str(candidate.get("algorithm_candidate_id", "")).strip()
@@ -1458,6 +1456,28 @@ def _algorithm_candidate_card(
             "source_algorithm_card_id": algorithm_card_id,
         },
     }
+
+
+def _algorithm_candidate_hypothesis_hooks(candidate: dict[str, Any]) -> list[str]:
+    executor = candidate.get("executor_spec")
+    if not isinstance(executor, dict):
+        return []
+    hooks = _candidate_hypothesis_hooks(executor.get("implementation_hooks"))
+    if hooks:
+        return hooks
+    family_to_hook = {
+        "local_strategy_skill": None,
+        "lightweight_residual_corrector": "learned_residual_correction",
+        "spectral_rollout_stabilization": "linear_trend_spectral",
+    }
+    candidate_family = str(candidate.get("candidate_family", "")).strip()
+    hook = family_to_hook.get(candidate_family)
+    if hook is None:
+        return []
+    cli_command = str(executor.get("cli_command", "")).strip()
+    if cli_command != "run-blueprint-sandbox":
+        return []
+    return _candidate_hypothesis_hooks([hook])
 
 
 def _candidate_hypothesis_hooks(value: Any) -> list[str]:
