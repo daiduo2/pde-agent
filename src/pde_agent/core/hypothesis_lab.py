@@ -139,6 +139,26 @@ def generate_hypotheses(
         source_cards = grouped_cards["task1_retrieval_prior"]
         hypotheses.append(
             {
+                "hypothesis_id": "h_task1_retrieval_refinement_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_retrieval_refinement",
+                "mechanism": (
+                    "Refine the Task 1 retrieval prior by sweeping retrieval modes, "
+                    "larger neighbor sets, early-horizon persistence blending, and "
+                    "optional spectral smoothing to target weak early/middle windows "
+                    "without losing late-window stability."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -4,
+            }
+        )
+        hypotheses.append(
+            {
                 "hypothesis_id": "h_task1_retrieval_prior_001",
                 "source_card_ids": [card["card_id"] for card in source_cards],
                 "candidate_family": "task1_retrieval_prior",
@@ -365,6 +385,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         priority = int(item.get("priority", 10))
         novelty_bonus = {
             "official_checkpoint_calibration": 45.0,
+            "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
             "learned_residual_correction": 40.0,
             "linear_trend_late_spectral_ramp": 25.0,
@@ -490,6 +511,46 @@ def design_algorithm_blueprints(
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
                         "allowed_executor": "controlled_numpy_retrieval_prior",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_retrieval_refinement":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_retrieval_refinement_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_retrieval_refinement",
+                    "search_mode": "horizon_blended_retrieval_prior",
+                    "algorithm": {
+                        "summary": (
+                            "Blend a nearest-neighbor retrieval future with a "
+                            "persistence fallback over the early horizon, then "
+                            "optionally smooth predicted future frames while "
+                            "restoring the context prefix exactly."
+                        ),
+                        "pseudocode": [
+                            "retrieval = knn_retrieval(context, reference, k, mode)",
+                            "fallback = persistence(context)",
+                            "w = linear_decay(persistence_weight_start, early_blend_steps)",
+                            "future = w * fallback_future + (1 - w) * retrieval_future",
+                            "future = optional_spectral_smooth(future)",
+                            "prediction[:10] = context",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "k": [12, 20, 32, 48],
+                        "mode": ["affine", "delta", "raw"],
+                        "early_blend_steps": [0, 20, 40],
+                        "persistence_weight_start": [0.0, 0.25, 0.5],
+                        "spectral_strength": [0.0, 0.5, 1.0],
+                    },
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_retrieval_refinement",
                         "primary_metric": "task1_total_score_proxy",
                         "promotion_min_score_delta": 0.01,
                         "max_inference_seconds": 120.0,
@@ -665,6 +726,7 @@ def run_blueprint_sandbox(
         "linear_trend_spectral",
         "learned_residual_correction",
         "task1_retrieval_prior",
+        "task1_retrieval_refinement",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -924,6 +986,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "linear_trend_spectral",
             "learned_residual_correction",
             "task1_retrieval_prior",
+            "task1_retrieval_refinement",
         }:
             return blueprint
     return None
@@ -1683,6 +1746,12 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_retrieval_refinement":
+        return _prediction_from_task1_retrieval_refinement(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
 
 
@@ -1708,6 +1777,40 @@ def _prediction_from_task1_retrieval_prior(
     return prediction.astype(np.float32, copy=False)
 
 
+def _prediction_from_task1_retrieval_refinement(
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    retrieval = _prediction_from_task1_retrieval_prior(
+        context=context,
+        target=target,
+        params=params,
+    )
+    persistence = make_persistence_prediction(context)
+    prediction = retrieval.copy()
+    forecast_steps = prediction.shape[1] - context.shape[1]
+    early_steps = int(params["early_blend_steps"])
+    weight_start = float(params["persistence_weight_start"])
+    if early_steps > 0 and weight_start > 0.0:
+        horizon = np.arange(forecast_steps, dtype=np.float32)
+        weights = weight_start * np.clip(1.0 - horizon / float(early_steps), 0.0, 1.0)
+        weights = weights.reshape(1, forecast_steps, 1)
+        prediction[:, context.shape[1] :, :] = (
+            weights * persistence[:, context.shape[1] :, :]
+            + (1.0 - weights) * retrieval[:, context.shape[1] :, :]
+        )
+    strength = float(params.get("spectral_strength", 0.0))
+    if strength > 0.0:
+        prediction = spectral_smooth_prediction(
+            prediction=prediction,
+            strength=strength,
+        )
+    prediction[:, : context.shape[1], :] = context
+    return prediction.astype(np.float32, copy=False)
+
+
 def _candidate_metadata(
     *,
     family: str,
@@ -1715,9 +1818,9 @@ def _candidate_metadata(
     target: np.ndarray,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    if family != "task1_retrieval_prior":
+    if family not in {"task1_retrieval_prior", "task1_retrieval_refinement"}:
         return {}
-    return {
+    metadata = {
         "leave_one_out": bool(
             context.shape[0] == target.shape[0]
             and np.allclose(context, target[:, : context.shape[1], :], atol=1e-6)
@@ -1726,6 +1829,17 @@ def _candidate_metadata(
         "k": int(params["k"]),
         "mode": str(params.get("mode", "affine")),
     }
+    if family == "task1_retrieval_refinement":
+        metadata.update(
+            {
+                "early_blend_steps": int(params["early_blend_steps"]),
+                "persistence_weight_start": float(
+                    params["persistence_weight_start"]
+                ),
+                "spectral_strength": float(params.get("spectral_strength", 0.0)),
+            }
+        )
+    return metadata
 
 
 def _prediction_from_linear_trend_spectral(
@@ -1791,6 +1905,8 @@ def _iter_parameter_grid(
         return _residual_parameter_grid(grid)
     if family == "task1_retrieval_prior":
         return _retrieval_parameter_grid(grid)
+    if family == "task1_retrieval_refinement":
+        return _retrieval_refinement_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
     late_starts = grid.get("late_start", [None])
@@ -1843,7 +1959,52 @@ def _retrieval_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]
     return [{"k": int(k), "mode": str(mode)} for k in ks for mode in modes]
 
 
+def _retrieval_refinement_parameter_grid(
+    grid: dict[str, list[Any]],
+) -> list[dict[str, Any]]:
+    ks = grid.get("k")
+    modes = grid.get("mode")
+    early_steps = grid.get("early_blend_steps")
+    weight_starts = grid.get("persistence_weight_start")
+    strengths = grid.get("spectral_strength", [0.0])
+    required = {
+        "k": ks,
+        "mode": modes,
+        "early_blend_steps": early_steps,
+        "persistence_weight_start": weight_starts,
+        "spectral_strength": strengths,
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(f"retrieval refinement blueprint missing {key} list")
+    rows = []
+    for k in ks:
+        for mode in modes:
+            for steps in early_steps:
+                for weight in weight_starts:
+                    for strength in strengths:
+                        rows.append(
+                            {
+                                "k": int(k),
+                                "mode": str(mode),
+                                "early_blend_steps": int(steps),
+                                "persistence_weight_start": float(weight),
+                                "spectral_strength": float(strength),
+                            }
+                        )
+    return rows
+
+
 def _candidate_id(params: dict[str, Any]) -> str:
+    if "early_blend_steps" in params and "persistence_weight_start" in params:
+        return (
+            "task1_retrieval_refinement"
+            f"_k{int(params['k'])}"
+            f"_{params['mode']}"
+            f"_eb{int(params['early_blend_steps'])}"
+            f"_pw{float(params['persistence_weight_start']):g}"
+            f"_s{float(params.get('spectral_strength', 0.0)):g}"
+        )
     if "k" in params and "mode" in params:
         return f"task1_retrieval_prior_k{int(params['k'])}_{params['mode']}"
     if "residual_shrinkage" in params:

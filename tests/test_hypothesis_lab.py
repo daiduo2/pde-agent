@@ -391,17 +391,34 @@ def test_hypothesis_lab_builds_retrieval_prior_from_algorithm_candidate(
 
     assert cards["cards"][0]["implementation_hooks"] == ["task1_retrieval_prior"]
     hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
-    assert hypotheses["hypotheses"][0]["candidate_family"] == "task1_retrieval_prior"
+    families = [item["candidate_family"] for item in hypotheses["hypotheses"]]
+    assert families == ["task1_retrieval_refinement", "task1_retrieval_prior"]
     blueprints = design_algorithm_blueprints(
         hypotheses=hypotheses,
         output_path=None,
         force=False,
     )
-    blueprint = blueprints["blueprints"][0]
-    assert blueprint["candidate_family"] == "task1_retrieval_prior"
-    assert blueprint["sandbox"]["allowed_executor"] == "controlled_numpy_retrieval_prior"
-    assert blueprint["parameter_grid"]["k"] == [8, 12, 20]
-    assert blueprint["parameter_grid"]["mode"] == ["affine"]
+    by_family = {
+        blueprint["candidate_family"]: blueprint
+        for blueprint in blueprints["blueprints"]
+    }
+    prior = by_family["task1_retrieval_prior"]
+    assert prior["sandbox"]["allowed_executor"] == "controlled_numpy_retrieval_prior"
+    assert prior["parameter_grid"]["k"] == [8, 12, 20]
+    assert prior["parameter_grid"]["mode"] == ["affine"]
+    refinement = by_family["task1_retrieval_refinement"]
+    assert refinement["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_retrieval_refinement"
+    )
+    assert refinement["parameter_grid"]["k"] == [12, 20, 32, 48]
+    assert refinement["parameter_grid"]["mode"] == ["affine", "delta", "raw"]
+    assert refinement["parameter_grid"]["early_blend_steps"] == [0, 20, 40]
+    assert refinement["parameter_grid"]["persistence_weight_start"] == [
+        0.0,
+        0.25,
+        0.5,
+    ]
+    assert refinement["parameter_grid"]["spectral_strength"] == [0.0, 0.5, 1.0]
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
@@ -903,6 +920,66 @@ def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
     assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
     assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
     assert sandbox["best_candidate"]["metadata"]["leave_one_out"] is True
+
+
+def test_hypothesis_lab_sandbox_executes_retrieval_refinement_leave_one_out(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.2, 0.4]):
+        for step in range(200):
+            target[sample, step, :] = (
+                offset
+                + np.float32(0.01 * step)
+                + np.float32(0.1) * np.sin(x + np.float32(0.01 * step))
+            )
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_retrieval_refinement_001",
+        "candidate_family": "task1_retrieval_refinement",
+        "search_mode": "horizon_blended_retrieval_prior",
+        "parameter_grid": {
+            "k": [1, 2],
+            "mode": ["affine", "delta"],
+            "early_blend_steps": [0, 20],
+            "persistence_weight_start": [0.0, 0.5],
+            "spectral_strength": [0.0],
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_retrieval_refinement"
+    )
+    assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+    metadata = sandbox["best_candidate"]["metadata"]
+    assert metadata["leave_one_out"] is True
+    assert metadata["reference_count"] == 3
+    assert set(metadata) >= {
+        "k",
+        "mode",
+        "early_blend_steps",
+        "persistence_weight_start",
+        "spectral_strength",
+    }
 
 
 def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
