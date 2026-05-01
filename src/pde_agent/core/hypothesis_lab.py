@@ -142,7 +142,32 @@ def generate_hypotheses(
             ).append(card)
         if "task1_retrieval_refinement" in hooks:
             grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
+        if "task1_early_refinement" in hooks:
+            grouped_cards.setdefault("task1_early_refinement", []).append(card)
     hypotheses = []
+    if "task1_early_refinement" in grouped_cards:
+        source_cards = grouped_cards["task1_early_refinement"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_early_refinement_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_early_refinement",
+                "mechanism": (
+                    "Treat the early Burgers rollout window as an explicit "
+                    "optimization objective, using retrieval-refinement evidence "
+                    "as the base executor while sweeping early anchors and short "
+                    "horizon blend weights under middle/late guardrails."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
+                "priority": -6,
+            }
+        )
     retrieval_refinement_cards = [
         *grouped_cards.get("task1_retrieval_refinement", []),
         *grouped_cards.get("task1_retrieval_prior", []),
@@ -454,6 +479,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         priority = int(item.get("priority", 10))
         novelty_bonus = {
             "official_checkpoint_calibration": 45.0,
+            "task1_early_refinement": 47.0,
             "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
@@ -555,6 +581,50 @@ def design_algorithm_blueprints(
                         ),
                     },
                     "next_command": "run-checkpoint-family-sandbox",
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_early_refinement":
+            candidate_params = _early_refinement_params(
+                hypothesis.get("evidence_params", [])
+            )
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_early_refinement_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_early_refinement",
+                    "search_mode": "early_segment_objective_search",
+                    "algorithm": {
+                        "summary": (
+                            "Run the retrieval-refinement executor with the early "
+                            "segment as a first-class objective, testing short "
+                            "horizon anchors such as persistence, retrieval-only, "
+                            "and linear-velocity extrapolation while guarding "
+                            "middle and late windows."
+                        ),
+                        "pseudocode": [
+                            "center = best retrieval-refinement evidence params",
+                            "retrieval = knn_retrieval(context, reference, k, mode)",
+                            "anchor = early_anchor(context, retrieval)",
+                            "blend first early_blend_steps toward anchor",
+                            "score early rel-mse plus middle/late guardrails",
+                            "prediction[:10] = context",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": candidate_params,
+                    },
+                    "experiment_plan": _early_refinement_experiment_plan(
+                        evidence_params=hypothesis.get("evidence_params", []),
+                        candidate_budget=len(candidate_params),
+                    ),
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_task1_early_refinement",
+                        "primary_metric": "task1_early_rel_mse_guarded_score",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
                     "risks": hypothesis.get("known_risks", []),
                 }
             )
@@ -853,6 +923,7 @@ def run_blueprint_sandbox(
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
+        "task1_early_refinement",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -883,7 +954,8 @@ def run_blueprint_sandbox(
         score = score_prediction_arrays(prediction=prediction, target=target)
         rows.append(
             {
-                "candidate_id": _candidate_id(params),
+                "candidate_id": _candidate_id(params, family=family),
+                "family": family,
                 "params": params,
                 "metadata": _candidate_metadata(
                     family=family,
@@ -902,7 +974,7 @@ def run_blueprint_sandbox(
                 "_prediction": prediction,
             }
         )
-    rows.sort(key=lambda item: float(item["task1_total_score_proxy"]), reverse=True)
+    rows.sort(key=lambda item: _candidate_selection_key(item, family=family), reverse=True)
     best = rows[0]
     prediction_path = root / "best_prediction.npz"
     np.savez_compressed(prediction_path, prediction=best["_prediction"])
@@ -951,6 +1023,16 @@ def run_blueprint_sandbox(
         baseline_prediction=baseline_prediction,
         target=target,
     )
+    best_validation_score = judge["tasks"]["1"].get("validation_score")
+    if not isinstance(best_validation_score, dict):
+        best_validation_score = {
+            "segment_score": best["segment_score"],
+            "segments": best["segments"],
+        }
+    early_segment_diagnosis = _task1_early_segment_diagnosis(
+        baseline_score=baseline_score,
+        best_score=best_validation_score,
+    )
     verifier = {
         "decision": "promote_to_strategy_proposal"
         if _sandbox_metrics_pass(metric_results)
@@ -964,6 +1046,8 @@ def run_blueprint_sandbox(
         "judge_decision": judge["decision"],
         "metric_results": metric_results,
         "multiview_judge": multiview_judge,
+        "early_segment_diagnosis": early_segment_diagnosis,
+        "selection_objective": _selection_objective(family),
         "promotion_score": _sandbox_promotion_score(metric_results),
     }
     serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
@@ -971,6 +1055,7 @@ def run_blueprint_sandbox(
         "schema_version": 1,
         "state_hint": SANDBOX_STATE_HINT,
         "blueprint_id": blueprint["blueprint_id"],
+        "candidate_family": family,
         "baseline": {
             "segment_score": baseline_score["segment_score"],
             "task1_prediction_score": baseline_score["task1_prediction_score"],
@@ -1120,6 +1205,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "task1_retrieval_prior",
             "task1_retrieval_refinement",
             "task1_retrieval_refinement_local_search",
+            "task1_early_refinement",
         }:
             return blueprint
     return None
@@ -1508,6 +1594,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
+        "task1_early_refinement",
         "linear_trend_spectral",
         "linear_trend_spectral_escape",
         "linear_trend_late_spectral_ramp",
@@ -1834,10 +1921,12 @@ def _adaptive_retrieval_refinement_card(
     if (
         family
         not in {
+            "task1_early_refinement",
             "task1_retrieval_refinement",
             "task1_retrieval_refinement_local_search",
         }
         and "task1_retrieval_refinement" not in blueprint_id
+        and "task1_early_refinement" not in blueprint_id
     ):
         return None
     best = report.get("best_candidate")
@@ -1892,6 +1981,18 @@ def _adaptive_retrieval_refinement_card(
             )
             scored_candidates.append(top_evidence[-1])
     search_directives = _retrieval_refinement_search_directives(scored_candidates)
+    verifier = report.get("verifier")
+    early_segment_diagnosis = None
+    if isinstance(verifier, dict) and isinstance(
+        verifier.get("early_segment_diagnosis"), dict
+    ):
+        early_segment_diagnosis = verifier["early_segment_diagnosis"]
+    hooks = ["task1_retrieval_refinement_local_search"]
+    if (
+        isinstance(early_segment_diagnosis, dict)
+        and early_segment_diagnosis.get("decision") == "early_segment_bottleneck"
+    ):
+        hooks.insert(0, "task1_early_refinement")
     return {
         "card_id": f"adaptive_retrieval_refinement_{report_file.stem}",
         "source_type": "adaptive_retrieval_refinement_sandbox",
@@ -1911,7 +2012,7 @@ def _adaptive_retrieval_refinement_card(
             "best candidate preserves the first 10 context steps",
             "next iteration can reuse the same validation target as a sandbox",
         ],
-        "implementation_hooks": ["task1_retrieval_refinement_local_search"],
+        "implementation_hooks": hooks,
         "expected_observables": [
             "candidate grid is centered on the latest sandbox best parameters",
             "new candidates include immediate score-neighborhood perturbations",
@@ -1928,6 +2029,7 @@ def _adaptive_retrieval_refinement_card(
             "top_params": top_params,
             "top_candidates": top_evidence,
             "search_directives": search_directives,
+            "early_segment_diagnosis": early_segment_diagnosis,
             "task1_total_score_proxy": best.get("task1_total_score_proxy"),
             "task1_total_fast_proxy": best.get("task1_total_fast_proxy"),
             "segment_score": best.get("segment_score"),
@@ -2089,6 +2191,12 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_early_refinement":
+        return _prediction_from_task1_retrieval_refinement(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
 
 
@@ -2131,11 +2239,17 @@ def _prediction_from_task1_retrieval_refinement(
     early_steps = int(params["early_blend_steps"])
     weight_start = float(params["persistence_weight_start"])
     if early_steps > 0 and weight_start > 0.0:
+        anchor = persistence
+        early_anchor = str(params.get("early_anchor", "persistence"))
+        if early_anchor == "linear_velocity":
+            anchor = _linear_velocity_anchor_prediction(context, prediction.shape[1])
+        elif early_anchor == "retrieval":
+            anchor = retrieval
         horizon = np.arange(forecast_steps, dtype=np.float32)
         weights = weight_start * np.clip(1.0 - horizon / float(early_steps), 0.0, 1.0)
         weights = weights.reshape(1, forecast_steps, 1)
         prediction[:, context.shape[1] :, :] = (
-            weights * persistence[:, context.shape[1] :, :]
+            weights * anchor[:, context.shape[1] :, :]
             + (1.0 - weights) * retrieval[:, context.shape[1] :, :]
         )
     strength = float(params.get("spectral_strength", 0.0))
@@ -2146,6 +2260,19 @@ def _prediction_from_task1_retrieval_refinement(
         )
     prediction[:, : context.shape[1], :] = context
     return prediction.astype(np.float32, copy=False)
+
+
+def _linear_velocity_anchor_prediction(context: np.ndarray, steps: int) -> np.ndarray:
+    prediction = np.empty((context.shape[0], steps, context.shape[2]), dtype=np.float32)
+    prediction[:, : context.shape[1], :] = context
+    velocity = context[:, -1:, :] - context[:, -2:-1, :]
+    horizon = np.arange(
+        1,
+        steps - context.shape[1] + 1,
+        dtype=np.float32,
+    ).reshape(1, -1, 1)
+    prediction[:, context.shape[1] :, :] = context[:, -1:, :] + horizon * velocity
+    return prediction
 
 
 def _candidate_metadata(
@@ -2159,6 +2286,7 @@ def _candidate_metadata(
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
+        "task1_early_refinement",
     }:
         return {}
     metadata = {
@@ -2173,6 +2301,7 @@ def _candidate_metadata(
     if family in {
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
+        "task1_early_refinement",
     }:
         metadata.update(
             {
@@ -2181,6 +2310,13 @@ def _candidate_metadata(
                     params["persistence_weight_start"]
                 ),
                 "spectral_strength": float(params.get("spectral_strength", 0.0)),
+            }
+        )
+    if family == "task1_early_refinement":
+        metadata.update(
+            {
+                "early_anchor": str(params.get("early_anchor", "persistence")),
+                "early_objective": "early_rel_mse",
             }
         )
     return metadata
@@ -2252,6 +2388,8 @@ def _iter_parameter_grid(
     if family == "task1_retrieval_refinement":
         return _retrieval_refinement_parameter_grid(grid)
     if family == "task1_retrieval_refinement_local_search":
+        return _retrieval_refinement_parameter_grid(grid)
+    if family == "task1_early_refinement":
         return _retrieval_refinement_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
@@ -2501,6 +2639,110 @@ def _local_retrieval_refinement_params(
     )
 
 
+def _early_refinement_params(
+    evidence_params: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    center = _retrieval_refinement_center(evidence_params)
+    k0 = int(center["k"])
+    mode0 = str(center["mode"])
+    strength0 = float(center["spectral_strength"])
+    rows: list[dict[str, Any]] = []
+    for k in [k0 - 8, k0, k0 + 8]:
+        for early_steps in [8, 12, 16, 20, 24, 32]:
+            for weight in [0.0, 0.25, 0.5, 0.75, 1.0]:
+                for anchor in ["retrieval", "persistence", "linear_velocity"]:
+                    rows.append(
+                        {
+                            "k": _clamp_int(k, 4, 128),
+                            "mode": mode0,
+                            "early_blend_steps": early_steps,
+                            "persistence_weight_start": weight,
+                            "spectral_strength": strength0,
+                            "early_anchor": anchor,
+                        }
+                    )
+    rows.append(
+        {
+            "k": k0,
+            "mode": "delta",
+            "early_blend_steps": 12,
+            "persistence_weight_start": 0.5,
+            "spectral_strength": strength0,
+            "early_anchor": "linear_velocity",
+        }
+    )
+    deduped = []
+    seen: set[tuple[int, str, int, float, float, str]] = set()
+    for row in rows:
+        normalized = _normalize_retrieval_refinement_params(row)
+        key = (
+            int(normalized["k"]),
+            str(normalized["mode"]),
+            int(normalized["early_blend_steps"]),
+            float(normalized["persistence_weight_start"]),
+            float(normalized["spectral_strength"]),
+            str(normalized.get("early_anchor", "persistence")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
+
+
+def _early_refinement_experiment_plan(
+    *,
+    evidence_params: list[dict[str, Any]] | None,
+    candidate_budget: int,
+) -> dict[str, Any]:
+    center = _retrieval_refinement_center(evidence_params)
+    return {
+        "plan_id": "xp_task1_early_refinement_001",
+        "decision": "early_segment_objective_search",
+        "objective": {
+            "primary": "early_rel_mse",
+            "secondary": [
+                "early_score",
+                "task1_total_score_proxy",
+                "inference_seconds",
+            ],
+            "focus": "reduce_short_horizon_error_before_score_arbitration",
+        },
+        "center_params": center,
+        "axis_plan": [
+            {
+                "axis": "early_anchor",
+                "direction": "compare",
+                "reason": "test whether early drift needs retrieval, persistence, or velocity anchoring",
+                "budget": 3,
+            },
+            {
+                "axis": "early_blend_steps",
+                "direction": "short_horizon_grid",
+                "reason": "competition early window is steeply penalized by Rel-MSE",
+                "budget": 6,
+            },
+            {
+                "axis": "persistence_weight_start",
+                "direction": "early_anchor_weight_grid",
+                "reason": "separate short-window accuracy from late stability smoothing",
+                "budget": 5,
+            },
+        ],
+        "guardrails": [
+            "middle_score_non_regression",
+            "late_rmse_non_regression",
+            "context_prefix_exact",
+        ],
+        "candidate_budget": int(candidate_budget),
+        "stop_criteria": [
+            "stop_if_early_rel_mse_does_not_improve",
+            "stop_if_middle_or_late_guardrail_fails",
+            "stop_if_context_prefix_validation_fails",
+        ],
+    }
+
+
 def _retrieval_refinement_search_directives_from_evidence(
     evidence_params: list[dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
@@ -2720,24 +2962,42 @@ def _clamp_float(value: float, lower: float, upper: float) -> float:
 
 
 def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    normalized = {
         "k": int(row["k"]),
         "mode": str(row["mode"]),
         "early_blend_steps": int(row["early_blend_steps"]),
         "persistence_weight_start": float(row["persistence_weight_start"]),
         "spectral_strength": float(row.get("spectral_strength", 0.0)),
     }
+    if "early_anchor" in row:
+        early_anchor = str(row["early_anchor"])
+        if early_anchor not in {"retrieval", "persistence", "linear_velocity"}:
+            raise HypothesisLabError(
+                "retrieval refinement early_anchor must be retrieval, "
+                "persistence, or linear_velocity"
+            )
+        normalized["early_anchor"] = early_anchor
+    return normalized
 
 
-def _candidate_id(params: dict[str, Any]) -> str:
+def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
     if "early_blend_steps" in params and "persistence_weight_start" in params:
+        prefix = (
+            "task1_early_refinement"
+            if family == "task1_early_refinement"
+            else "task1_retrieval_refinement"
+        )
+        suffix = ""
+        if family == "task1_early_refinement":
+            suffix = f"_a{params.get('early_anchor', 'persistence')}"
         return (
-            "task1_retrieval_refinement"
+            f"{prefix}"
             f"_k{int(params['k'])}"
             f"_{params['mode']}"
             f"_eb{int(params['early_blend_steps'])}"
             f"_pw{float(params['persistence_weight_start']):g}"
             f"_s{float(params.get('spectral_strength', 0.0)):g}"
+            f"{suffix}"
         )
     if "k" in params and "mode" in params:
         return f"task1_retrieval_prior_k{int(params['k'])}_{params['mode']}"
@@ -2765,6 +3025,43 @@ def _context_preserved(*, prediction: np.ndarray, context: np.ndarray) -> bool:
     return bool(np.allclose(prediction[:, : context.shape[1], :], context, atol=1e-6))
 
 
+def _candidate_selection_key(row: dict[str, Any], *, family: str) -> tuple[float, ...]:
+    if family == "task1_early_refinement":
+        early = row.get("segments", {}).get("early", {})
+        rel_mse = early.get("rel_mse")
+        if not isinstance(rel_mse, int | float):
+            rel_mse = float("inf")
+        return (
+            -float(rel_mse),
+            float(row.get("segment_score", 0.0)),
+            float(row.get("task1_total_score_proxy", 0.0)),
+            -float(row.get("elapsed_seconds", 0.0)),
+        )
+    return (
+        float(row.get("task1_total_score_proxy", 0.0)),
+        float(row.get("segment_score", 0.0)),
+        -float(row.get("elapsed_seconds", 0.0)),
+    )
+
+
+def _selection_objective(family: str) -> dict[str, Any]:
+    if family == "task1_early_refinement":
+        return {
+            "primary": "early_rel_mse",
+            "direction": "minimize",
+            "secondary": [
+                "segment_score",
+                "task1_total_score_proxy",
+                "elapsed_seconds",
+            ],
+        }
+    return {
+        "primary": "task1_total_score_proxy",
+        "direction": "maximize",
+        "secondary": ["segment_score", "elapsed_seconds"],
+    }
+
+
 def _sandbox_metric_results(
     *,
     judge: dict[str, Any],
@@ -2784,6 +3081,27 @@ def _sandbox_metric_results(
         segment="late",
         metric="rmse",
         lower_is_better=True,
+    )
+    early_score_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="early",
+        metric="score",
+        lower_is_better=False,
+    )
+    early_rel_mse_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="early",
+        metric="rel_mse",
+        lower_is_better=True,
+    )
+    middle_score_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="middle",
+        metric="score",
+        lower_is_better=False,
     )
     segment_delta = float(best_score["segment_score"]) - float(
         baseline_score["segment_score"]
@@ -2806,7 +3124,23 @@ def _sandbox_metric_results(
             "value": segment_delta,
             "passed": segment_delta >= 0.0,
         },
+        "early_score_delta_vs_baseline": {
+            "value": early_score_delta,
+            "passed": early_score_delta is None or early_score_delta >= 0.0,
+        },
+        "early_rel_mse_delta_vs_baseline": {
+            "value": early_rel_mse_delta,
+            "passed": early_rel_mse_delta is None or early_rel_mse_delta >= 0.0,
+        },
+        "middle_score_guardrail": {
+            "value": middle_score_delta,
+            "passed": middle_score_delta is None or middle_score_delta >= 0.0,
+        },
         "late_rmse_delta_vs_baseline": {
+            "value": late_delta,
+            "passed": late_delta is None or late_delta >= 0.0,
+        },
+        "late_rmse_guardrail": {
             "value": late_delta,
             "passed": late_delta is None or late_delta >= 0.0,
         },
@@ -2844,6 +3178,20 @@ def _task1_multiview_local_judge(
         metric="rmse",
         lower_is_better=True,
     )
+    early_score_delta = _segment_metric_delta(
+        baseline_segments=full_baseline.get("segments", {}),
+        best_segments=full_score.get("segments", {}),
+        segment="early",
+        metric="score",
+        lower_is_better=False,
+    )
+    early_rel_mse_delta = _segment_metric_delta(
+        baseline_segments=full_baseline.get("segments", {}),
+        best_segments=full_score.get("segments", {}),
+        segment="early",
+        metric="rel_mse",
+        lower_is_better=True,
+    )
     views = {
         "fast_full": {
             "sample_count": int(target.shape[0]),
@@ -2853,6 +3201,18 @@ def _task1_multiview_local_judge(
             "passed": full_delta >= 0.0,
         },
         "heldout_split": heldout_view,
+        "early_accuracy": {
+            "sample_count": int(target.shape[0]),
+            "early_score": full_score["segments"]["early"]["score"],
+            "baseline_early_score": full_baseline["segments"]["early"]["score"],
+            "early_rel_mse": full_score["segments"]["early"]["rel_mse"],
+            "baseline_early_rel_mse": full_baseline["segments"]["early"][
+                "rel_mse"
+            ],
+            "early_score_delta": early_score_delta,
+            "early_rel_mse_delta": early_rel_mse_delta,
+            "passed": early_rel_mse_delta is None or early_rel_mse_delta >= 0.0,
+        },
         "late_stability": {
             "sample_count": int(target.shape[0]),
             "late_rmse": full_score["segments"]["late"]["rmse"],
@@ -2864,6 +3224,7 @@ def _task1_multiview_local_judge(
     required = [
         bool(views["fast_full"]["passed"]),
         bool(views["heldout_split"].get("passed")),
+        bool(views["early_accuracy"]["passed"]),
         bool(views["late_stability"]["passed"]),
     ]
     return {
@@ -2874,6 +3235,86 @@ def _task1_multiview_local_judge(
         else "mixed_or_insufficient_evidence",
         "views": views,
     }
+
+
+def _task1_early_segment_diagnosis(
+    *,
+    baseline_score: dict[str, Any],
+    best_score: dict[str, Any],
+) -> dict[str, Any]:
+    baseline_early = baseline_score.get("segments", {}).get("early", {})
+    candidate_early = best_score.get("segments", {}).get("early", {})
+    candidate_middle = best_score.get("segments", {}).get("middle", {})
+    candidate_late = best_score.get("segments", {}).get("late", {})
+    early_score = _numeric(candidate_early.get("score"))
+    middle_score = _numeric(candidate_middle.get("score"))
+    late_score = _numeric(candidate_late.get("score"))
+    early_rel_mse = _numeric(candidate_early.get("rel_mse"))
+    baseline_early_rel_mse = _numeric(baseline_early.get("rel_mse"))
+    early_rel_mse_delta = (
+        None
+        if early_rel_mse is None or baseline_early_rel_mse is None
+        else baseline_early_rel_mse - early_rel_mse
+    )
+    reason_codes = []
+    if early_score is not None and early_score < 20.0:
+        reason_codes.append("early_score_low")
+    if early_rel_mse is not None and early_rel_mse > 0.05:
+        reason_codes.append("early_rel_mse_high")
+    if (
+        early_score is not None
+        and middle_score is not None
+        and early_score + 10.0 < middle_score
+    ):
+        reason_codes.append("early_weaker_than_middle")
+    if (
+        early_score is not None
+        and late_score is not None
+        and early_score + 10.0 < late_score
+    ):
+        reason_codes.append("early_weaker_than_late")
+    decision = "early_segment_bottleneck" if reason_codes else "no_early_bottleneck"
+    return {
+        "schema_version": 1,
+        "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
+        "decision": decision,
+        "reason_codes": reason_codes,
+        "segments": {
+            "baseline": {"early": baseline_early},
+            "candidate": {
+                "early": candidate_early,
+                "middle": candidate_middle,
+                "late": candidate_late,
+            },
+        },
+        "deltas": {
+            "early_rel_mse_delta_vs_baseline": early_rel_mse_delta,
+            "early_score_delta_vs_baseline": _segment_metric_delta(
+                baseline_segments=baseline_score.get("segments", {}),
+                best_segments=best_score.get("segments", {}),
+                segment="early",
+                metric="score",
+                lower_is_better=False,
+            ),
+        },
+        "objective_recommendation": {
+            "primary": "early_rel_mse",
+            "secondary": "task1_total_score_proxy",
+            "next_candidate_family": "task1_early_refinement",
+            "guardrails": [
+                "context_prefix_exact",
+                "middle_score_non_regression",
+                "late_rmse_non_regression",
+                "inference_time_under_120s",
+            ],
+        },
+    }
+
+
+def _numeric(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    return None
 
 
 def _task1_heldout_view(

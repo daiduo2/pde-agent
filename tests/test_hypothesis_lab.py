@@ -629,6 +629,69 @@ def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidat
     )
 
 
+def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    report_path = _adaptive_retrieval_refinement_sandbox_report(
+        tmp_path / "early_bottleneck_sandbox.json"
+    )
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["verifier"] = {
+        "decision": "promote_to_strategy_proposal",
+        "early_segment_diagnosis": {
+            "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
+            "decision": "early_segment_bottleneck",
+            "reason_codes": ["early_score_low", "early_weaker_than_late"],
+            "objective_recommendation": {
+                "primary": "early_rel_mse",
+                "next_candidate_family": "task1_early_refinement",
+            },
+        },
+    }
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[report_path],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "task1_early_refinement",
+        "task1_retrieval_refinement_local_search",
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == "task1_early_refinement"
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    early = blueprints["blueprints"][0]
+    assert early["blueprint_id"] == "bp_task1_early_refinement_001"
+    assert early["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_task1_early_refinement"
+    )
+    assert early["experiment_plan"]["objective"]["primary"] == "early_rel_mse"
+    assert early["experiment_plan"]["guardrails"] == [
+        "middle_score_non_regression",
+        "late_rmse_non_regression",
+        "context_prefix_exact",
+    ]
+    assert any(
+        row["early_anchor"] == "linear_velocity"
+        for row in early["parameter_grid"]["candidate_params"]
+    )
+    assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
+
+
 def test_hypothesis_lab_builds_retrieval_refinement_center_from_sandbox_report(
     tmp_path: Path,
 ) -> None:
@@ -1335,11 +1398,139 @@ def test_hypothesis_lab_sandbox_records_task1_multiview_judge(
     assert set(multiview["views"]) == {
         "fast_full",
         "heldout_split",
+        "early_accuracy",
         "late_stability",
     }
     assert multiview["views"]["heldout_split"]["sample_count"] == 2
     assert "segment_score_delta" in multiview["views"]["fast_full"]
     assert "late_rmse_delta" in multiview["views"]["late_stability"]
+
+
+def test_hypothesis_lab_sandbox_records_early_segment_diagnosis(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((4, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.1, 0.2, 0.3]):
+        context = np.sin(x + np.float32(offset))[None, :]
+        for step in range(200):
+            target[sample, step, :] = context + np.float32(0.001 * step)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_retrieval_prior_001",
+        "candidate_family": "task1_retrieval_prior",
+        "search_mode": "affine_knn_trajectory_prior",
+        "parameter_grid": {"k": [1], "mode": ["affine"]},
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    diagnosis = sandbox["verifier"]["early_segment_diagnosis"]
+    assert diagnosis["state_hint"] == "TASK1_EARLY_SEGMENT_DIAGNOSED"
+    assert diagnosis["objective_recommendation"]["primary"] == "early_rel_mse"
+    assert diagnosis["objective_recommendation"]["next_candidate_family"] == (
+        "task1_early_refinement"
+    )
+    assert set(diagnosis["segments"]) == {"baseline", "candidate"}
+    assert isinstance(diagnosis["segments"]["candidate"]["early"]["rel_mse"], float)
+    assert isinstance(diagnosis["segments"]["candidate"]["middle"]["score"], float)
+    assert isinstance(diagnosis["segments"]["candidate"]["late"]["rmse"], float)
+    metrics = sandbox["verifier"]["metric_results"]
+    assert "early_score_delta_vs_baseline" in metrics
+    assert "early_rel_mse_delta_vs_baseline" in metrics
+    assert "middle_score_guardrail" in metrics
+    assert "late_rmse_guardrail" in metrics
+    multiview = sandbox["verifier"]["multiview_judge"]
+    assert "early_accuracy" in multiview["views"]
+    assert "early_rel_mse_delta" in multiview["views"]["early_accuracy"]
+
+
+def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.2, 0.4]):
+        for step in range(200):
+            target[sample, step, :] = (
+                offset
+                + np.float32(0.01 * step)
+                + np.float32(0.1) * np.sin(x + np.float32(0.01 * step))
+            )
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_early_refinement_001",
+        "candidate_family": "task1_early_refinement",
+        "search_mode": "early_segment_objective_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 12,
+                    "persistence_weight_start": 0.0,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "retrieval",
+                },
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 12,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "linear_velocity",
+                },
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["blueprint_id"] == "bp_task1_early_refinement_001"
+    assert sandbox["candidate_family"] == "task1_early_refinement"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_early_refinement"
+    )
+    assert sandbox["best_candidate"]["metadata"]["early_objective"] == "early_rel_mse"
+    selection = sandbox["verifier"]["selection_objective"]
+    assert selection["primary"] == "early_rel_mse"
+    best_rel_mse = sandbox["best_candidate"]["segments"]["early"]["rel_mse"]
+    top_rel_mses = [
+        row["segments"]["early"]["rel_mse"] for row in sandbox["top_candidates"]
+    ]
+    assert best_rel_mse == min(top_rel_mses)
+    assert sandbox["verifier"]["early_segment_diagnosis"]["objective_recommendation"][
+        "next_candidate_family"
+    ] == "task1_early_refinement"
 
 
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(

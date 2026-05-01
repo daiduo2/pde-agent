@@ -293,6 +293,7 @@ EXECUTABLE_BLUEPRINT_EXECUTORS = {
     "controlled_numpy_residual_operator",
     "controlled_numpy_retrieval_prior",
     "controlled_numpy_retrieval_refinement",
+    "controlled_numpy_task1_early_refinement",
     "official_checkpoint_candidate_pipeline",
 }
 
@@ -5077,6 +5078,8 @@ def _executor_id_for_candidate(candidate: dict[str, Any]) -> str:
         return "controlled_numpy_retrieval_prior"
     if family in {"task1_retrieval_refinement"}:
         return "controlled_numpy_retrieval_refinement"
+    if family in {"task1_early_refinement"}:
+        return "controlled_numpy_task1_early_refinement"
     return "controlled_numpy_operator"
 
 
@@ -5122,7 +5125,11 @@ def _has_native_executable_blueprint_shape(blueprint: dict[str, Any]) -> bool:
 
 
 def _blueprint_baseline_for_family(family: str) -> str:
-    if family in {"task1_retrieval_prior", "task1_retrieval_refinement"}:
+    if family in {
+        "task1_retrieval_prior",
+        "task1_retrieval_refinement",
+        "task1_early_refinement",
+    }:
         return "retrieval_prior"
     if family == "official_checkpoint_calibration":
         return "fno_checkpoint"
@@ -5136,7 +5143,7 @@ def _blueprint_transforms_for_family(
         return [{"name": "residual_fit", "params": parameter_grid}]
     if family == "task1_retrieval_prior":
         return [{"name": "retrieval_prior", "params": parameter_grid}]
-    if family == "task1_retrieval_refinement":
+    if family in {"task1_retrieval_refinement", "task1_early_refinement"}:
         return [{"name": "retrieval_refinement", "params": parameter_grid}]
     if family == "official_checkpoint_calibration":
         return [{"name": "checkpoint_calibration", "params": parameter_grid}]
