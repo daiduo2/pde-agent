@@ -944,6 +944,91 @@ def test_literature_spectral_candidate_maps_to_bounded_hypothesis_sandbox(
     assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
 
 
+def test_literature_candidate_promotion_preserves_external_grounding(
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+    from pde_agent.core.literature_algorithm_lab import (
+        compile_algorithm_candidates,
+        extract_algorithm_cards,
+    )
+
+    markdown = tmp_path / "residual_operator.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Residual-Corrected Neural Operators for Burgers Rollout",
+                "## Abstract",
+                "We use residual corrections to reduce autoregressive rollout bias.",
+                "## Algorithm",
+                "Claim: Horizon residual correction can reduce Burgers rollout bias.",
+                "Mechanism: Estimate a horizon-conditioned residual from local validation windows.",
+                "Operation: Apply a bounded residual correction to a persistence rollout.",
+                "Hook: learned_residual_correction",
+                "Observable: local sandbox score improves over persistence",
+                "Risk: residual correction can overfit a small validation split",
+                "Minimal Experiment: run a lightweight residual correction sandbox",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_residual_operator",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards_report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    candidates_report = compile_algorithm_candidates(
+        algorithm_cards_path=cards_report["algorithm_cards_path"],
+        output_path=tmp_path / "algorithm_candidates.json",
+        force=False,
+    )
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    context = np.repeat(np.sin(x)[None, None, :], 10, axis=1).astype(np.float32)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    target[:, 10:, :] = context[:, -1:, :] + np.float32(0.1)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[candidates_report["algorithm_candidates_path"]],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes_literature_grounding",
+        force=False,
+    )
+
+    proposal_path = Path(
+        report["strategy_growth"]["artifacts"]["strategy_proposal_path"]
+    )
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    assert proposal["source_type"] == "external_retrieval"
+    assert proposal["implementation_plan"]["source_grounding"]["source_ids"] == [
+        "source_residual_operator"
+    ]
+    assert proposal["implementation_plan"]["algorithm_candidate_id"].startswith(
+        "candidate_card_source_residual_operator"
+    )
+
+
 def test_plan_candidate_sandbox_selects_level_one_for_checkpoint(
     tmp_path: Path,
 ) -> None:

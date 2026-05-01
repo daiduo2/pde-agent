@@ -1454,6 +1454,7 @@ def _algorithm_candidate_card(
             "candidate_family": candidate_family,
             "model_family": candidate.get("model_family"),
             "source_algorithm_card_id": algorithm_card_id,
+            "source_grounding": grounding,
         },
     }
 
@@ -1576,6 +1577,11 @@ def _record_hypothesis_strategy_growth_artifacts(
     if card is None:
         return None
     evidence = card["evidence"]
+    source_type = (
+        "external_retrieval"
+        if evidence.get("candidate_family") != "local_strategy_skill"
+        else "agent_hypothesis"
+    )
     proposal_path = _fresh_output(output_dir / "strategy_proposal.json", force=force)
     evidence_path = _fresh_output(
         output_dir / "strategy_evidence_summary.json",
@@ -1585,7 +1591,7 @@ def _record_hypothesis_strategy_growth_artifacts(
     proposal = record_strategy_proposal(
         strategy_id=strategy_id,
         title=f"Hypothesis Lab verified {strategy_id}",
-        source_type="agent_hypothesis",
+        source_type=source_type,
         problem_context=(
             "Hypothesis Lab promoted a Hermes algorithm candidate after "
             "bounded 1D Burgers sandbox verification."
@@ -1601,6 +1607,7 @@ def _record_hypothesis_strategy_growth_artifacts(
             ],
             "algorithm_candidate_id": strategy_id,
             "candidate_key": evidence["candidate_key"],
+            "source_grounding": evidence.get("source_grounding", {}),
             "blueprint_id": executable_blueprint.get("blueprint_id"),
             "sandbox_report_path": sandbox["artifacts"]["sandbox_report_path"],
             "verified_blueprint_path": str(output_dir / "verified_blueprints.json"),
