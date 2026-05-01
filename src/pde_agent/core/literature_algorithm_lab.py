@@ -1494,7 +1494,10 @@ def compile_algorithm_candidates(
             if family in seen_families:
                 continue
             seen_families.add(family)
-            candidate_id = f"candidate_{_slug(card['algorithm_card_id'])}_{family}"
+            candidate_id = _algorithm_candidate_id(
+                card_id=str(card["algorithm_card_id"]),
+                family=family,
+            )
             candidates.append(
                 {
                     "algorithm_candidate_id": candidate_id,
@@ -1957,8 +1960,13 @@ def build_blocked_candidate_handoff(
 
 
 def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
+    candidate_id = _algorithm_candidate_id(
+        card_id=str(card["algorithm_card_id"]),
+        family="blocked",
+        hook=hook,
+    )
     return {
-        "algorithm_candidate_id": f"candidate_{_slug(card['algorithm_card_id'])}_blocked",
+        "algorithm_candidate_id": candidate_id,
         "parent_algorithm_card_id": card["algorithm_card_id"],
         "candidate_family": "unsupported",
         "target_problem": "PDE_Burgers",
@@ -1992,6 +2000,20 @@ def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
             "algorithm_card_id": card["algorithm_card_id"],
         },
     }
+
+
+def _algorithm_candidate_id(
+    *,
+    card_id: str,
+    family: str,
+    hook: str | None = None,
+) -> str:
+    raw_slug = re.sub(r"[^a-zA-Z0-9]+", "_", card_id.lower()).strip("_")
+    if len(raw_slug) <= 80:
+        return f"candidate_{raw_slug or 'source'}_{family}"
+    digest_source = "|".join([card_id, family, hook or ""])
+    digest = _sha256_text(digest_source)[:8]
+    return f"candidate_{_slug(card_id)}_{family}_{digest}"
 
 
 def _empty_literature_registry(registry_file: Path) -> dict[str, Any]:
@@ -2774,6 +2796,8 @@ def _infer_nonstructured_algorithm_field_block(
     section_title = (
         block["section_title"] if isinstance(block.get("section_title"), str) else ""
     )
+    if _is_low_signal_algorithm_section(section_title):
+        return None
     markdown = str(block["markdown"])
     text_lines = _non_heading_lines(markdown)
     joined = " ".join(text for _, text in text_lines)
@@ -2810,6 +2834,32 @@ def _infer_nonstructured_algorithm_fields(
     joined: str,
     text_lines: list[tuple[int, str]],
 ) -> tuple[dict[str, str], dict[str, dict[str, Any]]] | None:
+    if _looks_like_fno_architecture_section(lowered):
+        claim_line = _first_line_matching(
+            text_lines,
+            ["fourier neural operator", "infinite-dimensional", "discretization"],
+        )
+        mechanism_line = _first_line_matching(
+            text_lines,
+            ["kernel integral", "fourier space", "fourier transform"],
+        )
+        operation_line = _first_line_matching(
+            text_lines,
+            ["truncates", "low-frequency", "learned weights", "transforms back"],
+        )
+        fields = _infer_algorithm_fields("Fourier Neural Operator")
+        spans = {
+            "claim": _line_span_from_match(claim_line, fallback_text=joined),
+            "mechanism": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "operation": _line_span_from_match(
+                operation_line or mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+        }
+        return fields, spans
     if _looks_like_spectral_rollout_section(lowered):
         claim_line = _first_line_matching(
             text_lines,
@@ -2963,6 +3013,36 @@ def _infer_nonstructured_algorithm_fields(
         }
         return fields, spans
     return None
+
+
+def _is_low_signal_algorithm_section(section_title: str) -> bool:
+    lowered = section_title.lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "abstract",
+            "introduction",
+            "references",
+            "acknowledgement",
+            "discussion",
+            "conclusion",
+        ]
+    )
+
+
+def _looks_like_fno_architecture_section(lowered: str) -> bool:
+    return (
+        "fourier neural operator" in lowered
+        and any(
+            phrase in lowered
+            for phrase in [
+                "kernel integral",
+                "fourier space",
+                "fourier layer",
+                "fourier transform",
+            ]
+        )
+    )
 
 
 def _non_heading_lines(markdown: str) -> list[tuple[int, str]]:

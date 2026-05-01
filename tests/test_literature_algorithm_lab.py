@@ -2396,6 +2396,63 @@ def test_extract_algorithm_cards_infers_nonstructured_method_section(
     assert audit["decision"] == "approved"
 
 
+def test_extract_algorithm_cards_prefers_fno_architecture_section_over_intro(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import extract_algorithm_cards
+
+    markdown = tmp_path / "fno_realistic.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Fourier Neural Operator for Parametric Partial Differential Equations",
+                "## 1 Introduction",
+                "Figure 1 shows the architecture of the Fourier layer for fluid flow prediction.",
+                "## 4 Fourier Neural Operator",
+                "We formulate the Fourier neural operator by parameterizing the kernel integral operator in Fourier space.",
+                "The Fourier layer applies a Fourier transform, truncates to low-frequency modes, multiplies learned weights, and transforms back to physical space.",
+                "This architecture learns mappings between infinite-dimensional function spaces across discretizations.",
+                "## 5 Numerical Experiments",
+                "We evaluate on Burgers equation, Darcy flow, and Navier-Stokes equation.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_fno_realistic",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {
+                    "1 introduction": 2,
+                    "4 fourier neural operator": 4,
+                    "5 numerical experiments": 8,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+
+    assert report["algorithm_card_count"] == 1
+    card = report["algorithm_cards"][0]
+    assert card["implementation_hooks"] == ["fourier_neural_operator_architecture"]
+    assert card["operator_target"] == "ic_to_trajectory"
+    assert card["mechanism_type"] == "architecture"
+    assert card["mathematical_object"] == "fourier_modes"
+    assert card["provenance"]["section_title"] == "4 Fourier Neural Operator"
+    assert card["evidence_spans"]["mechanism"]["line_start"] == 5
+
+
 def test_extract_algorithm_cards_records_empty_extraction_artifact(
     tmp_path: Path,
 ) -> None:
@@ -2546,6 +2603,68 @@ def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> No
     assert residual["executor_spec"]["cli_command"] == "run-blueprint-sandbox"
     assert residual["promotion_criteria"]["requires_ablation"] is True
     assert report["next_command"] == "plan-algorithm-candidate-sandbox"
+
+
+def test_compile_algorithm_candidates_keeps_long_card_ids_unique(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
+
+    long_prefix = (
+        "card_arxiv_paper_fourier_neural_operator_for_parametric_partial_"
+        "differential_equations"
+    )
+    cards_path = tmp_path / "cards.json"
+    cards_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": f"{long_prefix}_section_fourier",
+                        "source_ids": ["source_fno"],
+                        "claim": "FNO section claim.",
+                        "core_mechanism": "FNO section mechanism.",
+                        "operation": "Design bounded FNO executor.",
+                        "preconditions": ["PDEBench Burgers"],
+                        "implementation_hooks": ["fourier_neural_operator_architecture"],
+                        "expected_observables": ["score improves"],
+                        "failure_modes": ["executor mismatch"],
+                        "minimal_experiment": "compile blocked candidate",
+                        "evidence_status": "extracted",
+                    },
+                    {
+                        "algorithm_card_id": f"{long_prefix}_appendix_spectral",
+                        "source_ids": ["source_fno"],
+                        "claim": "FNO appendix claim.",
+                        "core_mechanism": "FNO appendix mechanism.",
+                        "operation": "Design bounded FNO executor.",
+                        "preconditions": ["PDEBench Burgers"],
+                        "implementation_hooks": ["fourier_neural_operator_architecture"],
+                        "expected_observables": ["score improves"],
+                        "failure_modes": ["executor mismatch"],
+                        "minimal_experiment": "compile blocked candidate",
+                        "evidence_status": "extracted",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = compile_algorithm_candidates(
+        algorithm_cards_path=cards_path,
+        output_path=tmp_path / "candidates.json",
+        force=False,
+    )
+
+    ids = [
+        candidate["algorithm_candidate_id"]
+        for candidate in report["algorithm_candidates"]
+    ]
+    assert len(ids) == 2
+    assert len(set(ids)) == 2
 
 
 def test_literature_residual_candidate_runs_in_hypothesis_lab_sandbox(
