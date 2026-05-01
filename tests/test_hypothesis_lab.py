@@ -2119,6 +2119,112 @@ def test_hypothesis_lab_records_algorithm_candidate_outcome(
         "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
     )
     assert memory["failed_algorithm_candidate_ids"] == []
+    event = memory["pareto_learning_events"][0]
+    assert event["algorithm_candidate_id"] == (
+        "candidate_local_strategy_data_inference_linear_trend_spectral_v0"
+    )
+    assert event["decision"] == "promote_to_strategy_proposal"
+    assert event["pareto_status"] == "dominates_baseline"
+    assert event["outcome"] == "promoted"
+    assert "task1_total_score_proxy" in event["objective_axes"]
+    assert report["pareto_memory"]["event_count"] == 1
+
+
+def test_hypothesis_lab_records_pareto_failure_memory_tradeoff(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import _record_pareto_failure_memory
+
+    sandbox = {
+        "blueprint_id": "bp_task1_early_refinement_001",
+        "candidate_family": "task1_early_refinement",
+        "best_candidate": {
+            "candidate_id": "task1_early_refinement_k99_affine_eb28_pw0.5",
+            "params": {
+                "k": 99,
+                "mode": "affine",
+                "early_blend_steps": 28,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+                "early_anchor": "persistence",
+            },
+        },
+        "verifier": {
+            "decision": "keep_as_evidence",
+            "score_delta_vs_baseline": -0.03,
+            "best_segment_score": 47.7,
+            "pareto_promotion_gate": {
+                "decision": "keep_as_evidence",
+                "pareto_status": "tradeoff_evidence",
+                "reason_codes": ["primary_axis_improved_without_total_score"],
+                "objective_axes": {
+                    "task1_total_score_proxy": {
+                        "value": -0.03,
+                        "passed": False,
+                        "improved": False,
+                    },
+                    "early_rel_mse": {
+                        "value": 0.04,
+                        "passed": True,
+                        "improved": True,
+                    },
+                    "middle_score": {
+                        "value": 0.0,
+                        "passed": True,
+                        "improved": False,
+                    },
+                    "late_rmse": {
+                        "value": 0.0,
+                        "passed": True,
+                        "improved": False,
+                    },
+                },
+            },
+            "early_segment_diagnosis": {
+                "bottleneck_type": "phase_shift",
+                "reason_codes": ["early_rel_mse_high"],
+                "action_directives": [
+                    {
+                        "directive": (
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ),
+                        "target_family": "task1_early_refinement",
+                    }
+                ],
+            },
+        },
+        "artifacts": {
+            "sandbox_report_path": str(tmp_path / "sandbox_report.json"),
+        },
+    }
+
+    report = _record_pareto_failure_memory(
+        sandbox=sandbox,
+        failure_memory_output_path=tmp_path / "failure_memory.json",
+        algorithm_candidate_evidence={
+            "algorithm_candidate_id": "candidate_early_phase_probe",
+            "candidate_key": "card_phase|task1_early_refinement",
+        },
+        force=False,
+    )
+
+    memory = json.loads(
+        Path(report["failure_memory_path"]).read_text(encoding="utf-8")
+    )
+    event = memory["pareto_learning_events"][0]
+    assert event["outcome"] == "evidence_only"
+    assert event["algorithm_candidate_id"] == "candidate_early_phase_probe"
+    assert event["candidate_family"] == "task1_early_refinement"
+    assert event["bottleneck_type"] == "phase_shift"
+    assert event["effective_axes"] == ["early_rel_mse"]
+    assert event["guardrail_regressions"] == []
+    assert event["retry_directives"] == ["continue_guarded_local_search"]
+    assert event["avoid_directives"] == [
+        "do_not_promote_primary_axis_without_total_score"
+    ]
+    summary = memory["pareto_learning_summary"]["task1_early_refinement"]
+    assert summary["evidence_only_count"] == 1
+    assert summary["last_pareto_status"] == "tradeoff_evidence"
 
 
 def test_hypothesis_lab_promoted_candidate_records_strategy_growth_artifacts(

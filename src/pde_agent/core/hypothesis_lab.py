@@ -11,6 +11,7 @@ import numpy as np
 
 from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.hermes_literature_expansion import (
+    FAILURE_MEMORY_STATE_HINT,
     record_hermes_literature_candidate_outcome,
 )
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
@@ -1171,6 +1172,16 @@ def run_hypothesis_lab(
         failure_memory_output_path=failure_memory_output_path,
         force=force,
     )
+    pareto_memory = _record_pareto_failure_memory(
+        sandbox=sandbox,
+        failure_memory_output_path=failure_memory_output_path,
+        algorithm_candidate_evidence=_executed_algorithm_candidate_evidence(
+            cards=cards,
+            hypotheses=hypotheses,
+            executable_blueprint=executable_blueprint,
+        ),
+        force=force,
+    )
     strategy_growth = _record_hypothesis_strategy_growth_artifacts(
         cards=cards,
         hypotheses=hypotheses,
@@ -1210,6 +1221,8 @@ def run_hypothesis_lab(
         report["artifacts"].update(strategy_growth["artifacts"])
     if candidate_outcome is not None:
         report["candidate_outcome"] = candidate_outcome
+    if pareto_memory is not None:
+        report["pareto_memory"] = pareto_memory
     _write_json(report_path, report)
     return report
 
@@ -1685,6 +1698,260 @@ def _record_algorithm_candidate_outcome(
         "failure_memory_path": str(output_file),
         "outcome_count": len(record.get("outcomes", [])),
     }
+
+
+def _record_pareto_failure_memory(
+    *,
+    sandbox: dict[str, Any],
+    failure_memory_output_path: str | Path | None,
+    algorithm_candidate_evidence: dict[str, Any] | None,
+    force: bool,
+) -> dict[str, Any] | None:
+    if failure_memory_output_path is None:
+        return None
+    output_file = Path(failure_memory_output_path)
+    memory = _load_or_init_pareto_failure_memory(output_file, force=force)
+    event = _pareto_learning_event(
+        sandbox=sandbox,
+        algorithm_candidate_evidence=algorithm_candidate_evidence,
+    )
+    events = memory.setdefault("pareto_learning_events", [])
+    if not isinstance(events, list):
+        events = []
+        memory["pareto_learning_events"] = events
+    events.append(event)
+    _update_pareto_learning_summary(memory=memory, event=event)
+    _write_json(output_file, memory)
+    return {
+        "failure_memory_path": str(output_file),
+        "event_count": len(events),
+        "last_event": event,
+    }
+
+
+def _load_or_init_pareto_failure_memory(path: Path, *, force: bool) -> dict[str, Any]:
+    _ = force
+    if path.exists():
+        memory = _read_json(path)
+        if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
+            raise HypothesisLabError("failure memory has invalid state_hint")
+        return memory
+    return {
+        "schema_version": 1,
+        "state_hint": FAILURE_MEMORY_STATE_HINT,
+        "failed_algorithm_candidate_ids": [],
+        "failed_candidate_keys": [],
+        "failed_candidate_families": [],
+        "outcomes": [],
+    }
+
+
+def _pareto_learning_event(
+    *,
+    sandbox: dict[str, Any],
+    algorithm_candidate_evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    verifier = sandbox.get("verifier") if isinstance(sandbox.get("verifier"), dict) else {}
+    gate = (
+        verifier.get("pareto_promotion_gate")
+        if isinstance(verifier.get("pareto_promotion_gate"), dict)
+        else {}
+    )
+    diagnosis = (
+        verifier.get("early_segment_diagnosis")
+        if isinstance(verifier.get("early_segment_diagnosis"), dict)
+        else {}
+    )
+    best = (
+        sandbox.get("best_candidate")
+        if isinstance(sandbox.get("best_candidate"), dict)
+        else {}
+    )
+    candidate_family = str(sandbox.get("candidate_family", "unknown"))
+    decision = str(verifier.get("decision") or gate.get("decision") or "unknown")
+    pareto_status = str(gate.get("pareto_status", "unknown"))
+    objective_axes = _pareto_memory_axes(gate.get("objective_axes"))
+    event = {
+        "schema_version": 1,
+        "source": "hypothesis_lab_sandbox",
+        "sandbox_report_path": str(
+            sandbox.get("artifacts", {}).get("sandbox_report_path", "")
+        ),
+        "blueprint_id": str(sandbox.get("blueprint_id", "unknown")),
+        "candidate_family": candidate_family,
+        "candidate_id": str(best.get("candidate_id", "unknown")),
+        "candidate_params": best.get("params") if isinstance(best.get("params"), dict) else {},
+        "algorithm_candidate_id": None,
+        "candidate_key": None,
+        "decision": decision,
+        "pareto_status": pareto_status,
+        "outcome": _pareto_memory_outcome(decision),
+        "reason_codes": _string_list_from_any(gate.get("reason_codes")),
+        "score_delta_vs_baseline": verifier.get("score_delta_vs_baseline"),
+        "best_segment_score": verifier.get("best_segment_score"),
+        "bottleneck_type": diagnosis.get("bottleneck_type"),
+        "diagnosis_reason_codes": _string_list_from_any(diagnosis.get("reason_codes")),
+        "action_directives": _pareto_action_directive_names(diagnosis),
+        "objective_axes": objective_axes,
+        "effective_axes": _pareto_effective_axes(objective_axes),
+        "guardrail_regressions": _pareto_guardrail_regressions(objective_axes),
+        "retry_directives": _pareto_retry_directives(
+            decision=decision,
+            objective_axes=objective_axes,
+        ),
+        "avoid_directives": _pareto_avoid_directives(
+            decision=decision,
+            reason_codes=_string_list_from_any(gate.get("reason_codes")),
+        ),
+    }
+    if isinstance(algorithm_candidate_evidence, dict):
+        event["algorithm_candidate_id"] = algorithm_candidate_evidence.get(
+            "algorithm_candidate_id"
+        )
+        event["candidate_key"] = algorithm_candidate_evidence.get("candidate_key")
+    return event
+
+
+def _pareto_memory_axes(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    axes = {}
+    for axis_name, axis in value.items():
+        if not isinstance(axis, dict):
+            continue
+        axes[str(axis_name)] = {
+            "value": axis.get("value"),
+            "threshold": axis.get("threshold"),
+            "passed": bool(axis.get("passed")),
+            "improved": bool(axis.get("improved")),
+            "metric": axis.get("metric"),
+            "direction": axis.get("direction"),
+        }
+    return axes
+
+
+def _pareto_memory_outcome(decision: str) -> str:
+    return {
+        "promote_to_strategy_proposal": "promoted",
+        "keep_as_evidence": "evidence_only",
+        "continue_local_search": "needs_local_search",
+        "reject_or_revise": "rejected",
+    }.get(decision, "unknown")
+
+
+def _pareto_action_directive_names(diagnosis: dict[str, Any]) -> list[str]:
+    directives = []
+    for item in diagnosis.get("action_directives", []):
+        if not isinstance(item, dict):
+            continue
+        directive = item.get("directive")
+        if isinstance(directive, str) and directive:
+            directives.append(directive)
+    return directives
+
+
+def _pareto_effective_axes(objective_axes: dict[str, dict[str, Any]]) -> list[str]:
+    return [
+        axis_name
+        for axis_name, axis in objective_axes.items()
+        if axis.get("improved") is True
+    ]
+
+
+def _pareto_guardrail_regressions(
+    objective_axes: dict[str, dict[str, Any]],
+) -> list[str]:
+    regressions = []
+    for axis_name in ["middle_score", "late_rmse"]:
+        axis = objective_axes.get(axis_name)
+        if isinstance(axis, dict) and axis.get("passed") is False:
+            regressions.append(axis_name)
+    return regressions
+
+
+def _pareto_retry_directives(
+    *,
+    decision: str,
+    objective_axes: dict[str, dict[str, Any]],
+) -> list[str]:
+    if decision == "continue_local_search":
+        return ["repair_guardrails_before_promotion"]
+    if decision == "keep_as_evidence":
+        return ["continue_guarded_local_search"]
+    if decision == "reject_or_revise":
+        return ["revise_candidate_family_or_axis"]
+    if (
+        decision == "promote_to_strategy_proposal"
+        and objective_axes.get("early_rel_mse", {}).get("improved") is True
+    ):
+        return ["reuse_effective_axes_under_pareto_gate"]
+    return []
+
+
+def _pareto_avoid_directives(*, decision: str, reason_codes: list[str]) -> list[str]:
+    directives = []
+    if decision == "keep_as_evidence":
+        directives.append("do_not_promote_primary_axis_without_total_score")
+    if "guardrail_regression" in reason_codes:
+        directives.append("do_not_repeat_guardrail_regressing_params")
+    if decision == "reject_or_revise":
+        directives.append("do_not_repeat_without_new_mechanism")
+    return directives
+
+
+def _string_list_from_any(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
+def _update_pareto_learning_summary(
+    *,
+    memory: dict[str, Any],
+    event: dict[str, Any],
+) -> None:
+    summary = memory.setdefault("pareto_learning_summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+        memory["pareto_learning_summary"] = summary
+    family = str(event["candidate_family"])
+    family_summary = summary.setdefault(
+        family,
+        {
+            "promoted_count": 0,
+            "evidence_only_count": 0,
+            "needs_local_search_count": 0,
+            "rejected_count": 0,
+            "effective_axes": [],
+            "guardrail_regressions": [],
+            "last_pareto_status": None,
+        },
+    )
+    outcome = str(event.get("outcome", "unknown"))
+    count_key = {
+        "promoted": "promoted_count",
+        "evidence_only": "evidence_only_count",
+        "needs_local_search": "needs_local_search_count",
+        "rejected": "rejected_count",
+    }.get(outcome)
+    if count_key is not None:
+        family_summary[count_key] = int(family_summary.get(count_key, 0)) + 1
+    for axis in event.get("effective_axes", []):
+        if isinstance(axis, str):
+            _append_unique(family_summary, "effective_axes", axis)
+    for axis in event.get("guardrail_regressions", []):
+        if isinstance(axis, str):
+            _append_unique(family_summary, "guardrail_regressions", axis)
+    family_summary["last_pareto_status"] = event.get("pareto_status")
+
+
+def _append_unique(payload: dict[str, Any], key: str, value: str) -> None:
+    values = payload.setdefault(key, [])
+    if not isinstance(values, list):
+        values = []
+        payload[key] = values
+    if value not in values:
+        values.append(value)
 
 
 def _record_hypothesis_strategy_growth_artifacts(
