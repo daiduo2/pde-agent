@@ -462,6 +462,10 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "negative_candidate_evidence",
                 [],
             ),
+            "candidate_pool_attribution": evidence.get(
+                "candidate_pool_attribution",
+                {},
+            ),
             "search_directives": evidence.get("search_directives", []),
             "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
         }
@@ -512,6 +516,11 @@ def _merge_ranked_evidence_row(row: dict[str, Any], evidence: dict[str, Any]) ->
         dict,
     ):
         row["early_segment_diagnosis"] = evidence["early_segment_diagnosis"]
+    if not row.get("candidate_pool_attribution") and isinstance(
+        evidence.get("candidate_pool_attribution"),
+        dict,
+    ):
+        row["candidate_pool_attribution"] = evidence["candidate_pool_attribution"]
 
 
 def _normalize_evidence_params(params: dict[str, Any]) -> dict[str, Any] | None:
@@ -3178,6 +3187,120 @@ def _candidate_pool_attribution(
         f"by_{axis}": by_value,
         f"non_top_{axis}s": non_top_values,
         "non_top_anchors": non_top_values if axis == "early_anchor" else [],
+        "search_space_policy": _candidate_pool_search_space_policy(
+            axis=axis,
+            by_value=by_value,
+            non_top_values=non_top_values,
+        ),
+    }
+
+
+def _candidate_pool_search_space_policy(
+    *,
+    axis: str,
+    by_value: dict[str, dict[str, Any]],
+    non_top_values: list[str],
+) -> dict[str, Any]:
+    finite = [
+        (value, payload)
+        for value, payload in by_value.items()
+        if isinstance(payload.get("best_early_rel_mse"), int | float)
+    ]
+    if not finite:
+        return {
+            "axis": axis,
+            "focus_values": [],
+            "rescue_probe_values": [],
+            "deprioritize_values": non_top_values,
+            "recommended_actions": [
+        _candidate_pool_action(
+            action="deprioritize",
+            axis=axis,
+            value=value,
+            reason="generated_but_absent_from_top_candidates",
+            payload=by_value.get(value, {}),
+                )
+                for value in non_top_values
+            ],
+        }
+    best_rel_mse = min(float(payload["best_early_rel_mse"]) for _value, payload in finite)
+    rescue_threshold = best_rel_mse * 1.1
+    if best_rel_mse <= 0.0:
+        rescue_threshold = 1e-8
+    focus_values = [
+        value
+        for value, payload in sorted(
+            finite,
+            key=lambda item: float(item[1]["best_early_rel_mse"]),
+        )
+        if int(payload.get("top_candidate_count", 0)) > 0
+        and float(payload["best_early_rel_mse"]) <= rescue_threshold
+    ]
+    rescue_probe_values = [
+        value
+        for value in non_top_values
+        if isinstance(by_value.get(value, {}).get("best_early_rel_mse"), int | float)
+        and float(by_value[value]["best_early_rel_mse"]) <= rescue_threshold
+    ]
+    deprioritize_values = [
+        value for value in non_top_values if value not in rescue_probe_values
+    ]
+    actions = [
+        _candidate_pool_action(
+            action="keep_focus",
+            axis=axis,
+            value=value,
+            reason="top_candidate_near_best_early_rel_mse",
+            payload=by_value[value],
+        )
+        for value in focus_values
+    ]
+    actions.extend(
+        _candidate_pool_action(
+            action="budget_probe",
+            axis=axis,
+            value=value,
+            reason="non_top_near_best_early_rel_mse",
+            payload=by_value[value],
+        )
+        for value in rescue_probe_values
+    )
+    actions.extend(
+        _candidate_pool_action(
+            action="deprioritize",
+            axis=axis,
+            value=value,
+            reason="generated_but_not_competitive_in_candidate_pool",
+            payload=by_value[value],
+        )
+        for value in deprioritize_values
+    )
+    return {
+        "axis": axis,
+        "focus_values": focus_values,
+        "rescue_probe_values": rescue_probe_values,
+        "deprioritize_values": deprioritize_values,
+        "recommended_actions": actions,
+    }
+
+
+def _candidate_pool_action(
+    *,
+    action: str,
+    axis: str,
+    value: str,
+    reason: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "action": action,
+        "axis": axis,
+        "value": value,
+        "reason": reason,
+        "candidate_count": int(payload.get("candidate_count", 0)),
+        "top_candidate_count": int(payload.get("top_candidate_count", 0)),
+        "best_early_rel_mse": payload.get("best_early_rel_mse"),
+        "best_segment_score": payload.get("best_segment_score"),
     }
 
 
@@ -3734,6 +3857,7 @@ def _early_memory_policy(
     avoid_exact_params: list[dict[str, Any]] = []
     promoted_params: list[dict[str, Any]] = []
     deprioritized_anchors: list[str] = []
+    rescue_probe_anchors: list[str] = []
     for item in evidence_params or []:
         if not isinstance(item, dict):
             continue
@@ -3746,13 +3870,21 @@ def _early_memory_policy(
         retry_directives.extend(_string_list_from_any(item.get("retry_directives")))
         avoid_directives.extend(_string_list_from_any(item.get("avoid_directives")))
         effective_axes.extend(_string_list_from_any(item.get("effective_axes")))
+        pool_policy = _candidate_pool_policy_from_evidence(item)
+        rescue_probe_anchors.extend(
+            _string_list_from_any(pool_policy.get("rescue_probe_values"))
+        )
+        policy_deprioritized = _string_list_from_any(
+            pool_policy.get("deprioritize_values")
+        )
+        deprioritized_anchors.extend(policy_deprioritized)
         for evidence in item.get("negative_candidate_evidence", []):
             if not isinstance(evidence, dict):
                 continue
             if evidence.get("axis") == "early_anchor" and isinstance(
                 evidence.get("value"),
                 str,
-            ):
+            ) and not policy_deprioritized:
                 deprioritized_anchors.append(str(evidence["value"]))
         outcome = str(item.get("outcome", ""))
         if outcome == "promoted":
@@ -3764,9 +3896,18 @@ def _early_memory_policy(
         "avoid_directives": _dedupe_strings(avoid_directives),
         "effective_axes": _dedupe_strings(effective_axes),
         "deprioritized_anchors": _dedupe_strings(deprioritized_anchors),
+        "rescue_probe_anchors": _dedupe_strings(rescue_probe_anchors),
         "avoid_exact_params": avoid_exact_params,
         "promoted_params": promoted_params,
     }
+
+
+def _candidate_pool_policy_from_evidence(item: dict[str, Any]) -> dict[str, Any]:
+    attribution = item.get("candidate_pool_attribution")
+    if not isinstance(attribution, dict):
+        return {}
+    policy = attribution.get("search_space_policy")
+    return policy if isinstance(policy, dict) else {}
 
 
 def _should_avoid_exact_memory_params(item: dict[str, Any]) -> bool:
@@ -3807,12 +3948,16 @@ def _apply_early_memory_policy(
     deprioritized_anchors = set(
         _string_list_from_any(memory_policy.get("deprioritized_anchors"))
     )
+    rescue_probe_anchors = set(
+        _string_list_from_any(memory_policy.get("rescue_probe_anchors"))
+    )
     filtered.sort(
         key=lambda row: _early_memory_rank_key(
             row=row,
             promoted_params=promoted_params,
             effective_axes=effective_axes,
             deprioritized_anchors=deprioritized_anchors,
+            rescue_probe_anchors=rescue_probe_anchors,
         )
     )
     return filtered
@@ -3833,7 +3978,8 @@ def _early_memory_rank_key(
     promoted_params: list[dict[str, Any]],
     effective_axes: set[str],
     deprioritized_anchors: set[str],
-) -> tuple[int, int, int, int, int, str]:
+    rescue_probe_anchors: set[str],
+) -> tuple[int, int, int, int, int, int, str]:
     exact_promoted = any(_early_params_match(row=row, avoided=item) for item in promoted_params)
     early_axis_reuse = (
         "early_rel_mse" in effective_axes
@@ -3849,11 +3995,13 @@ def _early_memory_rank_key(
         "retrieval",
     }
     deprioritized_anchor = str(row.get("early_anchor", "")) in deprioritized_anchors
+    rescue_probe_anchor = str(row.get("early_anchor", "")) in rescue_probe_anchors
     return (
         0 if exact_promoted else 1,
+        1 if deprioritized_anchor and not rescue_probe_anchor else 0,
         0 if early_axis_reuse else 1,
         0 if guardrail_candidate else 1,
-        1 if deprioritized_anchor else 0,
+        0 if rescue_probe_anchor else 1,
         int(row.get("k", 0)),
         _early_param_sort_key(row),
     )
@@ -4105,6 +4253,7 @@ def _early_refinement_experiment_plan(
             "avoid_directives": memory_policy["avoid_directives"],
             "effective_axes": memory_policy["effective_axes"],
             "deprioritized_anchors": memory_policy["deprioritized_anchors"],
+            "rescue_probe_anchors": memory_policy["rescue_probe_anchors"],
             "avoid_exact_count": len(memory_policy["avoid_exact_params"]),
             "promoted_seed_count": len(memory_policy["promoted_params"]),
         },

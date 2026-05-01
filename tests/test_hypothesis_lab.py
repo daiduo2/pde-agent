@@ -2222,6 +2222,58 @@ def test_hypothesis_lab_candidate_pool_attribution_marks_non_top_anchors() -> No
     assert scaled["best_candidate_id"] == "scaled_bad_025"
 
 
+def test_hypothesis_lab_candidate_pool_policy_separates_rescue_from_deprioritize() -> None:
+    from pde_agent.core.hypothesis_lab import _candidate_pool_attribution
+
+    rows = [
+        {
+            "candidate_id": f"persistence_{index}",
+            "params": {"early_anchor": "persistence"},
+            "segment_score": 50.0 - index * 0.01,
+            "task1_total_score_proxy": 50.0 - index * 0.01,
+            "segments": {"early": {"rel_mse": 0.1 + index * 0.0001}},
+        }
+        for index in range(20)
+    ]
+    rows.extend(
+        [
+            {
+                "candidate_id": "scaled_close",
+                "params": {"early_anchor": "scaled_damped_velocity"},
+                "segment_score": 49.9,
+                "task1_total_score_proxy": 49.9,
+                "segments": {"early": {"rel_mse": 0.105}},
+            },
+            {
+                "candidate_id": "second_order_bad",
+                "params": {"early_anchor": "second_order_velocity"},
+                "segment_score": 20.0,
+                "task1_total_score_proxy": 20.0,
+                "segments": {"early": {"rel_mse": 3.0}},
+            },
+        ]
+    )
+
+    attribution = _candidate_pool_attribution(
+        rows=rows,
+        top_candidate_count=20,
+        family="task1_early_refinement",
+    )
+
+    policy = attribution["search_space_policy"]
+    assert policy["axis"] == "early_anchor"
+    assert policy["focus_values"] == ["persistence"]
+    assert policy["rescue_probe_values"] == ["scaled_damped_velocity"]
+    assert policy["deprioritize_values"] == ["second_order_velocity"]
+    assert {
+        item["action"]: item["value"] for item in policy["recommended_actions"]
+    } == {
+        "keep_focus": "persistence",
+        "budget_probe": "scaled_damped_velocity",
+        "deprioritize": "second_order_velocity",
+    }
+
+
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
     tmp_path: Path,
 ) -> None:
@@ -2959,6 +3011,118 @@ def test_hypothesis_lab_memory_deprioritizes_non_top_anchors(
     assert first_scaled_index > first_persistence_index
     memory_policy = blueprints["blueprints"][0]["experiment_plan"]["memory_policy"]
     assert memory_policy["deprioritized_anchors"] == ["scaled_damped_velocity"]
+
+
+def test_hypothesis_lab_memory_uses_candidate_pool_policy_for_rescue_probes(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_persistence",
+                        "candidate_params": {
+                            "k": 99,
+                            "mode": "affine",
+                            "early_blend_steps": 28,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.5,
+                            "early_anchor": "persistence",
+                        },
+                        "decision": "promote_to_strategy_proposal",
+                        "pareto_status": "dominates_baseline",
+                        "outcome": "promoted",
+                        "bottleneck_type": "initial_derivative_mismatch",
+                        "action_directives": [
+                            "expand_linear_velocity_anchor_search"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                        "candidate_pool_attribution": {
+                            "axis": "early_anchor",
+                            "candidate_count": 24,
+                            "top_candidate_count": 20,
+                            "non_top_anchors": [
+                                "scaled_damped_velocity",
+                                "second_order_velocity",
+                            ],
+                            "search_space_policy": {
+                                "axis": "early_anchor",
+                                "focus_values": ["persistence"],
+                                "rescue_probe_values": [
+                                    "scaled_damped_velocity"
+                                ],
+                                "deprioritize_values": [
+                                    "second_order_velocity"
+                                ],
+                                "recommended_actions": [],
+                            },
+                        },
+                        "negative_candidate_evidence": [
+                            {
+                                "axis": "early_anchor",
+                                "value": "scaled_damped_velocity",
+                                "reason": (
+                                    "generated_but_absent_from_top_candidates"
+                                ),
+                            },
+                            {
+                                "axis": "early_anchor",
+                                "value": "second_order_velocity",
+                                "reason": (
+                                    "generated_but_absent_from_top_candidates"
+                                ),
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    memory_policy = blueprints["blueprints"][0]["experiment_plan"]["memory_policy"]
+    assert memory_policy["rescue_probe_anchors"] == ["scaled_damped_velocity"]
+    assert memory_policy["deprioritized_anchors"] == ["second_order_velocity"]
+    params = blueprints["blueprints"][0]["parameter_grid"]["candidate_params"]
+    first_scaled_index = next(
+        index
+        for index, row in enumerate(params)
+        if row["early_anchor"] == "scaled_damped_velocity"
+    )
+    first_second_order_index = next(
+        index
+        for index, row in enumerate(params)
+        if row["early_anchor"] == "second_order_velocity"
+    )
+    assert first_scaled_index < first_second_order_index
 
 
 def test_hypothesis_lab_run_accepts_failure_memory_input(
