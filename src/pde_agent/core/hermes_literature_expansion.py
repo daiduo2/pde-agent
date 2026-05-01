@@ -20,6 +20,7 @@ from pde_agent.core.strategy_growth import record_strategy_proposal
 STATE_HINT = "HERMES_LITERATURE_STRATEGY_EXPANSION_RAN"
 FAILURE_MEMORY_STATE_HINT = "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED"
 LOCAL_ASSET_CANDIDATES_STATE_HINT = "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT"
+REGISTRY_SUMMARY_STATE_HINT = "HERMES_LITERATURE_REGISTRY_SUMMARY_BUILT"
 
 
 class HermesLiteratureExpansionError(RuntimeError):
@@ -32,6 +33,7 @@ def run_hermes_literature_strategy_expansion(
     workspace_dir: str | Path,
     checkpoint_paths: list[str | Path] | None = None,
     failure_memory_path: str | Path | None = None,
+    registry_summary_path: str | Path | None = None,
     force: bool,
 ) -> dict[str, Any]:
     candidates_file = Path(algorithm_candidates_path)
@@ -58,15 +60,21 @@ def run_hermes_literature_strategy_expansion(
         if failure_memory_path is not None
         else {}
     )
+    registry_summary = (
+        _read_registry_summary(Path(registry_summary_path))
+        if registry_summary_path is not None
+        else {}
+    )
     candidate_rankings = _rank_candidates(
         _candidate_list(candidates_report),
         checkpoint_paths=checkpoints,
         failure_memory=failure_memory,
+        registry_summary=registry_summary,
     )
     skipped_candidates = [
         ranking
         for ranking in candidate_rankings
-        if ranking.get("skip_reason") == "failed_memory"
+        if ranking.get("skip_reason")
     ]
     actions: list[dict[str, Any]] = []
     candidates_by_id = {
@@ -117,12 +125,16 @@ def run_hermes_literature_strategy_expansion(
         "selection_policy": {
             "ordered_by": [
                 "skip failed-memory candidates",
+                "skip registry avoid-repetition candidates",
                 "prefer checkpoint adapters when a resource is available",
                 "then existing bounded executors",
                 "then executor-design proposals",
             ],
             "failure_memory_path": str(failure_memory_path)
             if failure_memory_path is not None
+            else None,
+            "registry_summary_path": str(registry_summary_path)
+            if registry_summary_path is not None
             else None,
         },
         "actions": actions,
@@ -241,16 +253,79 @@ def record_hermes_literature_candidate_outcome(
     return memory
 
 
+def summarize_literature_registry_for_hermes(
+    *,
+    registry_path: str | Path,
+    output_path: str | Path,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, Any]:
+    registry_file = Path(registry_path)
+    registry = _read_json(registry_file)
+    if registry.get("state_hint") != "LITERATURE_REGISTRY_UPDATED":
+        raise HermesLiteratureExpansionError("literature registry has invalid state_hint")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+
+    source_backlog = _registry_source_backlog(registry)
+    candidate_actions = _registry_candidate_actions(
+        registry,
+        current_best_score=float(current_best_score),
+    )
+    learning_signals = _registry_learning_signals(
+        candidate_actions,
+        current_best_score=float(current_best_score),
+    )
+    avoid_repetition = [
+        {
+            "candidate_id": action["candidate_id"],
+            "reason": "sandbox_score_below_current_best",
+            "best_score": action.get("best_score"),
+            "current_best_score": float(current_best_score),
+            "recommended_next": "only_retry_with_new_variant_or_ablation",
+        }
+        for action in candidate_actions
+        if action.get("recommended_action") == "refine_or_ablate"
+        and float(action.get("score_delta_vs_current_best", 0.0)) < 0.0
+    ]
+    report = {
+        "schema_version": 1,
+        "state_hint": REGISTRY_SUMMARY_STATE_HINT,
+        "registry_path": str(registry_file),
+        "summary_path": str(output_file),
+        "current_best_score": float(current_best_score),
+        "source_backlog": source_backlog,
+        "candidate_action_queue": candidate_actions,
+        "learning_signals": learning_signals,
+        "avoid_repetition": avoid_repetition,
+        "metrics": {
+            "source_backlog_count": len(source_backlog),
+            "candidate_action_count": len(candidate_actions),
+            "learning_signal_count": len(learning_signals),
+            "avoid_repetition_count": len(avoid_repetition),
+        },
+        "next_command": _summary_next_command(candidate_actions, source_backlog),
+    }
+    _write_json(output_file, report)
+    return report
+
+
 def _rank_candidates(
     candidates: list[dict[str, Any]],
     *,
     checkpoint_paths: list[Path],
     failure_memory: dict[str, Any],
+    registry_summary: dict[str, Any],
 ) -> list[dict[str, Any]]:
     rankings = []
     failed_ids = set(_string_list(failure_memory.get("failed_algorithm_candidate_ids")))
     failed_keys = set(_string_list(failure_memory.get("failed_candidate_keys")))
     failed_families = set(_string_list(failure_memory.get("failed_candidate_families")))
+    avoid_ids = {
+        item["candidate_id"]
+        for item in _object_items(registry_summary.get("avoid_repetition"))
+        if isinstance(item.get("candidate_id"), str)
+    }
     for index, candidate in enumerate(candidates):
         candidate_id = _text(
             candidate.get("algorithm_candidate_id"),
@@ -274,6 +349,9 @@ def _rank_candidates(
         ):
             ranking["skip_reason"] = "failed_memory"
             ranking["selection_score"] = -1
+        elif candidate_id in avoid_ids:
+            ranking["skip_reason"] = "registry_avoid_repetition"
+            ranking["selection_score"] = -1
         rankings.append(ranking)
     return sorted(
         rankings,
@@ -283,6 +361,232 @@ def _rank_candidates(
             int(item["source_order"]),
         ),
     )
+
+
+def _registry_source_backlog(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    backlog = []
+    for source in registry.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        source_id = _text(source.get("source_id"), "source_id")
+        parse_status = str(source.get("parse_status", "not_parsed"))
+        card_ids = source.get("algorithm_card_ids")
+        if parse_status in {"not_parsed", "unknown", "failed"}:
+            backlog.append(
+                {
+                    "source_id": source_id,
+                    "title": source.get("title"),
+                    "status": "downloaded_not_parsed",
+                    "next_command": "submit-mineru-parse",
+                    "priority": 80,
+                }
+            )
+        elif parse_status == "usable" and not card_ids:
+            backlog.append(
+                {
+                    "source_id": source_id,
+                    "title": source.get("title"),
+                    "status": "parsed_without_algorithm_cards",
+                    "next_command": "extract-algorithm-cards",
+                    "priority": 70,
+                }
+            )
+    return sorted(
+        backlog,
+        key=lambda item: (-int(item["priority"]), str(item["source_id"])),
+    )
+
+
+def _registry_candidate_actions(
+    registry: dict[str, Any],
+    *,
+    current_best_score: float,
+) -> list[dict[str, Any]]:
+    actions = []
+    algorithm_by_candidate = _registry_algorithm_by_candidate(registry)
+    for candidate in registry.get("candidate_nodes", []):
+        if not isinstance(candidate, dict):
+            continue
+        candidate_id = _text(candidate.get("candidate_id"), "candidate_id")
+        status = str(candidate.get("status", "compiled"))
+        executor = str(candidate.get("executor", ""))
+        algorithm = algorithm_by_candidate.get(candidate_id, {})
+        action = {
+            "candidate_id": candidate_id,
+            "candidate_family": candidate.get("candidate_family"),
+            "status": status,
+            "executor": executor,
+            "algorithm_node_id": algorithm.get("node_id"),
+            "source_ids": candidate.get("source_ids", []),
+        }
+        if status == "compiled":
+            action.update(
+                {
+                    "recommended_action": "run_sandbox",
+                    "next_command": executor or "run-hypothesis-lab",
+                    "priority": 100,
+                    "reason": "candidate_has_no_sandbox_evidence",
+                }
+            )
+        elif status == "sandbox_verified":
+            evidence = _latest_sandbox_evidence(candidate)
+            score = _optional_float(evidence.get("best_score"))
+            delta = None if score is None else round(score - current_best_score, 6)
+            should_promote = delta is not None and delta >= 0
+            action.update(
+                {
+                    "recommended_action": (
+                        "promote_strategy" if should_promote else "refine_or_ablate"
+                    ),
+                    "next_command": (
+                        "record-strategy-proposal"
+                        if should_promote
+                        else "run-hermes-literature-strategy-expansion"
+                    ),
+                    "priority": 90 if should_promote else 80,
+                    "reason": (
+                        "sandbox_score_meets_or_exceeds_current_best"
+                        if should_promote
+                        else "sandbox_score_below_current_best"
+                    ),
+                    "best_score": score,
+                    "score_delta_vs_current_best": delta,
+                    "rules_passed": evidence.get("rules_passed"),
+                    "evidence_artifact_path": evidence.get("artifact_path"),
+                }
+            )
+        elif status == "blocked":
+            action.update(
+                {
+                    "recommended_action": "design_executor",
+                    "next_command": "create-executor-design-request",
+                    "priority": 60,
+                    "reason": "candidate_blocked_by_executor_gap",
+                }
+            )
+        elif status == "sandbox_failed":
+            action.update(
+                {
+                    "recommended_action": "deprioritize",
+                    "next_command": "review-sandbox-failure",
+                    "priority": 20,
+                    "reason": "candidate_failed_sandbox_rules",
+                }
+            )
+        else:
+            action.update(
+                {
+                    "recommended_action": "review",
+                    "next_command": "review-literature-registry",
+                    "priority": 10,
+                    "reason": f"unhandled_candidate_status:{status}",
+                }
+            )
+        actions.append(action)
+    return sorted(
+        actions,
+        key=lambda item: (
+            -int(item["priority"]),
+            str(item["candidate_id"]),
+        ),
+    )
+
+
+def _registry_learning_signals(
+    actions: list[dict[str, Any]],
+    *,
+    current_best_score: float,
+) -> list[dict[str, Any]]:
+    signals = []
+    for action in actions:
+        if action.get("recommended_action") == "refine_or_ablate":
+            signals.append(
+                {
+                    "signal": "sandbox_underperformed_current_best",
+                    "candidate_id": action["candidate_id"],
+                    "candidate_family": action.get("candidate_family"),
+                    "best_score": action.get("best_score"),
+                    "current_best_score": current_best_score,
+                    "score_delta_vs_current_best": action.get(
+                        "score_delta_vs_current_best"
+                    ),
+                    "recommended_learning_objective": (
+                        "search_variant_or_ablation_before_retry"
+                    ),
+                }
+            )
+        elif action.get("recommended_action") == "design_executor":
+            signals.append(
+                {
+                    "signal": "executor_gap_blocks_algorithm_family",
+                    "candidate_id": action["candidate_id"],
+                    "candidate_family": action.get("candidate_family"),
+                    "recommended_learning_objective": "build_bounded_executor",
+                }
+            )
+        elif action.get("recommended_action") == "run_sandbox":
+            signals.append(
+                {
+                    "signal": "candidate_needs_first_sandbox_evidence",
+                    "candidate_id": action["candidate_id"],
+                    "candidate_family": action.get("candidate_family"),
+                    "recommended_learning_objective": "measure_before_promotion",
+                }
+            )
+    priority = {
+        "sandbox_underperformed_current_best": 100,
+        "executor_gap_blocks_algorithm_family": 80,
+        "candidate_needs_first_sandbox_evidence": 60,
+    }
+    return sorted(
+        signals,
+        key=lambda item: (
+            -priority.get(str(item.get("signal")), 0),
+            str(item.get("candidate_id")),
+        ),
+    )
+
+
+def _registry_algorithm_by_candidate(
+    registry: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    result = {}
+    for algorithm in registry.get("algorithm_nodes", []):
+        if not isinstance(algorithm, dict):
+            continue
+        for candidate_id in algorithm.get("candidate_ids", []):
+            if isinstance(candidate_id, str):
+                result[candidate_id] = algorithm
+    return result
+
+
+def _latest_sandbox_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
+    evidence = candidate.get("sandbox_evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return {}
+    latest = evidence[-1]
+    return latest if isinstance(latest, dict) else {}
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _summary_next_command(
+    actions: list[dict[str, Any]],
+    source_backlog: list[dict[str, Any]],
+) -> str:
+    if actions:
+        command = actions[0].get("next_command")
+        if isinstance(command, str) and command.strip():
+            return command
+    if source_backlog:
+        return str(source_backlog[0]["next_command"])
+    return "run-hermes-literature-strategy-expansion"
 
 
 def _candidate_route(
@@ -669,6 +973,19 @@ def _read_failure_memory(path: Path) -> dict[str, Any]:
     if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
         raise HermesLiteratureExpansionError("failure memory has invalid state_hint")
     return memory
+
+
+def _read_registry_summary(path: Path) -> dict[str, Any]:
+    summary = _read_json(path)
+    if summary.get("state_hint") != REGISTRY_SUMMARY_STATE_HINT:
+        raise HermesLiteratureExpansionError("registry summary has invalid state_hint")
+    return summary
+
+
+def _object_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _read_json(path: Path) -> dict[str, Any]:

@@ -5,10 +5,12 @@ from pathlib import Path
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
     LOCAL_ASSET_CANDIDATES_STATE_HINT,
+    REGISTRY_SUMMARY_STATE_HINT,
     STATE_HINT,
     build_local_asset_algorithm_candidates,
     record_hermes_literature_candidate_outcome,
     run_hermes_literature_strategy_expansion,
+    summarize_literature_registry_for_hermes,
 )
 from pde_agent.core.json_output import success_payload
 
@@ -19,6 +21,7 @@ def run_hermes_literature_strategy_expansion_command(
     workspace_dir: str,
     checkpoint_paths: list[str] | None,
     failure_memory_path: str | None,
+    registry_summary_path: str | None,
     force: bool,
 ) -> dict[str, object]:
     report = run_hermes_literature_strategy_expansion(
@@ -27,6 +30,9 @@ def run_hermes_literature_strategy_expansion_command(
         checkpoint_paths=[Path(path) for path in (checkpoint_paths or [])],
         failure_memory_path=Path(failure_memory_path)
         if failure_memory_path is not None
+        else None,
+        registry_summary_path=Path(registry_summary_path)
+        if registry_summary_path is not None
         else None,
         force=force,
     )
@@ -102,4 +108,27 @@ def record_hermes_literature_candidate_outcome_command(
             "outcome_count": len(report.get("outcomes", [])),
         },
         next_hint="run-hermes-literature-strategy-expansion",
+    )
+
+
+def summarize_literature_registry_for_hermes_command(
+    *,
+    registry_path: str,
+    output_path: str,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, object]:
+    report = summarize_literature_registry_for_hermes(
+        registry_path=Path(registry_path),
+        output_path=Path(output_path),
+        current_best_score=current_best_score,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="summarize-literature-registry-for-hermes",
+        state_hint=REGISTRY_SUMMARY_STATE_HINT,
+        artifacts={"hermes_registry_summary_path": report["summary_path"]},
+        metrics=report["metrics"],
+        next_hint=report["next_command"],
     )

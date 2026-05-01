@@ -188,6 +188,74 @@ def test_hermes_literature_expansion_skips_failed_memory(
     assert report["actions"][0]["algorithm_candidate_id"] == "candidate_residual"
 
 
+def test_hermes_literature_expansion_uses_registry_summary_to_skip_repetition(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        run_hermes_literature_strategy_expansion,
+    )
+
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "FNO_ARCHITECTURE_CANDIDATE_ADAPTED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_checkpoint_adapter",
+                        "candidate_family": "official_checkpoint_family",
+                        "target_problem": "PDE_Burgers",
+                        "target_task": "task1",
+                        "executor_spec": {
+                            "cli_command": "run-checkpoint-family-sandbox"
+                        },
+                        "resource_bindings": {
+                            "checkpoint_paths": [str(tmp_path / "burgers_FNO.tar")]
+                        },
+                        "source_grounding": {
+                            "source_ids": ["source_fno"],
+                            "algorithm_card_id": "card_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary_path = tmp_path / "hermes_registry_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_REGISTRY_SUMMARY_BUILT",
+                "avoid_repetition": [
+                    {
+                        "candidate_id": "candidate_checkpoint_adapter",
+                        "reason": "sandbox_score_below_current_best",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_hermes_literature_strategy_expansion(
+        algorithm_candidates_path=candidates_path,
+        workspace_dir=tmp_path / "workspace",
+        checkpoint_paths=[],
+        registry_summary_path=summary_path,
+        force=False,
+    )
+
+    assert report["action_count"] == 0
+    assert report["skipped_count"] == 1
+    assert report["skipped_candidates"][0]["skip_reason"] == (
+        "registry_avoid_repetition"
+    )
+    assert report["next_command"] == "build-local-asset-algorithm-candidates"
+
+
 def test_hermes_literature_expansion_records_proposal_for_blocked_candidate(
     tmp_path: Path,
 ) -> None:
@@ -241,6 +309,111 @@ def test_record_hermes_literature_candidate_outcome_adds_failure_memory(
     assert report["failed_candidate_keys"] == [
         "card_fno|fourier_neural_operator_architecture"
     ]
+
+
+def test_summarize_literature_registry_for_hermes_builds_learning_queue(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        summarize_literature_registry_for_hermes,
+    )
+
+    registry_path = tmp_path / "literature_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_REGISTRY_UPDATED",
+                "sources": [
+                    {
+                        "source_id": "source_downloaded",
+                        "title": "Downloaded Paper",
+                        "download_status": "downloaded",
+                        "parse_status": "not_parsed",
+                    },
+                    {
+                        "source_id": "source_parsed",
+                        "title": "Parsed Paper",
+                        "download_status": "downloaded",
+                        "parse_status": "usable",
+                        "algorithm_card_ids": [],
+                    },
+                ],
+                "algorithm_nodes": [
+                    {
+                        "node_id": "algorithm_card_checkpoint",
+                        "algorithm_card_id": "card_checkpoint",
+                        "strategy_status": "sandbox_verified",
+                        "candidate_ids": ["candidate_checkpoint_adapter"],
+                        "source_ids": ["source_fno"],
+                    },
+                    {
+                        "node_id": "algorithm_card_executor_gap",
+                        "algorithm_card_id": "card_executor_gap",
+                        "strategy_status": "blocked",
+                        "candidate_ids": ["candidate_blocked"],
+                        "source_ids": ["source_blocked"],
+                    },
+                ],
+                "candidate_nodes": [
+                    {
+                        "candidate_id": "candidate_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "status": "compiled",
+                        "executor": "run-blueprint-sandbox",
+                        "source_ids": ["source_residual"],
+                    },
+                    {
+                        "candidate_id": "candidate_checkpoint_adapter",
+                        "candidate_family": "official_checkpoint_family",
+                        "status": "sandbox_verified",
+                        "executor": "run-checkpoint-family-sandbox",
+                        "source_ids": ["source_fno"],
+                        "sandbox_evidence": [
+                            {
+                                "best_score": 83.6,
+                                "rules_passed": True,
+                                "inference_time": 5.9,
+                                "artifact_path": "checkpoint_report.json",
+                            }
+                        ],
+                    },
+                    {
+                        "candidate_id": "candidate_blocked",
+                        "candidate_family": "unsupported",
+                        "status": "blocked",
+                        "executor": "blocked_requires_executor_design",
+                        "source_ids": ["source_blocked"],
+                    },
+                ],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = summarize_literature_registry_for_hermes(
+        registry_path=registry_path,
+        output_path=tmp_path / "hermes_registry_summary.json",
+        current_best_score=86.0,
+        force=False,
+    )
+
+    assert report["state_hint"] == "HERMES_LITERATURE_REGISTRY_SUMMARY_BUILT"
+    assert report["next_command"] == "run-blueprint-sandbox"
+    assert report["source_backlog"][0]["next_command"] == "submit-mineru-parse"
+    assert report["source_backlog"][1]["next_command"] == "extract-algorithm-cards"
+    actions = report["candidate_action_queue"]
+    assert actions[0]["candidate_id"] == "candidate_residual"
+    assert actions[0]["recommended_action"] == "run_sandbox"
+    assert actions[1]["candidate_id"] == "candidate_checkpoint_adapter"
+    assert actions[1]["recommended_action"] == "refine_or_ablate"
+    assert actions[1]["score_delta_vs_current_best"] == -2.4
+    assert actions[2]["recommended_action"] == "design_executor"
+    signals = report["learning_signals"]
+    assert signals[0]["signal"] == "sandbox_underperformed_current_best"
+    assert signals[0]["candidate_id"] == "candidate_checkpoint_adapter"
+    assert report["avoid_repetition"][0]["candidate_id"] == "candidate_checkpoint_adapter"
 
 
 def test_checkpoint_failure_memory_skips_local_checkpoint_family(
@@ -486,6 +659,58 @@ def test_record_hermes_literature_candidate_outcome_cli_returns_payload(
     payload = json.loads(result.stdout)
     assert payload["state_hint"] == "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED"
     assert payload["metrics"]["failed_candidate_count"] == 1
+
+
+def test_summarize_literature_registry_for_hermes_cli_returns_payload(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    registry_path = tmp_path / "literature_registry.json"
+    summary_path = tmp_path / "hermes_registry_summary.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_REGISTRY_UPDATED",
+                "sources": [],
+                "algorithm_nodes": [],
+                "candidate_nodes": [
+                    {
+                        "candidate_id": "candidate_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "status": "compiled",
+                        "executor": "run-blueprint-sandbox",
+                        "source_ids": [],
+                    }
+                ],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "summarize-literature-registry-for-hermes",
+            "--registry-path",
+            str(registry_path),
+            "--output-path",
+            str(summary_path),
+            "--current-best-score",
+            "86.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "HERMES_LITERATURE_REGISTRY_SUMMARY_BUILT"
+    assert payload["metrics"]["candidate_action_count"] == 1
+    assert payload["next_hint"] == "run-blueprint-sandbox"
+    assert summary_path.exists()
 
 
 def test_hermes_literature_expansion_cli_returns_payload(

@@ -227,6 +227,7 @@ from pde_agent.commands.run_hermes_literature_strategy_expansion import (
     build_local_asset_algorithm_candidates_command,
     record_hermes_literature_candidate_outcome_command,
     run_hermes_literature_strategy_expansion_command,
+    summarize_literature_registry_for_hermes_command,
 )
 from pde_agent.commands.run_hermes_three_stage_policy import (
     run_hermes_three_stage_policy_command,
@@ -1467,6 +1468,7 @@ def run_hermes_literature_strategy_expansion_cmd(
     workspace_dir: str = typer.Option(...),
     checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
     failure_memory_path: str | None = typer.Option(None),
+    registry_summary_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1478,6 +1480,7 @@ def run_hermes_literature_strategy_expansion_cmd(
                 workspace_dir=workspace_dir,
                 checkpoint_paths=checkpoint_paths,
                 failure_memory_path=failure_memory_path,
+                registry_summary_path=registry_summary_path,
                 force=force,
             )
         )
@@ -1503,6 +1506,27 @@ def record_hermes_literature_candidate_outcome_cmd(
                 outcome=outcome,
                 reason_codes=reason_codes,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("summarize-literature-registry-for-hermes")
+def summarize_literature_registry_for_hermes_cmd(
+    registry_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    current_best_score: float = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            summarize_literature_registry_for_hermes_command(
+                registry_path=registry_path,
+                output_path=output_path,
+                current_best_score=current_best_score,
                 force=force,
             )
         )
