@@ -1217,43 +1217,68 @@ def extract_algorithm_cards(
             "parsed markdown",
         )
         markdown = markdown_file.read_text(encoding="utf-8")
-        fields = _extract_colon_fields(markdown)
-        if "hook" not in fields:
-            fields = _infer_algorithm_fields(markdown)
+        field_blocks = _extract_algorithm_card_field_blocks(markdown)
+        if not field_blocks:
+            field_blocks = [
+                {
+                    "fields": _extract_colon_fields(markdown),
+                    "markdown": markdown,
+                    "section_title": None,
+                    "block_index": 0,
+                    "source_shape": "whole_document",
+                }
+            ]
         source_id = _nonempty_text(parse.get("source_id"), "source_id")
-        hook = _nonempty_text(fields.get("hook"), "Hook")
-        card = {
-            "algorithm_card_id": f"card_{source_id}_{_slug(hook)}",
-            "source_ids": [source_id],
-            "claim": _nonempty_text(fields.get("claim"), "Claim"),
-            "core_mechanism": _nonempty_text(
-                fields.get("mechanism"),
-                "Mechanism",
-            ),
-            "operation": _nonempty_text(fields.get("operation"), "Operation"),
-            "preconditions": ["PDEBench-style neural operator rollout"],
-            "implementation_hooks": [hook],
-            "expected_observables": [
-                _nonempty_text(fields.get("observable"), "Observable")
-            ],
-            "failure_modes": [_nonempty_text(fields.get("risk"), "Risk")],
-            "minimal_experiment": _nonempty_text(
-                fields.get("minimal experiment"),
-                "Minimal Experiment",
-            ),
-            "evidence_status": "extracted",
-        }
-        card.update(
-            _algorithm_card_v2_fields(
-                fields=fields,
-                hook=hook,
-                markdown=markdown,
-                parse=parse,
-                parse_path=Path(parse_path),
-                markdown_path=markdown_file,
+        for field_block in field_blocks:
+            fields = dict(field_block["fields"])
+            block_markdown = str(field_block["markdown"])
+            if "hook" not in fields:
+                fields = _infer_algorithm_fields(block_markdown)
+            hook = _nonempty_text(fields.get("hook"), "Hook")
+            section_title = field_block.get("section_title")
+            card = {
+                "algorithm_card_id": _algorithm_card_id(
+                    source_id=source_id,
+                    hook=hook,
+                    section_title=section_title
+                    if isinstance(section_title, str)
+                    else None,
+                ),
+                "source_ids": [source_id],
+                "claim": _nonempty_text(fields.get("claim"), "Claim"),
+                "core_mechanism": _nonempty_text(
+                    fields.get("mechanism"),
+                    "Mechanism",
+                ),
+                "operation": _nonempty_text(fields.get("operation"), "Operation"),
+                "preconditions": ["PDEBench-style neural operator rollout"],
+                "implementation_hooks": [hook],
+                "expected_observables": [
+                    _nonempty_text(fields.get("observable"), "Observable")
+                ],
+                "failure_modes": [_nonempty_text(fields.get("risk"), "Risk")],
+                "minimal_experiment": _nonempty_text(
+                    fields.get("minimal experiment"),
+                    "Minimal Experiment",
+                ),
+                "evidence_status": "extracted",
+            }
+            card.update(
+                _algorithm_card_v2_fields(
+                    fields=fields,
+                    hook=hook,
+                    markdown=block_markdown,
+                    parse=parse,
+                    parse_path=Path(parse_path),
+                    markdown_path=markdown_file,
+                    section_title=section_title
+                    if isinstance(section_title, str)
+                    else None,
+                    block_index=int(field_block["block_index"]),
+                    source_shape=str(field_block["source_shape"]),
+                )
             )
-        )
-        cards.append(card)
+            cards.append(card)
     if not cards:
         raise LiteratureAlgorithmLabError("no usable algorithm cards extracted")
     report = {
@@ -2549,6 +2574,73 @@ def _extract_colon_fields(markdown: str) -> dict[str, str]:
     return fields
 
 
+def _extract_algorithm_card_field_blocks(markdown: str) -> list[dict[str, Any]]:
+    blocks = _markdown_heading_blocks(markdown)
+    algorithm_blocks = []
+    for block in blocks:
+        fields = _extract_colon_fields(str(block["markdown"]))
+        if _has_complete_algorithm_card_fields(fields):
+            algorithm_blocks.append(
+                {
+                    "fields": fields,
+                    "markdown": block["markdown"],
+                    "section_title": block["section_title"],
+                    "block_index": block["block_index"],
+                    "source_shape": "structured_section",
+                }
+            )
+    return algorithm_blocks
+
+
+def _markdown_heading_blocks(markdown: str) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    current_title: str | None = None
+    current_lines: list[str] = []
+    current_index = 0
+    for line in markdown.splitlines():
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", line)
+        if heading:
+            if current_lines:
+                blocks.append(
+                    {
+                        "section_title": current_title,
+                        "markdown": "\n".join(current_lines).strip(),
+                        "block_index": current_index,
+                    }
+                )
+                current_index += 1
+            current_title = heading.group(2).strip()
+            current_lines = [line]
+            continue
+        current_lines.append(line)
+    if current_lines:
+        blocks.append(
+            {
+                "section_title": current_title,
+                "markdown": "\n".join(current_lines).strip(),
+                "block_index": current_index,
+            }
+        )
+    return [block for block in blocks if str(block["markdown"]).strip()]
+
+
+def _has_complete_algorithm_card_fields(fields: dict[str, str]) -> bool:
+    return all(key in fields for key in ["claim", "mechanism", "operation", "hook"])
+
+
+def _algorithm_card_id(
+    *,
+    source_id: str,
+    hook: str,
+    section_title: str | None,
+) -> str:
+    parts = ["card", source_id]
+    if section_title:
+        parts.append(_slug(section_title))
+    parts.append(_slug(hook))
+    return "_".join(parts)
+
+
 def _infer_algorithm_fields(markdown: str) -> dict[str, str]:
     lowered = markdown.lower()
     if "fourier neural operator" in lowered:
@@ -2592,12 +2684,27 @@ def _algorithm_card_v2_fields(
     parse: dict[str, Any],
     parse_path: Path,
     markdown_path: Path,
+    section_title: str | None,
+    block_index: int,
+    source_shape: str,
 ) -> dict[str, Any]:
     normalized_hook = _normalize_algorithm_hook(hook)
     defaults = HOOK_TO_ALGORITHM_CARD_V2.get(
         normalized_hook,
         _infer_algorithm_card_v2_defaults(markdown),
     )
+    provenance = {
+        "source_id": _nonempty_text(parse.get("source_id"), "source_id"),
+        "paper_parse_path": str(parse_path),
+        "markdown_path": str(markdown_path),
+        "extractor": "heuristic_algorithm_card_v2",
+        "normalized_hook": normalized_hook,
+        "section_index": parse.get("section_index", []),
+        "source_shape": source_shape,
+        "block_index": block_index,
+    }
+    if section_title:
+        provenance["section_title"] = section_title
     return {
         "operator_target": _algorithm_card_v2_enum_or_default(
             fields.get("operator target") or fields.get("operator_target"),
@@ -2617,14 +2724,7 @@ def _algorithm_card_v2_fields(
             fields=fields,
             defaults=defaults["implementation_requirements"],
         ),
-        "provenance": {
-            "source_id": _nonempty_text(parse.get("source_id"), "source_id"),
-            "paper_parse_path": str(parse_path),
-            "markdown_path": str(markdown_path),
-            "extractor": "heuristic_algorithm_card_v2",
-            "normalized_hook": normalized_hook,
-            "section_index": parse.get("section_index", []),
-        },
+        "provenance": provenance,
     }
 
 

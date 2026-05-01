@@ -2109,6 +2109,89 @@ def test_extract_algorithm_cards_emits_algorithm_card_v2_fields(
     assert audit["issue_count"] == 0
 
 
+def test_extract_algorithm_cards_reads_multiple_structured_sections(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        extract_algorithm_cards,
+        validate_algorithm_cards_v2,
+    )
+
+    markdown = tmp_path / "multi.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Burgers Operator Stabilization Notes",
+                "## Abstract",
+                "We study several bounded neural-operator improvements for Burgers rollouts.",
+                "## Method",
+                "### Residual Corrector",
+                "Claim: Residual correction reduces short-horizon checkpoint bias.",
+                "Mechanism: Learn a residual operator from local validation windows.",
+                "Operation: Fit and apply a horizon-decayed residual correction.",
+                "Hook: learned_residual_correction",
+                "Observable: lower early Rel-MSE.",
+                "Risk: can overfit validation windows.",
+                "Minimal Experiment: compare checkpoint rollout against residual-corrected rollout.",
+                "### Spectral Stabilizer",
+                "Claim: Spectral damping suppresses late-horizon high-frequency drift.",
+                "Mechanism: Damp high Fourier modes only after the context window.",
+                "Operation: Apply a cutoff spectral filter during autoregressive rollout.",
+                "Hook: spectral_rollout_stabilization",
+                "Observable: lower late RMSE.",
+                "Risk: can oversmooth shocks.",
+                "Minimal Experiment: sweep spectral cutoff and damping on held-out Burgers windows.",
+                "## Experiments",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_multi_method",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {
+                    "abstract": 2,
+                    "method": 4,
+                    "residual corrector": 5,
+                    "spectral stabilizer": 13,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=tmp_path / "algorithm_cards.json",
+        output_path=tmp_path / "algorithm_cards_v2_audit.json",
+        force=False,
+    )
+
+    assert report["algorithm_card_count"] == 2
+    hooks = [card["implementation_hooks"][0] for card in report["algorithm_cards"]]
+    assert hooks == [
+        "learned_residual_correction",
+        "spectral_rollout_stabilization",
+    ]
+    assert {
+        card["provenance"]["section_title"] for card in report["algorithm_cards"]
+    } == {"Residual Corrector", "Spectral Stabilizer"}
+    assert len({card["algorithm_card_id"] for card in report["algorithm_cards"]}) == 2
+    assert audit["decision"] == "approved"
+    assert audit["issue_count"] == 0
+
+
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
 
