@@ -2168,6 +2168,60 @@ def test_hypothesis_lab_sandbox_executes_compound_calibration_anchors(
     assert sandbox["best_candidate"]["metadata"]["early_anchor"] in anchors
 
 
+def test_hypothesis_lab_candidate_pool_attribution_marks_non_top_anchors() -> None:
+    from pde_agent.core.hypothesis_lab import _candidate_pool_attribution
+
+    rows = [
+        {
+            "candidate_id": f"persistence_{index}",
+            "params": {"early_anchor": "persistence"},
+            "segment_score": 50.0 - index * 0.1,
+            "task1_total_score_proxy": 50.0 - index * 0.1,
+            "segments": {"early": {"rel_mse": 0.1 + index * 0.001}},
+        }
+        for index in range(20)
+    ]
+    rows.extend(
+        [
+            {
+                "candidate_id": "scaled_bad_025",
+                "params": {
+                    "early_anchor": "scaled_damped_velocity",
+                    "velocity_scale": 0.25,
+                },
+                "segment_score": 20.0,
+                "task1_total_score_proxy": 20.0,
+                "segments": {"early": {"rel_mse": 2.0}},
+            },
+            {
+                "candidate_id": "scaled_bad_050",
+                "params": {
+                    "early_anchor": "scaled_damped_velocity",
+                    "velocity_scale": 0.5,
+                },
+                "segment_score": 19.0,
+                "task1_total_score_proxy": 19.0,
+                "segments": {"early": {"rel_mse": 2.5}},
+            },
+        ]
+    )
+
+    attribution = _candidate_pool_attribution(
+        rows=rows,
+        top_candidate_count=20,
+        family="task1_early_refinement",
+    )
+
+    assert attribution["axis"] == "early_anchor"
+    assert attribution["candidate_count"] == 22
+    assert attribution["non_top_anchors"] == ["scaled_damped_velocity"]
+    scaled = attribution["by_early_anchor"]["scaled_damped_velocity"]
+    assert scaled["candidate_count"] == 2
+    assert scaled["top_candidate_count"] == 0
+    assert scaled["best_early_rel_mse"] == 2.0
+    assert scaled["best_candidate_id"] == "scaled_bad_025"
+
+
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
     tmp_path: Path,
 ) -> None:
@@ -2449,6 +2503,110 @@ def test_hypothesis_lab_records_pareto_failure_memory_tradeoff(
     assert summary["last_pareto_status"] == "tradeoff_evidence"
 
 
+def test_hypothesis_lab_records_candidate_pool_negative_memory(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import _record_pareto_failure_memory
+
+    sandbox = {
+        "blueprint_id": "bp_task1_early_refinement_001",
+        "candidate_family": "task1_early_refinement",
+        "best_candidate": {
+            "candidate_id": "task1_early_refinement_persistence",
+            "params": {
+                "k": 99,
+                "mode": "affine",
+                "early_blend_steps": 28,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+                "early_anchor": "persistence",
+            },
+        },
+        "candidate_pool_attribution": {
+            "axis": "early_anchor",
+            "candidate_count": 24,
+            "top_candidate_count": 20,
+            "non_top_anchors": ["scaled_damped_velocity"],
+            "by_early_anchor": {
+                "persistence": {
+                    "candidate_count": 20,
+                    "top_candidate_count": 20,
+                    "best_early_rel_mse": 0.1,
+                    "best_segment_score": 47.8,
+                    "best_candidate_id": "task1_early_refinement_persistence",
+                },
+                "scaled_damped_velocity": {
+                    "candidate_count": 4,
+                    "top_candidate_count": 0,
+                    "best_early_rel_mse": 2.0,
+                    "best_segment_score": 20.0,
+                    "best_candidate_id": "scaled_bad_025",
+                },
+            },
+        },
+        "verifier": {
+            "decision": "promote_to_strategy_proposal",
+            "score_delta_vs_baseline": 1.0,
+            "best_segment_score": 47.8,
+            "pareto_promotion_gate": {
+                "decision": "promote_to_strategy_proposal",
+                "pareto_status": "dominates_baseline",
+                "reason_codes": [],
+                "objective_axes": {
+                    "early_rel_mse": {
+                        "value": -0.1,
+                        "threshold": 0.0,
+                        "passed": True,
+                        "improved": True,
+                        "metric": "early_rel_mse_delta_vs_baseline",
+                    }
+                },
+            },
+            "early_segment_diagnosis": {
+                "bottleneck_type": "initial_derivative_mismatch",
+                "reason_codes": ["early_rel_mse_high"],
+                "action_directives": [
+                    {
+                        "directive": "expand_linear_velocity_anchor_search",
+                        "target_family": "task1_early_refinement",
+                    }
+                ],
+            },
+        },
+        "artifacts": {
+            "sandbox_report_path": str(tmp_path / "sandbox_report.json"),
+        },
+    }
+
+    report = _record_pareto_failure_memory(
+        sandbox=sandbox,
+        failure_memory_output_path=tmp_path / "failure_memory.json",
+        algorithm_candidate_evidence=None,
+        force=False,
+    )
+
+    memory = json.loads(
+        Path(report["failure_memory_path"]).read_text(encoding="utf-8")
+    )
+    event = memory["pareto_learning_events"][0]
+    assert event["candidate_pool_attribution"]["non_top_anchors"] == [
+        "scaled_damped_velocity"
+    ]
+    assert event["negative_candidate_evidence"] == [
+        {
+            "axis": "early_anchor",
+            "value": "scaled_damped_velocity",
+            "reason": "generated_but_absent_from_top_candidates",
+            "candidate_count": 4,
+            "top_candidate_count": 0,
+            "best_early_rel_mse": 2.0,
+            "best_segment_score": 20.0,
+        }
+    ]
+    summary = memory["pareto_learning_summary"]["task1_early_refinement"]
+    assert summary["ineffective_anchors"] == ["scaled_damped_velocity"]
+
+
 def test_hypothesis_lab_reads_pareto_memory_into_knowledge_cards(
     tmp_path: Path,
 ) -> None:
@@ -2711,6 +2869,96 @@ def test_hypothesis_lab_memory_directives_filter_repeated_evidence_only_params(
     assert "do_not_promote_primary_axis_without_total_score" in memory_policy[
         "avoid_directives"
     ]
+
+
+def test_hypothesis_lab_memory_deprioritizes_non_top_anchors(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_persistence",
+                        "candidate_params": {
+                            "k": 99,
+                            "mode": "affine",
+                            "early_blend_steps": 28,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.5,
+                            "early_anchor": "persistence",
+                        },
+                        "decision": "promote_to_strategy_proposal",
+                        "pareto_status": "dominates_baseline",
+                        "outcome": "promoted",
+                        "bottleneck_type": "initial_derivative_mismatch",
+                        "action_directives": [
+                            "expand_linear_velocity_anchor_search"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                        "candidate_pool_attribution": {
+                            "axis": "early_anchor",
+                            "candidate_count": 24,
+                            "top_candidate_count": 20,
+                            "non_top_anchors": ["scaled_damped_velocity"],
+                        },
+                        "negative_candidate_evidence": [
+                            {
+                                "axis": "early_anchor",
+                                "value": "scaled_damped_velocity",
+                                "reason": (
+                                    "generated_but_absent_from_top_candidates"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    params = blueprints["blueprints"][0]["parameter_grid"]["candidate_params"]
+    first_scaled_index = next(
+        index
+        for index, row in enumerate(params)
+        if row["early_anchor"] == "scaled_damped_velocity"
+    )
+    first_persistence_index = next(
+        index
+        for index, row in enumerate(params)
+        if row["early_anchor"] == "persistence"
+    )
+    assert first_scaled_index > first_persistence_index
+    memory_policy = blueprints["blueprints"][0]["experiment_plan"]["memory_policy"]
+    assert memory_policy["deprioritized_anchors"] == ["scaled_damped_velocity"]
 
 
 def test_hypothesis_lab_run_accepts_failure_memory_input(

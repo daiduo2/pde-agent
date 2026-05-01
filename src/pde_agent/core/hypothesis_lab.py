@@ -431,7 +431,7 @@ def _merge_card_list(cards: list[dict[str, Any]], key: str) -> list[str]:
 
 def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
-    seen: set[str] = set()
+    by_key: dict[str, dict[str, Any]] = {}
     for card in cards:
         evidence = card.get("evidence")
         if not isinstance(evidence, dict):
@@ -443,26 +443,30 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
         if normalized is None:
             continue
         key = json.dumps(params, sort_keys=True)
-        if key in seen:
+        if key in by_key:
+            _merge_ranked_evidence_row(by_key[key], evidence)
             continue
-        seen.add(key)
-        rows.append(
-            {
-                "params": normalized,
-                "source_card_id": card["card_id"],
-                "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
-                "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
-                "segment_score": evidence.get("segment_score"),
-                "source_kind": evidence.get("source_kind"),
-                "outcome": evidence.get("outcome"),
-                "pareto_status": evidence.get("pareto_status"),
-                "effective_axes": evidence.get("effective_axes", []),
-                "retry_directives": evidence.get("retry_directives", []),
-                "avoid_directives": evidence.get("avoid_directives", []),
-                "search_directives": evidence.get("search_directives", []),
-                "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
-            }
-        )
+        row = {
+            "params": normalized,
+            "source_card_id": card["card_id"],
+            "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
+            "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
+            "segment_score": evidence.get("segment_score"),
+            "source_kind": evidence.get("source_kind"),
+            "outcome": evidence.get("outcome"),
+            "pareto_status": evidence.get("pareto_status"),
+            "effective_axes": evidence.get("effective_axes", []),
+            "retry_directives": evidence.get("retry_directives", []),
+            "avoid_directives": evidence.get("avoid_directives", []),
+            "negative_candidate_evidence": evidence.get(
+                "negative_candidate_evidence",
+                [],
+            ),
+            "search_directives": evidence.get("search_directives", []),
+            "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
+        }
+        by_key[key] = row
+        rows.append(row)
     rows.sort(
         key=lambda item: (
             -float(
@@ -479,6 +483,35 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
         )
     )
     return rows
+
+
+def _merge_ranked_evidence_row(row: dict[str, Any], evidence: dict[str, Any]) -> None:
+    for key in [
+        "effective_axes",
+        "retry_directives",
+        "avoid_directives",
+        "negative_candidate_evidence",
+        "search_directives",
+    ]:
+        values = row.setdefault(key, [])
+        if not isinstance(values, list):
+            values = []
+            row[key] = values
+        for item in evidence.get(key, []):
+            marker = json.dumps(item, sort_keys=True) if isinstance(item, dict) else str(item)
+            existing = {
+                json.dumps(value, sort_keys=True)
+                if isinstance(value, dict)
+                else str(value)
+                for value in values
+            }
+            if marker not in existing:
+                values.append(item)
+    if row.get("early_segment_diagnosis") is None and isinstance(
+        evidence.get("early_segment_diagnosis"),
+        dict,
+    ):
+        row["early_segment_diagnosis"] = evidence["early_segment_diagnosis"]
 
 
 def _normalize_evidence_params(params: dict[str, Any]) -> dict[str, Any] | None:
@@ -1034,6 +1067,11 @@ def run_blueprint_sandbox(
         - baseline_total
     )
     serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
+    candidate_pool_attribution = _candidate_pool_attribution(
+        rows=serializable_rows,
+        top_candidate_count=20,
+        family=family,
+    )
     metric_results = _sandbox_metric_results(
         judge=judge,
         baseline_score=baseline_score,
@@ -1104,6 +1142,7 @@ def run_blueprint_sandbox(
         "best_candidate": {k: v for k, v in best.items() if k != "_prediction"},
         "verifier": verifier,
         "top_candidates": serializable_rows[:20],
+        "candidate_pool_attribution": candidate_pool_attribution,
         "artifacts": {
             "sandbox_report_path": str(report_path),
             "best_prediction_path": str(prediction_path),
@@ -1595,6 +1634,11 @@ def _pareto_memory_card(
     avoid_directives = _string_list_from_any(event.get("avoid_directives"))
     retry_directives = _string_list_from_any(event.get("retry_directives"))
     effective_axes = _string_list_from_any(event.get("effective_axes"))
+    negative_candidate_evidence = [
+        item
+        for item in event.get("negative_candidate_evidence", [])
+        if isinstance(item, dict)
+    ]
     return {
         "card_id": f"pareto_memory_{memory_file.stem}_{index:03d}",
         "source_type": "pareto_learning_memory",
@@ -1619,6 +1663,11 @@ def _pareto_memory_card(
             "effective axes are reused only under guardrails",
         ],
         "known_risks": avoid_directives
+        + [
+            f"deprioritize_{item.get('axis')}:{item.get('value')}"
+            for item in negative_candidate_evidence
+            if item.get("axis") and item.get("value")
+        ]
         or ["memory replay can overfit a single sandbox window"],
         "evidence_status": outcome,
         "evidence": {
@@ -1631,6 +1680,10 @@ def _pareto_memory_card(
             "effective_axes": effective_axes,
             "retry_directives": retry_directives,
             "avoid_directives": avoid_directives,
+            "candidate_pool_attribution": event.get("candidate_pool_attribution")
+            if isinstance(event.get("candidate_pool_attribution"), dict)
+            else {},
+            "negative_candidate_evidence": negative_candidate_evidence,
             "early_segment_diagnosis": diagnosis,
             "task1_total_score_proxy": event.get("best_segment_score"),
             "segment_score": event.get("best_segment_score"),
@@ -1899,6 +1952,11 @@ def _pareto_learning_event(
         if isinstance(sandbox.get("best_candidate"), dict)
         else {}
     )
+    candidate_pool_attribution = (
+        sandbox.get("candidate_pool_attribution")
+        if isinstance(sandbox.get("candidate_pool_attribution"), dict)
+        else {}
+    )
     candidate_family = str(sandbox.get("candidate_family", "unknown"))
     decision = str(verifier.get("decision") or gate.get("decision") or "unknown")
     pareto_status = str(gate.get("pareto_status", "unknown"))
@@ -1927,6 +1985,10 @@ def _pareto_learning_event(
         "objective_axes": objective_axes,
         "effective_axes": _pareto_effective_axes(objective_axes),
         "guardrail_regressions": _pareto_guardrail_regressions(objective_axes),
+        "candidate_pool_attribution": candidate_pool_attribution,
+        "negative_candidate_evidence": _candidate_pool_negative_evidence(
+            candidate_pool_attribution
+        ),
         "retry_directives": _pareto_retry_directives(
             decision=decision,
             objective_axes=objective_axes,
@@ -1942,6 +2004,34 @@ def _pareto_learning_event(
         )
         event["candidate_key"] = algorithm_candidate_evidence.get("candidate_key")
     return event
+
+
+def _candidate_pool_negative_evidence(
+    attribution: dict[str, Any],
+) -> list[dict[str, Any]]:
+    axis = str(attribution.get("axis", ""))
+    if axis != "early_anchor":
+        return []
+    by_anchor = attribution.get("by_early_anchor")
+    if not isinstance(by_anchor, dict):
+        return []
+    evidence = []
+    for anchor in _string_list_from_any(attribution.get("non_top_anchors")):
+        payload = by_anchor.get(anchor)
+        if not isinstance(payload, dict):
+            continue
+        evidence.append(
+            {
+                "axis": "early_anchor",
+                "value": anchor,
+                "reason": "generated_but_absent_from_top_candidates",
+                "candidate_count": int(payload.get("candidate_count", 0)),
+                "top_candidate_count": int(payload.get("top_candidate_count", 0)),
+                "best_early_rel_mse": payload.get("best_early_rel_mse"),
+                "best_segment_score": payload.get("best_segment_score"),
+            }
+        )
+    return evidence
 
 
 def _pareto_memory_axes(value: Any) -> dict[str, dict[str, Any]]:
@@ -2074,6 +2164,11 @@ def _update_pareto_learning_summary(
     for axis in event.get("guardrail_regressions", []):
         if isinstance(axis, str):
             _append_unique(family_summary, "guardrail_regressions", axis)
+    for item in event.get("negative_candidate_evidence", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("axis") == "early_anchor" and isinstance(item.get("value"), str):
+            _append_unique(family_summary, "ineffective_anchors", str(item["value"]))
     family_summary["last_pareto_status"] = event.get("pareto_status")
 
 
@@ -3026,6 +3121,83 @@ def _candidate_metadata(
     return metadata
 
 
+def _candidate_pool_attribution(
+    *,
+    rows: list[dict[str, Any]],
+    top_candidate_count: int,
+    family: str,
+) -> dict[str, Any]:
+    axis = "early_anchor" if family == "task1_early_refinement" else "mode"
+    top_ids = {
+        str(row.get("candidate_id", ""))
+        for row in rows[: max(0, int(top_candidate_count))]
+    }
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        params = row.get("params") if isinstance(row.get("params"), dict) else {}
+        value = params.get(axis)
+        if value is None:
+            value = row.get(axis, "unknown")
+        groups.setdefault(str(value), []).append(row)
+    by_value = {}
+    non_top_values = []
+    for value, group in sorted(groups.items()):
+        top_count = sum(
+            1 for row in group if str(row.get("candidate_id", "")) in top_ids
+        )
+        best_row = min(
+            group,
+            key=lambda row: (
+                _candidate_early_rel_mse(row),
+                -float(row.get("segment_score", 0.0)),
+            ),
+        )
+        if top_count == 0:
+            non_top_values.append(value)
+        by_value[value] = {
+            "candidate_count": len(group),
+            "top_candidate_count": top_count,
+            "best_candidate_id": best_row.get("candidate_id"),
+            "best_early_rel_mse": _finite_float_or_none(
+                _candidate_early_rel_mse(best_row)
+            ),
+            "best_segment_score": _finite_float_or_none(
+                float(best_row.get("segment_score", 0.0))
+            ),
+            "best_task1_total_score_proxy": _finite_float_or_none(
+                float(best_row.get("task1_total_score_proxy", 0.0))
+            ),
+            "best_params": best_row.get("params")
+            if isinstance(best_row.get("params"), dict)
+            else {},
+        }
+    return {
+        "axis": axis,
+        "candidate_count": len(rows),
+        "top_candidate_count": min(max(0, int(top_candidate_count)), len(rows)),
+        f"by_{axis}": by_value,
+        f"non_top_{axis}s": non_top_values,
+        "non_top_anchors": non_top_values if axis == "early_anchor" else [],
+    }
+
+
+def _candidate_early_rel_mse(row: dict[str, Any]) -> float:
+    segments = row.get("segments")
+    if isinstance(segments, dict):
+        early = segments.get("early")
+        if isinstance(early, dict):
+            value = early.get("rel_mse")
+            if isinstance(value, int | float):
+                return float(value)
+    return float("inf")
+
+
+def _finite_float_or_none(value: float) -> float | None:
+    if not np.isfinite(value):
+        return None
+    return float(value)
+
+
 def _prediction_from_linear_trend_spectral(
     *,
     context: np.ndarray,
@@ -3561,6 +3733,7 @@ def _early_memory_policy(
     effective_axes: list[str] = []
     avoid_exact_params: list[dict[str, Any]] = []
     promoted_params: list[dict[str, Any]] = []
+    deprioritized_anchors: list[str] = []
     for item in evidence_params or []:
         if not isinstance(item, dict):
             continue
@@ -3573,6 +3746,14 @@ def _early_memory_policy(
         retry_directives.extend(_string_list_from_any(item.get("retry_directives")))
         avoid_directives.extend(_string_list_from_any(item.get("avoid_directives")))
         effective_axes.extend(_string_list_from_any(item.get("effective_axes")))
+        for evidence in item.get("negative_candidate_evidence", []):
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("axis") == "early_anchor" and isinstance(
+                evidence.get("value"),
+                str,
+            ):
+                deprioritized_anchors.append(str(evidence["value"]))
         outcome = str(item.get("outcome", ""))
         if outcome == "promoted":
             promoted_params.append(normalized)
@@ -3582,6 +3763,7 @@ def _early_memory_policy(
         "retry_directives": _dedupe_strings(retry_directives),
         "avoid_directives": _dedupe_strings(avoid_directives),
         "effective_axes": _dedupe_strings(effective_axes),
+        "deprioritized_anchors": _dedupe_strings(deprioritized_anchors),
         "avoid_exact_params": avoid_exact_params,
         "promoted_params": promoted_params,
     }
@@ -3622,11 +3804,15 @@ def _apply_early_memory_policy(
         if isinstance(item, dict)
     ]
     effective_axes = set(_string_list_from_any(memory_policy.get("effective_axes")))
+    deprioritized_anchors = set(
+        _string_list_from_any(memory_policy.get("deprioritized_anchors"))
+    )
     filtered.sort(
         key=lambda row: _early_memory_rank_key(
             row=row,
             promoted_params=promoted_params,
             effective_axes=effective_axes,
+            deprioritized_anchors=deprioritized_anchors,
         )
     )
     return filtered
@@ -3646,7 +3832,8 @@ def _early_memory_rank_key(
     row: dict[str, Any],
     promoted_params: list[dict[str, Any]],
     effective_axes: set[str],
-) -> tuple[int, int, int, int, str]:
+    deprioritized_anchors: set[str],
+) -> tuple[int, int, int, int, int, str]:
     exact_promoted = any(_early_params_match(row=row, avoided=item) for item in promoted_params)
     early_axis_reuse = (
         "early_rel_mse" in effective_axes
@@ -3661,10 +3848,12 @@ def _early_memory_rank_key(
         "persistence",
         "retrieval",
     }
+    deprioritized_anchor = str(row.get("early_anchor", "")) in deprioritized_anchors
     return (
         0 if exact_promoted else 1,
         0 if early_axis_reuse else 1,
         0 if guardrail_candidate else 1,
+        1 if deprioritized_anchor else 0,
         int(row.get("k", 0)),
         _early_param_sort_key(row),
     )
@@ -3915,6 +4104,7 @@ def _early_refinement_experiment_plan(
             "retry_directives": memory_policy["retry_directives"],
             "avoid_directives": memory_policy["avoid_directives"],
             "effective_axes": memory_policy["effective_axes"],
+            "deprioritized_anchors": memory_policy["deprioritized_anchors"],
             "avoid_exact_count": len(memory_policy["avoid_exact_params"]),
             "promoted_seed_count": len(memory_policy["promoted_params"]),
         },
