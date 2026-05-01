@@ -22,6 +22,7 @@ PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT = "ALGORITHM_CARDS_V2_VALIDATED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
+ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT = "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED"
 SANDBOX_PLAN_STATE_HINT = "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
 EXECUTOR_TAXONOMY_STATE_HINT = "EXECUTOR_TAXONOMY_BUILT"
 FNO_CANDIDATE_ADAPTED_STATE_HINT = "FNO_ARCHITECTURE_CANDIDATE_ADAPTED"
@@ -1038,6 +1039,88 @@ def plan_candidate_sandbox(
         "reason_codes": ["requires_new_bounded_executor"] if blocked else [],
         "risk_controls": selected.get("risk_controls", []),
         "next_command": "create-executor-design-request" if blocked else cli_command,
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def evaluate_algorithm_candidate_promotion(
+    *,
+    algorithm_candidates_path: str | Path,
+    algorithm_candidate_id: str,
+    sandbox_evidence_paths: list[str | Path],
+    output_path: str | Path,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, Any]:
+    candidates_report = _read_json(
+        _require_file(Path(algorithm_candidates_path), "algorithm candidates")
+    )
+    if candidates_report.get("state_hint") not in {
+        ALGORITHM_CANDIDATES_STATE_HINT,
+        FNO_CANDIDATE_ADAPTED_STATE_HINT,
+    }:
+        raise LiteratureAlgorithmLabError(
+            "algorithm candidates report has invalid state_hint"
+        )
+    selected_id = _nonempty_text(algorithm_candidate_id, "algorithm_candidate_id")
+    selected = _find_algorithm_candidate(candidates_report, selected_id)
+    if not sandbox_evidence_paths:
+        raise LiteratureAlgorithmLabError("sandbox_evidence_paths must be non-empty")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    evidence_records = [
+        _read_json(_require_file(Path(path), "sandbox evidence"))
+        for path in sandbox_evidence_paths
+    ]
+    best_evidence = _select_best_candidate_evidence(
+        evidence_records=evidence_records,
+        candidate_id=selected_id,
+    )
+    passed_checks, failed_checks = _evaluate_candidate_promotion_checks(
+        candidate=selected,
+        evidence=best_evidence,
+        current_best_score=current_best_score,
+    )
+    reason_codes = [
+        str(check["failure_code"]) for check in failed_checks.values()
+    ] or ["all_rubric_checks_passed"]
+    decision = _candidate_promotion_decision(
+        candidate=selected,
+        failed_checks=failed_checks,
+        evidence=best_evidence,
+    )
+    promote = decision == "promote"
+    ledger_event = {
+        "event_type": f"candidate_{'promoted' if promote else decision}",
+        "algorithm_candidate_id": selected_id,
+        "candidate_family": selected.get("candidate_family"),
+        "evidence_id": best_evidence.get("evidence_id"),
+        "decision": decision,
+        "reason_codes": reason_codes,
+    }
+    report = {
+        "schema_version": 1,
+        "state_hint": ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
+        "algorithm_candidate_promotion_path": str(output_file),
+        "algorithm_candidates_path": str(Path(algorithm_candidates_path)),
+        "algorithm_candidate_id": selected_id,
+        "candidate_family": selected.get("candidate_family"),
+        "sandbox_evidence_paths": [str(Path(path)) for path in sandbox_evidence_paths],
+        "evidence_count": len(evidence_records),
+        "best_evidence_id": best_evidence.get("evidence_id"),
+        "current_best_score": current_best_score,
+        "decision": decision,
+        "promote_to_strategy_growth": promote,
+        "passed_checks": passed_checks,
+        "failed_checks": failed_checks,
+        "reason_codes": reason_codes,
+        "metric_results": _candidate_promotion_metric_results(
+            evidence=best_evidence,
+            current_best_score=current_best_score,
+        ),
+        "ledger_event": ledger_event,
+        "next_command": _candidate_promotion_next_command(decision),
     }
     _write_json(output_file, report)
     return report
@@ -2275,6 +2358,226 @@ def _append_algorithm_card_v2_issue(
 
 def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _find_algorithm_candidate(
+    candidates_report: dict[str, Any], algorithm_candidate_id: str
+) -> dict[str, Any]:
+    for candidate in candidates_report.get("algorithm_candidates", []):
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("algorithm_candidate_id") == algorithm_candidate_id
+        ):
+            return candidate
+    raise LiteratureAlgorithmLabError(
+        f"algorithm candidate not found: {algorithm_candidate_id}"
+    )
+
+
+def _select_best_candidate_evidence(
+    *, evidence_records: list[dict[str, Any]], candidate_id: str
+) -> dict[str, Any]:
+    matching = [
+        evidence
+        for evidence in evidence_records
+        if evidence.get("candidate_id") == candidate_id
+    ]
+    if not matching:
+        raise LiteratureAlgorithmLabError(
+            f"sandbox evidence does not reference candidate: {candidate_id}"
+        )
+    return max(matching, key=lambda item: _float_or_default(item.get("score"), -1e30))
+
+
+def _evaluate_candidate_promotion_checks(
+    *,
+    candidate: dict[str, Any],
+    evidence: dict[str, Any],
+    current_best_score: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    passed: dict[str, Any] = {}
+    failed: dict[str, Any] = {}
+    criteria = candidate.get("promotion_criteria")
+    if not isinstance(criteria, dict):
+        criteria = {}
+    min_score_delta = _float_or_default(criteria.get("min_score_delta"), 0.0)
+    max_inference_seconds = _float_or_default(
+        criteria.get("max_inference_seconds"), 120.0
+    )
+    requires_ablation = bool(criteria.get("requires_ablation", True))
+
+    executor = candidate.get("executor_spec")
+    cli_command = executor.get("cli_command") if isinstance(executor, dict) else None
+    if (
+        candidate.get("candidate_family") == "unsupported"
+        or cli_command == "blocked_requires_executor_design"
+    ):
+        failed["executor"] = _promotion_check(
+            failure_code="unsupported_executor",
+            message="candidate cannot promote without an executable sandbox",
+        )
+    else:
+        passed["executor"] = {"passed": True, "cli_command": cli_command}
+
+    if evidence.get("rules_passed") is True:
+        passed["validity"] = {"passed": True}
+    else:
+        failed["validity"] = _promotion_check(
+            failure_code="sandbox_rule_failed",
+            message="sandbox rules did not pass",
+        )
+
+    score_delta = _evidence_score_delta(evidence, current_best_score)
+    if score_delta >= min_score_delta:
+        passed["score"] = {
+            "passed": True,
+            "score_delta": score_delta,
+            "threshold": min_score_delta,
+        }
+    else:
+        failed["score"] = _promotion_check(
+            failure_code="score_regressed",
+            message="score delta did not meet promotion threshold",
+            score_delta=score_delta,
+            threshold=min_score_delta,
+        )
+
+    runtime_seconds = _evidence_runtime_seconds(evidence)
+    if runtime_seconds <= max_inference_seconds:
+        passed["runtime"] = {
+            "passed": True,
+            "inference_seconds": runtime_seconds,
+            "threshold": max_inference_seconds,
+        }
+    else:
+        failed["runtime"] = _promotion_check(
+            failure_code="runtime_budget_exceeded",
+            message="inference runtime exceeded candidate budget",
+            inference_seconds=runtime_seconds,
+            threshold=max_inference_seconds,
+        )
+
+    physics_delta = _evidence_physics_delta(evidence)
+    if physics_delta <= 0.0:
+        passed["physics"] = {"passed": True, "residual_delta": physics_delta}
+    else:
+        failed["physics"] = _promotion_check(
+            failure_code="physics_regressed",
+            message="physics diagnostic regressed",
+            residual_delta=physics_delta,
+        )
+
+    ablation = evidence.get("ablation_metrics")
+    ablation_delta = (
+        _float_or_default(ablation.get("score_delta"), 0.0)
+        if isinstance(ablation, dict)
+        else 0.0
+    )
+    if not requires_ablation or ablation_delta > 0.0:
+        passed["ablation"] = {
+            "passed": True,
+            "required": requires_ablation,
+            "score_delta": ablation_delta,
+        }
+    else:
+        failed["ablation"] = _promotion_check(
+            failure_code="ablation_missing_or_weak",
+            message="required ablation evidence did not support candidate",
+            score_delta=ablation_delta,
+        )
+
+    reproducibility = evidence.get("reproducibility")
+    deterministic = (
+        bool(reproducibility.get("deterministic"))
+        if isinstance(reproducibility, dict)
+        else False
+    )
+    if deterministic:
+        passed["reproducibility"] = {"passed": True}
+    else:
+        failed["reproducibility"] = _promotion_check(
+            failure_code="insufficient_reproducibility",
+            message="evidence is not marked deterministic",
+        )
+    return passed, failed
+
+
+def _candidate_promotion_decision(
+    *,
+    candidate: dict[str, Any],
+    failed_checks: dict[str, Any],
+    evidence: dict[str, Any],
+) -> str:
+    if "executor" in failed_checks:
+        return "blocked"
+    hard_reject = {"validity", "runtime"}
+    if hard_reject.intersection(failed_checks):
+        return "reject"
+    if "score" in failed_checks:
+        return "deprioritize" if evidence.get("rules_passed") is True else "reject"
+    if failed_checks:
+        return "refine"
+    return "promote"
+
+
+def _candidate_promotion_next_command(decision: str) -> str:
+    if decision == "promote":
+        return "record-strategy-proposal"
+    if decision == "refine":
+        return "refine-algorithm-candidate"
+    if decision == "blocked":
+        return "create-executor-design-request"
+    return "record-literature-registry-event"
+
+
+def _candidate_promotion_metric_results(
+    *, evidence: dict[str, Any], current_best_score: float
+) -> dict[str, Any]:
+    return {
+        "score": evidence.get("score"),
+        "current_best_score": current_best_score,
+        "score_delta_vs_current_best": _evidence_score_delta(
+            evidence, current_best_score
+        ),
+        "inference_seconds": _evidence_runtime_seconds(evidence),
+        "physics_residual_delta": _evidence_physics_delta(evidence),
+        "rules_passed": evidence.get("rules_passed"),
+    }
+
+
+def _promotion_check(
+    *, failure_code: str, message: str, **extra: Any
+) -> dict[str, Any]:
+    result = {"passed": False, "failure_code": failure_code, "message": message}
+    result.update(extra)
+    return result
+
+
+def _evidence_score_delta(evidence: dict[str, Any], current_best_score: float) -> float:
+    if isinstance(evidence.get("score_delta_vs_current_best"), int | float):
+        return float(evidence["score_delta_vs_current_best"])
+    score = _float_or_default(evidence.get("score"), current_best_score)
+    return score - current_best_score
+
+
+def _evidence_runtime_seconds(evidence: dict[str, Any]) -> float:
+    runtime = evidence.get("runtime")
+    if isinstance(runtime, dict):
+        return _float_or_default(runtime.get("inference_seconds"), 1e30)
+    return _float_or_default(runtime, 1e30)
+
+
+def _evidence_physics_delta(evidence: dict[str, Any]) -> float:
+    physics = evidence.get("physics_metrics")
+    if isinstance(physics, dict):
+        return _float_or_default(physics.get("residual_delta"), 0.0)
+    return 0.0
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    return default
 
 
 def _object_list(value: Any, label: str) -> list[dict[str, Any]]:

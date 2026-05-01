@@ -6,6 +6,7 @@ from pathlib import Path
 from pde_agent.core.json_output import success_payload
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATES_STATE_HINT,
+    ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
     ALGORITHM_CARDS_STATE_HINT,
     ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
@@ -29,6 +30,7 @@ from pde_agent.core.literature_algorithm_lab import (
     create_executor_design_request,
     download_mineru_parse_result,
     download_source_document,
+    evaluate_algorithm_candidate_promotion,
     extract_algorithm_cards,
     ingest_mineru_parse,
     normalize_arxiv_search_results,
@@ -404,6 +406,43 @@ def plan_candidate_sandbox_command(
             "algorithm_candidate_id": report["algorithm_candidate_id"],
             "sandbox_level": report["sandbox_level"],
             "blocked": report["blocked"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def evaluate_algorithm_candidate_promotion_command(
+    *,
+    algorithm_candidates_path: str,
+    algorithm_candidate_id: str,
+    sandbox_evidence_paths: list[str],
+    output_path: str,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, object]:
+    report = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=Path(algorithm_candidates_path),
+        algorithm_candidate_id=algorithm_candidate_id,
+        sandbox_evidence_paths=[Path(path) for path in sandbox_evidence_paths],
+        output_path=Path(output_path),
+        current_best_score=current_best_score,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="evaluate-algorithm-candidate-promotion",
+        state_hint=ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
+        artifacts={
+            "algorithm_candidate_promotion_path": report[
+                "algorithm_candidate_promotion_path"
+            ],
+            "algorithm_candidates_path": report["algorithm_candidates_path"],
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "decision": report["decision"],
+            "evidence_count": report["evidence_count"],
+            "reason_code_count": len(report["reason_codes"]),
         },
         next_hint=report["next_command"],
     )

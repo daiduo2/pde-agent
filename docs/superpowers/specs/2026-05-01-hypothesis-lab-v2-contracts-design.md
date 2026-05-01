@@ -352,6 +352,46 @@ Rubric outcomes:
 - `reject`: violates rules or repeatedly regresses.
 - `blocked`: needs parser, executor, data, or resource work.
 
+Candidate promotion entrypoint:
+
+- CLI command: `evaluate-algorithm-candidate-promotion`
+- Input artifacts:
+  - `ALGORITHM_CANDIDATES_COMPILED`
+  - one or more `SANDBOX_EVIDENCE_RECORDED` artifacts
+  - `current_best_score`
+- Output artifact state: `ALGORITHM_CANDIDATE_PROMOTION_EVALUATED`
+
+The evaluator selects the best matching evidence for the requested
+`algorithm_candidate_id` and writes:
+
+- `decision`
+- `promote_to_strategy_growth`
+- `passed_checks`
+- `failed_checks`
+- `reason_codes`
+- `metric_results`
+- `ledger_event`
+- `next_command`
+
+Initial deterministic checks:
+
+- `executor`: blocked or unsupported candidates cannot promote.
+- `validity`: evidence with `rules_passed != true` is rejected.
+- `score`: `score_delta_vs_current_best` must satisfy the candidate's
+  `promotion_criteria.min_score_delta`.
+- `runtime`: inference seconds must stay under
+  `promotion_criteria.max_inference_seconds`.
+- `physics`: residual delta must not regress.
+- `ablation`: required ablation evidence must improve score.
+- `reproducibility`: evidence must be marked deterministic before promotion.
+
+Routing:
+
+- `promote` -> `record-strategy-proposal`
+- `refine` -> `refine-algorithm-candidate`
+- `blocked` -> `create-executor-design-request`
+- `deprioritize` or `reject` -> `record-literature-registry-event`
+
 ## Failure Taxonomy
 
 Failure codes should be shared across registry, Hermes summaries, and logs:
@@ -368,8 +408,11 @@ Failure codes should be shared across registry, Hermes summaries, and logs:
 - `context_mismatch`
 - `target_leakage_risk`
 - `score_regressed`
-- `runtime_exceeded`
+- `runtime_budget_exceeded`
 - `physics_regressed`
+- `ablation_missing_or_weak`
+- `insufficient_reproducibility`
+- `runtime_exceeded`
 - `duplicate_family`
 - `insufficient_evidence`
 - `reproducibility_failed`

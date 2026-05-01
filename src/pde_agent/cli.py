@@ -121,6 +121,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     create_executor_design_request_command,
     download_mineru_result_command,
     download_source_document_command,
+    evaluate_algorithm_candidate_promotion_command,
     extract_algorithm_cards_command,
     ingest_mineru_parse_command,
     normalize_arxiv_sources_command,
@@ -1158,6 +1159,31 @@ def plan_algorithm_candidate_sandbox_cmd(
                 algorithm_candidates_path=algorithm_candidates_path,
                 algorithm_candidate_id=algorithm_candidate_id,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("evaluate-algorithm-candidate-promotion")
+def evaluate_algorithm_candidate_promotion_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    algorithm_candidate_id: str = typer.Option(...),
+    sandbox_evidence_paths: list[str] = typer.Option(..., "--sandbox-evidence-path"),
+    output_path: str = typer.Option(...),
+    current_best_score: float = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            evaluate_algorithm_candidate_promotion_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                algorithm_candidate_id=algorithm_candidate_id,
+                sandbox_evidence_paths=sandbox_evidence_paths,
+                output_path=output_path,
+                current_best_score=current_best_score,
                 force=force,
             )
         )

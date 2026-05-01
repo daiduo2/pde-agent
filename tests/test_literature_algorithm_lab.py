@@ -917,6 +917,293 @@ def test_validate_algorithm_cards_v2_cli_returns_payload(tmp_path: Path) -> None
     assert output_path.exists()
 
 
+def test_evaluate_algorithm_candidate_promotion_promotes_valid_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        evaluate_algorithm_candidate_promotion,
+    )
+
+    candidate_id = "candidate_card_spectral_spectral_rollout_stabilization"
+    candidates = tmp_path / "algorithm_candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "spectral_rollout_stabilization",
+                        "executor_spec": {"cli_command": "run-blueprint-sandbox"},
+                        "promotion_criteria": {
+                            "min_score_delta": 0.05,
+                            "max_inference_seconds": 120.0,
+                            "requires_ablation": True,
+                        },
+                        "source_grounding": {
+                            "source_ids": ["paper_spectral"],
+                            "algorithm_card_id": "card_spectral",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "sandbox_evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_spectral_001",
+                "candidate_id": candidate_id,
+                "blueprint_id": "blueprint_spectral_001",
+                "sandbox_id": "sandbox_task1_local",
+                "dataset_id": "pdebench_burgers_task1_validation",
+                "rules_passed": True,
+                "score": 86.25,
+                "segment_scores": {"early": 93.0, "middle": 88.0, "late": 82.0},
+                "runtime": {"inference_seconds": 34.0},
+                "physics_metrics": {"residual_delta": -0.02},
+                "ablation_metrics": {"score_delta": 0.31},
+                "score_delta_vs_current_best": 0.31,
+                "artifact_paths": [str(tmp_path / "prediction.hdf5")],
+                "reproducibility": {"deterministic": True, "repeat_count": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=candidates,
+        algorithm_candidate_id=candidate_id,
+        sandbox_evidence_paths=[evidence],
+        output_path=tmp_path / "candidate_promotion.json",
+        current_best_score=85.94,
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED"
+    assert report["decision"] == "promote"
+    assert report["promote_to_strategy_growth"] is True
+    assert report["reason_codes"] == ["all_rubric_checks_passed"]
+    assert report["ledger_event"]["event_type"] == "candidate_promoted"
+    assert report["next_command"] == "record-strategy-proposal"
+
+
+def test_evaluate_algorithm_candidate_promotion_rejects_rule_failures(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        evaluate_algorithm_candidate_promotion,
+    )
+
+    candidate_id = "candidate_card_residual_lightweight_residual_corrector"
+    candidates = tmp_path / "algorithm_candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "lightweight_residual_corrector",
+                        "executor_spec": {"cli_command": "run-blueprint-sandbox"},
+                        "promotion_criteria": {
+                            "min_score_delta": 0.1,
+                            "max_inference_seconds": 60.0,
+                            "requires_ablation": True,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "sandbox_evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_residual_001",
+                "candidate_id": candidate_id,
+                "rules_passed": False,
+                "score": 84.0,
+                "runtime": {"inference_seconds": 88.0},
+                "physics_metrics": {"residual_delta": 0.03},
+                "ablation_metrics": {},
+                "score_delta_vs_current_best": -1.0,
+                "artifact_paths": [],
+                "reproducibility": {"deterministic": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=candidates,
+        algorithm_candidate_id=candidate_id,
+        sandbox_evidence_paths=[evidence],
+        output_path=tmp_path / "candidate_promotion.json",
+        current_best_score=85.0,
+        force=False,
+    )
+
+    assert report["decision"] == "reject"
+    assert report["promote_to_strategy_growth"] is False
+    assert "sandbox_rule_failed" in report["reason_codes"]
+    assert "score_regressed" in report["reason_codes"]
+    assert report["failed_checks"]["validity"]["failure_code"] == "sandbox_rule_failed"
+    assert report["next_command"] == "record-literature-registry-event"
+
+
+def test_evaluate_algorithm_candidate_promotion_blocks_unsupported_executor(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        evaluate_algorithm_candidate_promotion,
+    )
+
+    candidate_id = "candidate_card_fno_unsupported"
+    candidates = tmp_path / "algorithm_candidates.json"
+    evidence = tmp_path / "sandbox_evidence.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "unsupported",
+                        "executor_spec": {
+                            "cli_command": "blocked_requires_executor_design"
+                        },
+                        "promotion_criteria": {
+                            "min_score_delta": 0.01,
+                            "max_inference_seconds": 120.0,
+                            "requires_ablation": False,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence.write_text(
+        json.dumps(
+            {
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_blocked_001",
+                "candidate_id": candidate_id,
+                "rules_passed": True,
+                "score": 90.0,
+                "runtime": {"inference_seconds": 10.0},
+                "physics_metrics": {"residual_delta": -0.01},
+                "ablation_metrics": {},
+                "score_delta_vs_current_best": 4.0,
+                "artifact_paths": [str(tmp_path / "pred.hdf5")],
+                "reproducibility": {"deterministic": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=candidates,
+        algorithm_candidate_id=candidate_id,
+        sandbox_evidence_paths=[evidence],
+        output_path=tmp_path / "candidate_promotion.json",
+        current_best_score=86.0,
+        force=False,
+    )
+
+    assert report["decision"] == "blocked"
+    assert report["promote_to_strategy_growth"] is False
+    assert report["failed_checks"]["executor"]["failure_code"] == (
+        "unsupported_executor"
+    )
+    assert report["next_command"] == "create-executor-design-request"
+
+
+def test_evaluate_algorithm_candidate_promotion_cli_returns_payload(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    candidate_id = "candidate_card_checkpoint_official_checkpoint_family"
+    candidates = tmp_path / "algorithm_candidates.json"
+    evidence = tmp_path / "sandbox_evidence.json"
+    output_path = tmp_path / "candidate_promotion.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "official_checkpoint_family",
+                        "executor_spec": {"cli_command": "run-checkpoint-family-sandbox"},
+                        "promotion_criteria": {
+                            "min_score_delta": 0.01,
+                            "max_inference_seconds": 120.0,
+                            "requires_ablation": False,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence.write_text(
+        json.dumps(
+            {
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_checkpoint_001",
+                "candidate_id": candidate_id,
+                "rules_passed": True,
+                "score": 85.8,
+                "runtime": {"inference_seconds": 21.0},
+                "physics_metrics": {"residual_delta": -0.01},
+                "ablation_metrics": {},
+                "score_delta_vs_current_best": 0.2,
+                "artifact_paths": [str(tmp_path / "pred.hdf5")],
+                "reproducibility": {"deterministic": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluate-algorithm-candidate-promotion",
+            "--algorithm-candidates-path",
+            str(candidates),
+            "--algorithm-candidate-id",
+            candidate_id,
+            "--sandbox-evidence-path",
+            str(evidence),
+            "--output-path",
+            str(output_path),
+            "--current-best-score",
+            "85.6",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED"
+    assert payload["metrics"]["decision"] == "promote"
+    assert payload["metrics"]["evidence_count"] == 1
+    assert payload["next_hint"] == "record-strategy-proposal"
+    assert output_path.exists()
+
+
 def test_ingest_mineru_parse_scores_markdown_quality(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,
