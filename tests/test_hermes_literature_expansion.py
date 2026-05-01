@@ -414,6 +414,24 @@ def test_summarize_literature_registry_for_hermes_builds_learning_queue(
     assert signals[0]["signal"] == "sandbox_underperformed_current_best"
     assert signals[0]["candidate_id"] == "candidate_checkpoint_adapter"
     assert report["avoid_repetition"][0]["candidate_id"] == "candidate_checkpoint_adapter"
+    family_summary = {
+        family["candidate_family"]: family for family in report["family_summary"]
+    }
+    assert family_summary["lightweight_residual_corrector"] == {
+        "candidate_family": "lightweight_residual_corrector",
+        "candidate_count": 1,
+        "status_counts": {"compiled": 1},
+        "best_score": None,
+        "best_candidate_id": None,
+        "recommended_action": "run_sandbox",
+        "next_command": "run-blueprint-sandbox",
+    }
+    assert family_summary["official_checkpoint_family"]["candidate_count"] == 1
+    assert family_summary["official_checkpoint_family"]["best_score"] == 83.6
+    assert family_summary["official_checkpoint_family"]["recommended_action"] == (
+        "refine_or_ablate"
+    )
+    assert family_summary["unsupported"]["recommended_action"] == "design_executor"
 
 
 def test_checkpoint_failure_memory_skips_local_checkpoint_family(

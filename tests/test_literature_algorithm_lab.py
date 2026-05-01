@@ -692,6 +692,71 @@ def test_update_literature_registry_links_checkpoint_sandbox_evidence(
     assert registry["events"][-1]["event_type"] == "candidate_sandbox_verified"
 
 
+def test_compile_algorithm_candidates_expands_all_literature_strategy_families(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
+
+    cards = tmp_path / "cards.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_multi_strategy",
+                        "source_ids": ["paper_001"],
+                        "claim": "Several PDE operator interventions are plausible.",
+                        "core_mechanism": "Combine residual, spectral, rollout, and correction ideas.",
+                        "implementation_hooks": [
+                            "learned_residual_correction",
+                            "spectral_rollout_stabilization",
+                            "physics_informed_loss",
+                            "scheduled_sampling",
+                            "operator_correction_postprocess",
+                        ],
+                        "evidence_status": "extracted",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = compile_algorithm_candidates(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "candidates.json",
+        force=False,
+    )
+
+    families = {
+        candidate["candidate_family"]: candidate
+        for candidate in report["algorithm_candidates"]
+    }
+    assert report["algorithm_candidate_count"] == 5
+    assert set(families) == {
+        "lightweight_residual_corrector",
+        "spectral_rollout_stabilization",
+        "physics_residual_regularization",
+        "scheduled_rollout_training",
+        "operator_correction_postprocess",
+    }
+    assert families["physics_residual_regularization"]["normalized_hook"] == (
+        "physics_residual_regularization"
+    )
+    assert families["physics_residual_regularization"]["literature_hook"] == (
+        "physics_informed_loss"
+    )
+    assert families["scheduled_rollout_training"]["normalized_hook"] == (
+        "scheduled_rollout_training"
+    )
+    assert families["operator_correction_postprocess"]["parameter_grid"] == {
+        "correction_strength": [0.25, 0.5, 0.75],
+        "spectral_strength": [0.0, 0.5],
+    }
+
+
 def test_ingest_mineru_parse_scores_markdown_quality(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,

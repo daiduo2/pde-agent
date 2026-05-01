@@ -71,6 +71,23 @@ HOOK_TO_FAMILY = {
         "cli_command": "execute-fno-finetune-candidate",
         "sandbox_level": 1,
     },
+    "operator_correction_postprocess": {
+        "candidate_family": "operator_correction_postprocess",
+        "model_family": "postprocess",
+        "cli_command": "run-hypothesis-lab",
+        "sandbox_level": 0,
+    },
+}
+
+HOOK_ALIASES = {
+    "physics_informed_loss": "physics_residual_regularization",
+    "pinn_residual_loss": "physics_residual_regularization",
+    "pi_deeponet_physics_loss": "physics_residual_regularization",
+    "scheduled_sampling": "scheduled_rollout_training",
+    "rollout_training": "scheduled_rollout_training",
+    "autoregressive_rollout_training": "scheduled_rollout_training",
+    "postprocess_operator_correction": "operator_correction_postprocess",
+    "residual_blend_postprocess": "operator_correction_postprocess",
 }
 
 EXECUTOR_DESIGN_HOOKS = {
@@ -817,54 +834,56 @@ def compile_algorithm_candidates(
     for card in cards_report.get("algorithm_cards", []):
         if not isinstance(card, dict):
             raise LiteratureAlgorithmLabError("algorithm card must be an object")
-        hooks = _text_list(card.get("implementation_hooks"), "implementation_hooks")
-        hook = hooks[0]
-        family_spec = HOOK_TO_FAMILY.get(hook)
-        if family_spec is None:
-            candidates.append(_blocked_candidate(card=card, hook=hook))
-            continue
-        candidate_id = (
-            f"candidate_{_slug(card['algorithm_card_id'])}_"
-            f"{family_spec['candidate_family']}"
-        )
-        candidates.append(
-            {
-                "algorithm_candidate_id": candidate_id,
-                "parent_algorithm_card_id": card["algorithm_card_id"],
-                "candidate_family": family_spec["candidate_family"],
-                "target_problem": "PDE_Burgers",
-                "target_task": "task1",
-                "model_family": family_spec["model_family"],
-                "hypothesis": card["claim"],
-                "mechanism": card["core_mechanism"],
-                "executor_spec": _executor_spec(str(family_spec["cli_command"])),
-                "parameter_grid": _default_parameter_grid(
-                    str(family_spec["candidate_family"])
-                ),
-                "benchmark_plan": {
-                    "judge": "hermes_local_judge",
-                    "primary_metric": "task1_total_score_proxy",
-                    "sandbox_level": family_spec["sandbox_level"],
-                },
-                "ablation_plan": {
-                    "baseline": "persistence_or_current_best",
-                    "contrast": "candidate_disabled_or_weight_zero",
-                },
-                "promotion_criteria": {
-                    "min_score_delta": 0.01,
-                    "max_inference_seconds": 120.0,
-                    "requires_ablation": True,
-                },
-                "risk_controls": [
-                    "preserve first 10 context steps",
-                    "do not execute external repo code",
-                ],
-                "source_grounding": {
-                    "source_ids": card["source_ids"],
-                    "algorithm_card_id": card["algorithm_card_id"],
-                },
-            }
-        )
+        seen_families: set[str] = set()
+        for hook in _text_list(card.get("implementation_hooks"), "implementation_hooks"):
+            normalized_hook = _normalize_algorithm_hook(hook)
+            family_spec = HOOK_TO_FAMILY.get(normalized_hook)
+            if family_spec is None:
+                candidates.append(_blocked_candidate(card=card, hook=hook))
+                continue
+            family = str(family_spec["candidate_family"])
+            if family in seen_families:
+                continue
+            seen_families.add(family)
+            candidate_id = f"candidate_{_slug(card['algorithm_card_id'])}_{family}"
+            candidates.append(
+                {
+                    "algorithm_candidate_id": candidate_id,
+                    "parent_algorithm_card_id": card["algorithm_card_id"],
+                    "candidate_family": family_spec["candidate_family"],
+                    "target_problem": "PDE_Burgers",
+                    "target_task": "task1",
+                    "model_family": family_spec["model_family"],
+                    "hypothesis": card["claim"],
+                    "mechanism": card["core_mechanism"],
+                    "literature_hook": hook,
+                    "normalized_hook": normalized_hook,
+                    "executor_spec": _executor_spec(str(family_spec["cli_command"])),
+                    "parameter_grid": _default_parameter_grid(family),
+                    "benchmark_plan": {
+                        "judge": "hermes_local_judge",
+                        "primary_metric": "task1_total_score_proxy",
+                        "sandbox_level": family_spec["sandbox_level"],
+                    },
+                    "ablation_plan": {
+                        "baseline": "persistence_or_current_best",
+                        "contrast": "candidate_disabled_or_weight_zero",
+                    },
+                    "promotion_criteria": {
+                        "min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                        "requires_ablation": True,
+                    },
+                    "risk_controls": [
+                        "preserve first 10 context steps",
+                        "do not execute external repo code",
+                    ],
+                    "source_grounding": {
+                        "source_ids": card["source_ids"],
+                        "algorithm_card_id": card["algorithm_card_id"],
+                    },
+                }
+            )
     report = {
         "schema_version": 1,
         "state_hint": ALGORITHM_CANDIDATES_STATE_HINT,
@@ -1747,6 +1766,15 @@ def _default_parameter_grid(candidate_family: str) -> dict[str, Any]:
         return {"residual_shrinkage": [0.25, 0.5, 0.75], "horizon_decay": [40.0, 80.0]}
     if candidate_family == "spectral_rollout_stabilization":
         return {"spectral_strength": [0.25, 0.5, 1.0], "cutoff_ratio": [0.5, 0.75]}
+    if candidate_family == "physics_residual_regularization":
+        return {"physics_weight": [0.001, 0.01, 0.1], "spectral_weight": [0.0, 0.1]}
+    if candidate_family == "scheduled_rollout_training":
+        return {"rollout_steps": [1, 2, 4], "teacher_forcing_ratio": [0.5, 0.75]}
+    if candidate_family == "operator_correction_postprocess":
+        return {
+            "correction_strength": [0.25, 0.5, 0.75],
+            "spectral_strength": [0.0, 0.5],
+        }
     return {"candidate_enabled": [True]}
 
 
@@ -1754,6 +1782,7 @@ def _sandbox_level(candidate_family: str) -> int:
     if candidate_family in {
         "lightweight_residual_corrector",
         "spectral_rollout_stabilization",
+        "operator_correction_postprocess",
     }:
         return 0
     if candidate_family in {
@@ -1763,6 +1792,11 @@ def _sandbox_level(candidate_family: str) -> int:
     }:
         return 1
     return 2
+
+
+def _normalize_algorithm_hook(hook: str) -> str:
+    normalized = hook.strip()
+    return HOOK_ALIASES.get(normalized, normalized)
 
 
 def _section_index(markdown: str) -> dict[str, int]:

@@ -276,6 +276,7 @@ def summarize_literature_registry_for_hermes(
         candidate_actions,
         current_best_score=float(current_best_score),
     )
+    family_summary = _registry_family_summary(candidate_actions)
     avoid_repetition = [
         {
             "candidate_id": action["candidate_id"],
@@ -296,11 +297,13 @@ def summarize_literature_registry_for_hermes(
         "current_best_score": float(current_best_score),
         "source_backlog": source_backlog,
         "candidate_action_queue": candidate_actions,
+        "family_summary": family_summary,
         "learning_signals": learning_signals,
         "avoid_repetition": avoid_repetition,
         "metrics": {
             "source_backlog_count": len(source_backlog),
             "candidate_action_count": len(candidate_actions),
+            "candidate_family_count": len(family_summary),
             "learning_signal_count": len(learning_signals),
             "avoid_repetition_count": len(avoid_repetition),
         },
@@ -545,6 +548,61 @@ def _registry_learning_signals(
             str(item.get("candidate_id")),
         ),
     )
+
+
+def _registry_family_summary(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for action in actions:
+        family = str(action.get("candidate_family") or "unknown_family")
+        grouped.setdefault(family, []).append(action)
+    summaries = []
+    for family, family_actions in grouped.items():
+        status_counts: dict[str, int] = {}
+        best_score = None
+        best_candidate_id = None
+        for action in family_actions:
+            status = str(action.get("status", "unknown"))
+            status_counts[status] = status_counts.get(status, 0) + 1
+            score = action.get("best_score")
+            if isinstance(score, int | float) and not isinstance(score, bool):
+                if best_score is None or float(score) > best_score:
+                    best_score = float(score)
+                    best_candidate_id = str(action["candidate_id"])
+        top_action = sorted(
+            family_actions,
+            key=lambda item: (
+                -int(item.get("priority", 0)),
+                str(item.get("candidate_id")),
+            ),
+        )[0]
+        summaries.append(
+            {
+                "candidate_family": family,
+                "candidate_count": len(family_actions),
+                "status_counts": dict(sorted(status_counts.items())),
+                "best_score": best_score,
+                "best_candidate_id": best_candidate_id,
+                "recommended_action": top_action.get("recommended_action"),
+                "next_command": top_action.get("next_command"),
+            }
+        )
+    return sorted(
+        summaries,
+        key=lambda item: (
+            -int(_family_priority(str(item.get("recommended_action")))),
+            str(item["candidate_family"]),
+        ),
+    )
+
+
+def _family_priority(recommended_action: str) -> int:
+    return {
+        "run_sandbox": 100,
+        "promote_strategy": 90,
+        "refine_or_ablate": 80,
+        "design_executor": 60,
+        "deprioritize": 20,
+    }.get(recommended_action, 10)
 
 
 def _registry_algorithm_by_candidate(
