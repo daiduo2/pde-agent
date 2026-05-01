@@ -219,6 +219,9 @@ from pde_agent.commands.run_hermes_batch_optimization_loop import (
 from pde_agent.commands.run_checkpoint_family_sandbox import (
     run_checkpoint_family_sandbox_command,
 )
+from pde_agent.commands.compare_hypothesis_lab_memory import (
+    compare_hypothesis_lab_memory_command,
+)
 from pde_agent.commands.run_hypothesis_lab import run_hypothesis_lab_command
 from pde_agent.commands.run_hermes_adaptive_heartbeat import (
     run_hermes_adaptive_heartbeat_command,
@@ -867,6 +870,46 @@ def run_hypothesis_lab_cmd(
                 algorithm_candidate_paths=algorithm_candidate_paths,
                 failure_memory_paths=failure_memory_paths,
                 failure_memory_output_path=failure_memory_output_path,
+                context_path=context_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("compare-hypothesis-lab-memory")
+def compare_hypothesis_lab_memory_cmd(
+    manual_report_paths: list[str] = typer.Option([], "--manual-report-path"),
+    adaptive_report_paths: list[str] = typer.Option([], "--adaptive-report-path"),
+    log_paths: list[str] = typer.Option([], "--log-path"),
+    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
+    literature_paths: list[str] = typer.Option([], "--literature-path"),
+    algorithm_candidate_paths: list[str] = typer.Option(
+        [],
+        "--algorithm-candidates-path",
+    ),
+    failure_memory_paths: list[str] = typer.Option([], "--failure-memory-path"),
+    context_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option("team_hermes"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            compare_hypothesis_lab_memory_command(
+                manual_report_paths=manual_report_paths,
+                adaptive_report_paths=adaptive_report_paths,
+                log_paths=log_paths,
+                checkpoint_paths=checkpoint_paths,
+                literature_paths=literature_paths,
+                algorithm_candidate_paths=algorithm_candidate_paths,
+                failure_memory_paths=failure_memory_paths,
                 context_path=context_path,
                 target_path=target_path,
                 output_dir=output_dir,
