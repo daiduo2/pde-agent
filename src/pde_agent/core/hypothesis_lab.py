@@ -2440,7 +2440,13 @@ def _local_retrieval_refinement_params(
             continue
         seen.add(key)
         deduped.append(normalized)
-    return deduped
+    return _filter_retrieval_refinement_params_by_directives(
+        params=deduped,
+        center=center,
+        directives=_retrieval_refinement_search_directives_from_evidence(
+            evidence_params
+        ),
+    )
 
 
 def _retrieval_refinement_search_directives_from_evidence(
@@ -2494,6 +2500,7 @@ def _retrieval_refinement_experiment_plan(
             }
             for directive in directives
         ]
+        avoid_rules = _retrieval_refinement_avoid_rules_from_directives(directives)
         decision = "axis_directed_local_search"
         focus = "score_trend"
     else:
@@ -2511,6 +2518,7 @@ def _retrieval_refinement_experiment_plan(
                 "spectral_strength",
             ]
         ]
+        avoid_rules = []
         decision = "centered_local_search"
         focus = "local_neighborhood"
     return {
@@ -2527,6 +2535,7 @@ def _retrieval_refinement_experiment_plan(
             "focus": focus,
         },
         "axis_plan": axis_plan,
+        "avoid_rules": avoid_rules,
         "candidate_budget": int(candidate_budget),
         "stop_criteria": [
             "stop_if_no_candidate_improves_seed",
@@ -2538,6 +2547,55 @@ def _retrieval_refinement_experiment_plan(
             "switch_family_if_score_regresses_on_heldout_split",
         ],
     }
+
+
+def _retrieval_refinement_avoid_rules_from_directives(
+    directives: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    rules = []
+    for directive in directives:
+        direction = directive["direction"]
+        if direction == "increase":
+            relation = "below_center"
+        elif direction == "decrease":
+            relation = "above_center"
+        else:
+            continue
+        rules.append(
+            {
+                "axis": directive["axis"],
+                "relation": relation,
+                "reason": "opposite_of_score_trend",
+            }
+        )
+    return rules
+
+
+def _filter_retrieval_refinement_params_by_directives(
+    *,
+    params: list[dict[str, Any]],
+    center: dict[str, Any],
+    directives: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    rules = _retrieval_refinement_avoid_rules_from_directives(directives)
+    if not rules:
+        return params
+    filtered = []
+    for row in params:
+        rejected = False
+        for rule in rules:
+            axis = rule["axis"]
+            if axis not in row or axis not in center:
+                continue
+            value = float(row[axis])
+            center_value = float(center[axis])
+            if rule["relation"] == "below_center" and value < center_value:
+                rejected = True
+            if rule["relation"] == "above_center" and value > center_value:
+                rejected = True
+        if not rejected:
+            filtered.append(row)
+    return filtered
 
 
 def _directed_retrieval_refinement_params(

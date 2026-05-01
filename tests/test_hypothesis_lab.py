@@ -793,6 +793,46 @@ def test_hypothesis_lab_blueprint_records_experiment_plan_from_axis_evidence(
     assert "switch_family_after_repeated_axis_plateau" in plan["switch_criteria"]
 
 
+def test_hypothesis_lab_avoids_opposite_axis_region_after_score_trend(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[
+            _adaptive_retrieval_refinement_weight_trend_report(
+                tmp_path / "weight_trend_sandbox.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    blueprint = blueprints["blueprints"][0]
+    plan = blueprint["experiment_plan"]
+    assert {
+        "axis": "persistence_weight_start",
+        "relation": "below_center",
+        "reason": "opposite_of_score_trend",
+    } in plan["avoid_rules"]
+    weights = {
+        row["persistence_weight_start"]
+        for row in blueprint["parameter_grid"]["candidate_params"]
+    }
+    assert min(weights) >= 0.7
+
+
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
 
