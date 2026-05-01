@@ -410,6 +410,7 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
                 "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
                 "segment_score": evidence.get("segment_score"),
+                "search_directives": evidence.get("search_directives", []),
             }
         )
     rows.sort(
@@ -1792,7 +1793,18 @@ def _adaptive_retrieval_refinement_card(
     if normalized is None or "k" not in normalized:
         return None
     top_params = []
+    top_evidence = []
     seen = {json.dumps(normalized, sort_keys=True)}
+    best_score = _candidate_score(best)
+    scored_candidates = [
+        {
+            "candidate_id": best.get("candidate_id"),
+            "params": normalized,
+            "score": best_score,
+            "segment_score": best.get("segment_score"),
+            "task1_total_score_proxy": best.get("task1_total_score_proxy"),
+        }
+    ]
     top_candidates = report.get("top_candidates")
     if isinstance(top_candidates, list):
         for candidate in top_candidates:
@@ -1809,6 +1821,20 @@ def _adaptive_retrieval_refinement_card(
                 continue
             seen.add(key)
             top_params.append(normalized_top)
+            score = _candidate_score(candidate)
+            top_evidence.append(
+                {
+                    "candidate_id": candidate.get("candidate_id"),
+                    "params": normalized_top,
+                    "score": score,
+                    "segment_score": candidate.get("segment_score"),
+                    "task1_total_score_proxy": candidate.get(
+                        "task1_total_score_proxy"
+                    ),
+                }
+            )
+            scored_candidates.append(top_evidence[-1])
+    search_directives = _retrieval_refinement_search_directives(scored_candidates)
     return {
         "card_id": f"adaptive_retrieval_refinement_{report_file.stem}",
         "source_type": "adaptive_retrieval_refinement_sandbox",
@@ -1843,12 +1869,70 @@ def _adaptive_retrieval_refinement_card(
             "candidate_id": best.get("candidate_id"),
             "params": normalized,
             "top_params": top_params,
+            "top_candidates": top_evidence,
+            "search_directives": search_directives,
             "task1_total_score_proxy": best.get("task1_total_score_proxy"),
             "task1_total_fast_proxy": best.get("task1_total_fast_proxy"),
             "segment_score": best.get("segment_score"),
             "blueprint_id": blueprint_id,
         },
     }
+
+
+def _candidate_score(candidate: dict[str, Any]) -> float | None:
+    for key in ["task1_total_score_proxy", "task1_total_fast_proxy", "segment_score"]:
+        value = candidate.get(key)
+        if isinstance(value, int | float):
+            return float(value)
+    return None
+
+
+def _retrieval_refinement_search_directives(
+    scored_candidates: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    directives = []
+    axes = [
+        "k",
+        "early_blend_steps",
+        "persistence_weight_start",
+        "spectral_strength",
+    ]
+    rows = [
+        item
+        for item in scored_candidates
+        if isinstance(item.get("params"), dict)
+        and isinstance(item.get("score"), int | float)
+    ]
+    for axis in axes:
+        axis_rows = [
+            (float(item["params"][axis]), float(item["score"]))
+            for item in rows
+            if axis in item["params"]
+        ]
+        distinct_values = sorted({value for value, _score in axis_rows})
+        if len(distinct_values) < 3:
+            continue
+        low_value = distinct_values[0]
+        high_value = distinct_values[-1]
+        low_score = max(score for value, score in axis_rows if value == low_value)
+        high_score = max(score for value, score in axis_rows if value == high_value)
+        if high_score > low_score:
+            directives.append(
+                {
+                    "axis": axis,
+                    "direction": "increase",
+                    "reason": "top_candidate_score_trend",
+                }
+            )
+        elif low_score > high_score:
+            directives.append(
+                {
+                    "axis": axis,
+                    "direction": "decrease",
+                    "reason": "top_candidate_score_trend",
+                }
+            )
+    return directives
 
 
 def _scientific_log_card(log_file: Path) -> dict[str, Any] | None:
@@ -2314,6 +2398,18 @@ def _local_retrieval_refinement_params(
                 "spectral_strength": _clamp_float(strength, 0.0, 2.0),
             }
         )
+    for directive in _retrieval_refinement_search_directives_from_evidence(
+        evidence_params
+    ):
+        axis = directive["axis"]
+        direction = directive["direction"]
+        params.extend(
+            _directed_retrieval_refinement_params(
+                center=center,
+                axis=axis,
+                direction=direction,
+            )
+        )
     for mode in ["delta", "raw"]:
         params.append(
             {
@@ -2340,6 +2436,79 @@ def _local_retrieval_refinement_params(
         seen.add(key)
         deduped.append(normalized)
     return deduped
+
+
+def _retrieval_refinement_search_directives_from_evidence(
+    evidence_params: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    directives = []
+    seen: set[tuple[str, str]] = set()
+    for item in evidence_params or []:
+        if not isinstance(item, dict):
+            continue
+        raw_directives = item.get("search_directives")
+        if not isinstance(raw_directives, list):
+            continue
+        for directive in raw_directives:
+            if not isinstance(directive, dict):
+                continue
+            axis = str(directive.get("axis", ""))
+            direction = str(directive.get("direction", ""))
+            if axis not in {
+                "k",
+                "early_blend_steps",
+                "persistence_weight_start",
+                "spectral_strength",
+            }:
+                continue
+            if direction not in {"increase", "decrease"}:
+                continue
+            key = (axis, direction)
+            if key in seen:
+                continue
+            seen.add(key)
+            directives.append({"axis": axis, "direction": direction})
+    return directives
+
+
+def _directed_retrieval_refinement_params(
+    *,
+    center: dict[str, Any],
+    axis: str,
+    direction: str,
+) -> list[dict[str, Any]]:
+    sign = 1 if direction == "increase" else -1
+    rows = []
+    axis_steps: dict[str, list[float]] = {
+        "k": [8.0, 16.0, 24.0],
+        "early_blend_steps": [10.0, 20.0, 30.0],
+        "persistence_weight_start": [0.1, 0.15, 0.2],
+        "spectral_strength": [0.5, 1.0, 1.5],
+    }
+    for step in axis_steps.get(axis, []):
+        row = dict(center)
+        if axis == "k":
+            row["k"] = _clamp_int(int(center["k"]) + sign * int(step), 4, 128)
+        elif axis == "early_blend_steps":
+            row["early_blend_steps"] = _clamp_int(
+                int(center["early_blend_steps"]) + sign * int(step),
+                0,
+                80,
+            )
+        elif axis == "persistence_weight_start":
+            row["persistence_weight_start"] = _clamp_float(
+                float(center["persistence_weight_start"]) + sign * step,
+                0.0,
+                1.0,
+            )
+        elif axis == "spectral_strength":
+            row["spectral_strength"] = _clamp_float(
+                float(center["spectral_strength"]) + sign * step,
+                0.0,
+                2.0,
+            )
+        rows.append(row)
+    return rows
 
 
 def _retrieval_refinement_center(
