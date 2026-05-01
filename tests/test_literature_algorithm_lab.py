@@ -757,6 +757,166 @@ def test_compile_algorithm_candidates_expands_all_literature_strategy_families(
     }
 
 
+def test_validate_algorithm_cards_v2_approves_semiformal_cards(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_algorithm_cards_v2
+
+    cards = tmp_path / "cards_v2.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_v2_fno",
+                        "source_ids": ["paper_fno"],
+                        "claim": "Fourier kernels learn solution operators.",
+                        "operator_target": "ic_to_trajectory",
+                        "mechanism_type": "architecture",
+                        "mathematical_object": "fourier_modes",
+                        "operation": "Evaluate Fourier-mode operator rollout on Burgers.",
+                        "implementation_hooks": [
+                            "fourier_neural_operator_architecture"
+                        ],
+                        "implementation_requirements": {
+                            "requires_training": False,
+                            "requires_checkpoint": True,
+                            "requires_target_data": False,
+                            "requires_new_executor": True,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": False,
+                        },
+                        "preconditions": ["PDEBench Burgers context is available"],
+                        "expected_observables": ["lower rollout RMSE"],
+                        "failure_modes": ["checkpoint adapter underperforms"],
+                        "minimal_experiment": "Run checkpoint-family sandbox.",
+                        "evidence_status": "extracted",
+                        "provenance": {
+                            "parse_id": "parse_fno",
+                            "source_content_hash": "hash_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_algorithm_cards_v2(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "cards_v2_audit.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CARDS_V2_VALIDATED"
+    assert report["decision"] == "approved"
+    assert report["issue_count"] == 0
+    assert report["card_count"] == 1
+    assert report["next_command"] == "compile-algorithm-candidates"
+
+
+def test_validate_algorithm_cards_v2_rejects_missing_operation_and_bad_enum(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_algorithm_cards_v2
+
+    cards = tmp_path / "cards_v2.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_bad",
+                        "source_ids": ["paper_bad"],
+                        "claim": "This is too vague.",
+                        "operator_target": "generic_ai_solver",
+                        "mechanism_type": "architecture",
+                        "mathematical_object": "fourier_modes",
+                        "operation": "",
+                        "implementation_hooks": [],
+                        "implementation_requirements": {
+                            "requires_training": "maybe",
+                        },
+                        "preconditions": [],
+                        "expected_observables": [],
+                        "failure_modes": [],
+                        "minimal_experiment": "",
+                        "evidence_status": "extracted",
+                        "provenance": {},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_algorithm_cards_v2(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "cards_v2_audit.json",
+        force=False,
+    )
+
+    assert report["decision"] == "rejected"
+    assert report["issue_count"] >= 4
+    issues = {issue["code"]: issue for issue in report["issues"]}
+    assert issues["invalid_operator_target"]["failure_code"] == (
+        "candidate_schema_invalid"
+    )
+    assert issues["missing_operation"]["failure_code"] == "no_algorithmic_claim"
+    assert issues["empty_implementation_hooks"]["failure_code"] == (
+        "candidate_schema_invalid"
+    )
+    assert issues["implementation_requirement_not_bool"]["path"] == (
+        "algorithm_cards[0].implementation_requirements.requires_training"
+    )
+
+
+def test_validate_algorithm_cards_v2_cli_returns_payload(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    cards = tmp_path / "cards_v2.json"
+    output_path = tmp_path / "cards_v2_audit.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_minimal_bad",
+                        "source_ids": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "validate-algorithm-cards-v2",
+            "--algorithm-cards-path",
+            str(cards),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "ALGORITHM_CARDS_V2_VALIDATED"
+    assert payload["metrics"]["issue_count"] > 0
+    assert payload["next_hint"] == "fix-algorithm-card-v2-schema"
+    assert output_path.exists()
+
+
 def test_ingest_mineru_parse_scores_markdown_quality(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,

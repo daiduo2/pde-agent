@@ -130,6 +130,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     poll_mineru_parse_command,
     submit_mineru_parse_command,
     update_literature_registry_command,
+    validate_algorithm_cards_v2_command,
 )
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
@@ -1115,6 +1116,25 @@ def compile_algorithm_candidates_cmd(
     typer.echo(
         json.dumps(
             compile_algorithm_candidates_command(
+                algorithm_cards_path=algorithm_cards_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("validate-algorithm-cards-v2")
+def validate_algorithm_cards_v2_cmd(
+    algorithm_cards_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            validate_algorithm_cards_v2_command(
                 algorithm_cards_path=algorithm_cards_path,
                 output_path=output_path,
                 force=force,

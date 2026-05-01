@@ -166,6 +166,28 @@ Rules:
 - Cards requiring external code are allowed but must compile to a blocked
   candidate until an approved executor exists.
 
+Validation entrypoint:
+
+- CLI command: `validate-algorithm-cards-v2`
+- Input artifact: `ALGORITHM_CARDS_EXTRACTED`
+- Output artifact state: `ALGORITHM_CARDS_V2_VALIDATED`
+- Approved cards route to `compile-algorithm-candidates`.
+- Rejected cards route to `fix-algorithm-card-v2-schema`.
+
+Validator issue records must include:
+
+- `code`: machine-readable issue type, for example `missing_operation` or
+  `invalid_operator_target`
+- `path`: JSON path-like field location
+- `failure_code`: stable recovery class
+- `message`: short human-readable explanation
+
+Important failure codes:
+
+- `no_algorithmic_claim`: the card does not contain an actionable operation.
+- `candidate_schema_invalid`: the card violates structural, enum, list, bool,
+  provenance, or implementation requirement constraints.
+
 ### AlgorithmCandidate
 
 Question answered: how does a card become a PDEBench/Burgers experiment?

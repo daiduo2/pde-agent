@@ -20,6 +20,7 @@ MINERU_TASK_POLLED_STATE_HINT = "MINERU_PARSE_TASK_POLLED"
 MINERU_RESULT_DOWNLOADED_STATE_HINT = "MINERU_PARSE_RESULT_DOWNLOADED"
 PAPER_PARSE_STATE_HINT = "MINERU_PARSE_INGESTED"
 ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
+ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT = "ALGORITHM_CARDS_V2_VALIDATED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
 SANDBOX_PLAN_STATE_HINT = "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
 EXECUTOR_TAXONOMY_STATE_HINT = "EXECUTOR_TAXONOMY_BUILT"
@@ -88,6 +89,43 @@ HOOK_ALIASES = {
     "autoregressive_rollout_training": "scheduled_rollout_training",
     "postprocess_operator_correction": "operator_correction_postprocess",
     "residual_blend_postprocess": "operator_correction_postprocess",
+}
+
+ALGORITHM_CARD_V2_OPERATOR_TARGETS = {
+    "ic_to_trajectory",
+    "coefficient_to_solution",
+    "residual_to_correction",
+    "context_to_rollout",
+    "postprocess_to_solution",
+}
+
+ALGORITHM_CARD_V2_MECHANISM_TYPES = {
+    "architecture",
+    "loss",
+    "rollout",
+    "postprocess",
+    "conditioning",
+    "checkpoint",
+    "hybrid",
+}
+
+ALGORITHM_CARD_V2_EVIDENCE_STATUSES = {
+    "extracted",
+    "candidate_compiled",
+    "sandbox_planned",
+    "tested",
+    "promoted",
+    "rejected",
+    "blocked",
+}
+
+ALGORITHM_CARD_V2_IMPLEMENTATION_REQUIREMENTS = {
+    "requires_training",
+    "requires_checkpoint",
+    "requires_target_data",
+    "requires_new_executor",
+    "requires_external_code",
+    "can_run_as_postprocess",
 }
 
 EXECUTOR_DESIGN_HOOKS = {
@@ -810,6 +848,61 @@ def extract_algorithm_cards(
         "algorithm_card_count": len(cards),
         "algorithm_cards": cards,
         "next_command": "compile-algorithm-candidates",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def validate_algorithm_cards_v2(
+    *,
+    algorithm_cards_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    cards_report = _read_json(
+        _require_file(Path(algorithm_cards_path), "algorithm cards")
+    )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    issues: list[dict[str, Any]] = []
+    if cards_report.get("state_hint") != ALGORITHM_CARDS_STATE_HINT:
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="invalid_state_hint",
+            path="state_hint",
+            failure_code="candidate_schema_invalid",
+            message="algorithm cards report must have ALGORITHM_CARDS_EXTRACTED state",
+        )
+    cards_value = cards_report.get("algorithm_cards")
+    if not isinstance(cards_value, list):
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="invalid_algorithm_cards",
+            path="algorithm_cards",
+            failure_code="candidate_schema_invalid",
+            message="algorithm_cards must be a list",
+        )
+        cards: list[Any] = []
+    else:
+        cards = cards_value
+    for index, card in enumerate(cards):
+        issues.extend(_validate_algorithm_card_v2(card, index=index))
+    decision = "approved" if not issues else "rejected"
+    next_command = (
+        "compile-algorithm-candidates"
+        if decision == "approved"
+        else "fix-algorithm-card-v2-schema"
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
+        "algorithm_cards_path": str(Path(algorithm_cards_path)),
+        "algorithm_card_v2_audit_path": str(output_file),
+        "decision": decision,
+        "card_count": len(cards),
+        "issue_count": len(issues),
+        "issues": issues,
+        "next_command": next_command,
     }
     _write_json(output_file, report)
     return report
@@ -2026,6 +2119,162 @@ def _source_candidate(
             key: value for key, value in external_ids.items() if value is not None
         },
     }
+
+
+def _validate_algorithm_card_v2(card: Any, *, index: int) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    base = f"algorithm_cards[{index}]"
+    if not isinstance(card, dict):
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="invalid_algorithm_card",
+            path=base,
+            failure_code="candidate_schema_invalid",
+            message="algorithm card must be an object",
+        )
+        return issues
+    for field in (
+        "algorithm_card_id",
+        "claim",
+        "mathematical_object",
+        "operation",
+        "minimal_experiment",
+    ):
+        failure_code = (
+            "no_algorithmic_claim" if field == "operation" else "candidate_schema_invalid"
+        )
+        if not _is_nonempty_string(card.get(field)):
+            _append_algorithm_card_v2_issue(
+                issues,
+                code=f"missing_{field}",
+                path=f"{base}.{field}",
+                failure_code=failure_code,
+                message=f"{field} must be a non-empty string",
+            )
+    for field in (
+        "source_ids",
+        "implementation_hooks",
+        "preconditions",
+        "expected_observables",
+        "failure_modes",
+    ):
+        value = card.get(field)
+        if not isinstance(value, list) or not value:
+            _append_algorithm_card_v2_issue(
+                issues,
+                code=f"empty_{field}",
+                path=f"{base}.{field}",
+                failure_code="candidate_schema_invalid",
+                message=f"{field} must be a non-empty list of strings",
+            )
+            continue
+        for item_index, item in enumerate(value):
+            if not _is_nonempty_string(item):
+                _append_algorithm_card_v2_issue(
+                    issues,
+                    code=f"invalid_{field}_item",
+                    path=f"{base}.{field}[{item_index}]",
+                    failure_code="candidate_schema_invalid",
+                    message=f"{field} items must be non-empty strings",
+                )
+    _validate_algorithm_card_v2_enum(
+        issues,
+        value=card.get("operator_target"),
+        allowed=ALGORITHM_CARD_V2_OPERATOR_TARGETS,
+        code="invalid_operator_target",
+        path=f"{base}.operator_target",
+    )
+    _validate_algorithm_card_v2_enum(
+        issues,
+        value=card.get("mechanism_type"),
+        allowed=ALGORITHM_CARD_V2_MECHANISM_TYPES,
+        code="invalid_mechanism_type",
+        path=f"{base}.mechanism_type",
+    )
+    _validate_algorithm_card_v2_enum(
+        issues,
+        value=card.get("evidence_status"),
+        allowed=ALGORITHM_CARD_V2_EVIDENCE_STATUSES,
+        code="invalid_evidence_status",
+        path=f"{base}.evidence_status",
+    )
+    requirements = card.get("implementation_requirements")
+    if not isinstance(requirements, dict):
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="missing_implementation_requirements",
+            path=f"{base}.implementation_requirements",
+            failure_code="candidate_schema_invalid",
+            message="implementation_requirements must be an object",
+        )
+    else:
+        for key in sorted(ALGORITHM_CARD_V2_IMPLEMENTATION_REQUIREMENTS):
+            if key not in requirements:
+                _append_algorithm_card_v2_issue(
+                    issues,
+                    code="missing_implementation_requirement",
+                    path=f"{base}.implementation_requirements.{key}",
+                    failure_code="candidate_schema_invalid",
+                    message=f"implementation requirement missing: {key}",
+                )
+            elif not isinstance(requirements[key], bool):
+                _append_algorithm_card_v2_issue(
+                    issues,
+                    code="implementation_requirement_not_bool",
+                    path=f"{base}.implementation_requirements.{key}",
+                    failure_code="candidate_schema_invalid",
+                    message=f"implementation requirement must be boolean: {key}",
+                )
+    provenance = card.get("provenance")
+    if not isinstance(provenance, dict) or not provenance:
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="missing_provenance",
+            path=f"{base}.provenance",
+            failure_code="candidate_schema_invalid",
+            message="provenance must be a non-empty object",
+        )
+    return issues
+
+
+def _validate_algorithm_card_v2_enum(
+    issues: list[dict[str, Any]],
+    *,
+    value: Any,
+    allowed: set[str],
+    code: str,
+    path: str,
+) -> None:
+    if not isinstance(value, str) or value not in allowed:
+        _append_algorithm_card_v2_issue(
+            issues,
+            code=code,
+            path=path,
+            failure_code="candidate_schema_invalid",
+            message=f"{path} must be one of {sorted(allowed)}",
+        )
+
+
+def _append_algorithm_card_v2_issue(
+    issues: list[dict[str, Any]],
+    *,
+    code: str,
+    path: str,
+    failure_code: str,
+    message: str,
+) -> None:
+    issues.append(
+        {
+            "code": code,
+            "path": path,
+            "failure_code": failure_code,
+            "message": message,
+        }
+    )
+
+
+def _is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _object_list(value: Any, label: str) -> list[dict[str, Any]]:

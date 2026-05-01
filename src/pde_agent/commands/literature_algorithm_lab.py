@@ -7,6 +7,7 @@ from pde_agent.core.json_output import success_payload
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATES_STATE_HINT,
     ALGORITHM_CARDS_STATE_HINT,
+    ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
@@ -37,6 +38,7 @@ from pde_agent.core.literature_algorithm_lab import (
     poll_mineru_parse_task,
     submit_mineru_parse_task,
     update_literature_registry,
+    validate_algorithm_cards_v2,
 )
 
 
@@ -325,6 +327,36 @@ def extract_algorithm_cards_command(
         state_hint=ALGORITHM_CARDS_STATE_HINT,
         artifacts={"algorithm_cards_path": report["algorithm_cards_path"]},
         metrics={"algorithm_card_count": report["algorithm_card_count"]},
+        next_hint=report["next_command"],
+    )
+
+
+def validate_algorithm_cards_v2_command(
+    *,
+    algorithm_cards_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = validate_algorithm_cards_v2(
+        algorithm_cards_path=Path(algorithm_cards_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="validate-algorithm-cards-v2",
+        state_hint=ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
+        artifacts={
+            "algorithm_card_v2_audit_path": report[
+                "algorithm_card_v2_audit_path"
+            ],
+            "algorithm_cards_path": report["algorithm_cards_path"],
+        },
+        metrics={
+            "decision": report["decision"],
+            "card_count": report["card_count"],
+            "issue_count": report["issue_count"],
+        },
         next_hint=report["next_command"],
     )
 
