@@ -68,7 +68,9 @@ def build_knowledge_cards(
     for report_path in adaptive_report_paths or []:
         report_file = Path(report_path)
         report = _read_json(report_file)
-        card = _adaptive_plateau_card(report_file, report)
+        card = _adaptive_retrieval_refinement_card(report_file, report)
+        if card is None:
+            card = _adaptive_plateau_card(report_file, report)
         if card is not None:
             cards.append(card)
     for log_path in log_paths or []:
@@ -134,6 +136,10 @@ def generate_hypotheses(
             grouped_cards.setdefault("learned_residual_correction", []).append(card)
         if "task1_retrieval_prior" in hooks:
             grouped_cards.setdefault("task1_retrieval_prior", []).append(card)
+        if "task1_retrieval_refinement_local_search" in hooks:
+            grouped_cards.setdefault(
+                "task1_retrieval_refinement_local_search", []
+            ).append(card)
         if "task1_retrieval_refinement" in hooks:
             grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
     hypotheses = []
@@ -141,8 +147,14 @@ def generate_hypotheses(
         *grouped_cards.get("task1_retrieval_refinement", []),
         *grouped_cards.get("task1_retrieval_prior", []),
     ]
-    if "task1_retrieval_refinement" in grouped_cards:
-        source_cards = grouped_cards["task1_retrieval_refinement"]
+    if (
+        "task1_retrieval_refinement_local_search" in grouped_cards
+        or "task1_retrieval_refinement" in grouped_cards
+    ):
+        source_cards = grouped_cards.get(
+            "task1_retrieval_refinement_local_search",
+            grouped_cards.get("task1_retrieval_refinement", []),
+        )
         hypotheses.append(
             {
                 "hypothesis_id": "h_task1_retrieval_refinement_local_search_001",
@@ -159,6 +171,7 @@ def generate_hypotheses(
                     "expected_observables",
                 ),
                 "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
                 "priority": -5,
             }
         )
@@ -383,32 +396,53 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
         params = evidence.get("params")
         if not isinstance(params, dict):
             continue
+        normalized = _normalize_evidence_params(params)
+        if normalized is None:
+            continue
         key = json.dumps(params, sort_keys=True)
         if key in seen:
             continue
         seen.add(key)
         rows.append(
             {
-                "params": {
-                    "slope_window": int(params["slope_window"]),
-                    "gain": float(params["gain"]),
-                    "decay": float(params["decay"]),
-                    "spectral_strength": float(params["spectral_strength"]),
-                },
+                "params": normalized,
                 "source_card_id": card["card_id"],
                 "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
+                "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
                 "segment_score": evidence.get("segment_score"),
             }
         )
     rows.sort(
         key=lambda item: (
-            -float(item["task1_total_fast_proxy"])
-            if isinstance(item.get("task1_total_fast_proxy"), int | float)
+            -float(
+                item.get("task1_total_fast_proxy")
+                or item.get("task1_total_score_proxy")
+            )
+            if isinstance(
+                item.get("task1_total_fast_proxy")
+                or item.get("task1_total_score_proxy"),
+                int | float,
+            )
             else 0.0,
             str(item["source_card_id"]),
         )
     )
     return rows
+
+
+def _normalize_evidence_params(params: dict[str, Any]) -> dict[str, Any] | None:
+    if {"k", "mode", "early_blend_steps", "persistence_weight_start"}.issubset(
+        params
+    ):
+        return _normalize_retrieval_refinement_params(params)
+    if {"slope_window", "gain", "decay", "spectral_strength"}.issubset(params):
+        return {
+            "slope_window": int(params["slope_window"]),
+            "gain": float(params["gain"]),
+            "decay": float(params["decay"]),
+            "spectral_strength": float(params["spectral_strength"]),
+        }
+    return None
 
 
 def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -603,14 +637,16 @@ def design_algorithm_blueprints(
                             "while perturbing the strongest observed parameters."
                         ),
                         "pseudocode": [
-                            "center = k48 affine eb20 pw0.5 spectral in {0.5, 1.0}",
+                            "center = best verified sandbox retrieval-refinement params",
                             "sweep nearby k, early blend, persistence weight, smoothing",
                             "retain raw/delta sentinels at the center",
                             "prediction[:10] = context",
                         ],
                     },
                     "parameter_grid": {
-                        "candidate_params": _local_retrieval_refinement_params(),
+                        "candidate_params": _local_retrieval_refinement_params(
+                            hypothesis.get("evidence_params", [])
+                        ),
                     },
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
@@ -1419,6 +1455,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
     supported = {
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
+        "task1_retrieval_refinement_local_search",
         "linear_trend_spectral",
         "linear_trend_spectral_escape",
         "linear_trend_late_spectral_ramp",
@@ -1724,6 +1761,92 @@ def _adaptive_plateau_card(
             "action": last.get("action"),
             "stage_index": last.get("stage_index"),
             "plateau_escape_already_used": escaped_once,
+        },
+    }
+
+
+def _adaptive_retrieval_refinement_card(
+    report_file: Path,
+    report: dict[str, Any],
+) -> dict[str, Any] | None:
+    if report.get("state_hint") != SANDBOX_STATE_HINT:
+        return None
+    family = str(report.get("candidate_family", ""))
+    blueprint_id = str(report.get("blueprint_id", ""))
+    if (
+        family
+        not in {
+            "task1_retrieval_refinement",
+            "task1_retrieval_refinement_local_search",
+        }
+        and "task1_retrieval_refinement" not in blueprint_id
+    ):
+        return None
+    best = report.get("best_candidate")
+    if not isinstance(best, dict):
+        return None
+    best_params = best.get("params")
+    if not isinstance(best_params, dict):
+        return None
+    normalized = _normalize_evidence_params(best_params)
+    if normalized is None or "k" not in normalized:
+        return None
+    top_params = []
+    seen = {json.dumps(normalized, sort_keys=True)}
+    top_candidates = report.get("top_candidates")
+    if isinstance(top_candidates, list):
+        for candidate in top_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            params = candidate.get("params")
+            if not isinstance(params, dict):
+                continue
+            normalized_top = _normalize_evidence_params(params)
+            if normalized_top is None or "k" not in normalized_top:
+                continue
+            key = json.dumps(normalized_top, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            top_params.append(normalized_top)
+    return {
+        "card_id": f"adaptive_retrieval_refinement_{report_file.stem}",
+        "source_type": "adaptive_retrieval_refinement_sandbox",
+        "source_path": str(report_file),
+        "claim": (
+            "A verified retrieval-refinement sandbox found a stronger local "
+            "center, so Hermes should move the next local search around the "
+            "observed best parameters instead of repeating a fixed hand-written grid."
+        ),
+        "procedural_heuristic": (
+            "Use the sandbox best candidate as the local-search center, then "
+            "perturb neighbor count, early blend length, persistence weight, "
+            "and spectral strength under the same controlled NumPy executor."
+        ),
+        "preconditions": [
+            "verified retrieval-refinement sandbox report exists",
+            "best candidate preserves the first 10 context steps",
+            "next iteration can reuse the same validation target as a sandbox",
+        ],
+        "implementation_hooks": ["task1_retrieval_refinement_local_search"],
+        "expected_observables": [
+            "candidate grid is centered on the latest sandbox best parameters",
+            "new candidates include immediate score-neighborhood perturbations",
+            "Hermes does not repeat only the original hand-written center",
+        ],
+        "known_risks": [
+            "validation retrieval can overfit",
+            "too narrow a local search can miss a different basin",
+        ],
+        "evidence_status": "local_search_center_ready",
+        "evidence": {
+            "candidate_id": best.get("candidate_id"),
+            "params": normalized,
+            "top_params": top_params,
+            "task1_total_score_proxy": best.get("task1_total_score_proxy"),
+            "task1_total_fast_proxy": best.get("task1_total_fast_proxy"),
+            "segment_score": best.get("segment_score"),
+            "blueprint_id": blueprint_id,
         },
     }
 
@@ -2144,64 +2267,63 @@ def _default_retrieval_refinement_params() -> list[dict[str, Any]]:
     return params
 
 
-def _local_retrieval_refinement_params() -> list[dict[str, Any]]:
-    params: list[dict[str, Any]] = [
-        {
-            "k": 48,
-            "mode": "affine",
-            "early_blend_steps": 20,
-            "persistence_weight_start": 0.5,
-            "spectral_strength": 0.5,
-        },
-        {
-            "k": 48,
-            "mode": "affine",
-            "early_blend_steps": 20,
-            "persistence_weight_start": 0.5,
-            "spectral_strength": 1.0,
-        },
-    ]
-    for k in [44, 48, 52, 56]:
-        for strength in [0.5, 0.75, 1.0]:
+def _local_retrieval_refinement_params(
+    evidence_params: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    center = _retrieval_refinement_center(evidence_params)
+    k0 = int(center["k"])
+    mode0 = str(center["mode"])
+    early0 = int(center["early_blend_steps"])
+    weight0 = float(center["persistence_weight_start"])
+    strength0 = float(center["spectral_strength"])
+    params: list[dict[str, Any]] = [center]
+    for k in [k0 - 8, k0 - 4, k0, k0 + 4, k0 + 8]:
+        params.append(
+            {
+                "k": _clamp_int(k, 4, 128),
+                "mode": mode0,
+                "early_blend_steps": early0,
+                "persistence_weight_start": weight0,
+                "spectral_strength": strength0,
+            }
+        )
+    for early_steps in [early0 - 5, early0, early0 + 5]:
+        for weight in [
+            weight0 - 0.1,
+            weight0 - 0.05,
+            weight0,
+            weight0 + 0.05,
+            weight0 + 0.1,
+        ]:
             params.append(
                 {
-                    "k": k,
-                    "mode": "affine",
-                    "early_blend_steps": 20,
-                    "persistence_weight_start": 0.5,
-                    "spectral_strength": strength,
+                    "k": k0,
+                    "mode": mode0,
+                    "early_blend_steps": _clamp_int(early_steps, 0, 80),
+                    "persistence_weight_start": _clamp_float(weight, 0.0, 1.0),
+                    "spectral_strength": strength0,
                 }
             )
-    for early_steps in [15, 20, 25]:
-        for weight in [0.4, 0.5, 0.6]:
-            for strength in [0.5, 1.0]:
-                params.append(
-                    {
-                        "k": 48,
-                        "mode": "affine",
-                        "early_blend_steps": early_steps,
-                        "persistence_weight_start": weight,
-                        "spectral_strength": strength,
-                    }
-                )
-    params.extend(
-        [
+    for strength in [strength0 - 0.25, strength0, strength0 + 0.25, strength0 + 0.5]:
+        params.append(
             {
-                "k": 48,
-                "mode": "delta",
-                "early_blend_steps": 20,
-                "persistence_weight_start": 0.5,
-                "spectral_strength": 0.5,
-            },
+                "k": k0,
+                "mode": mode0,
+                "early_blend_steps": early0,
+                "persistence_weight_start": weight0,
+                "spectral_strength": _clamp_float(strength, 0.0, 2.0),
+            }
+        )
+    for mode in ["delta", "raw"]:
+        params.append(
             {
-                "k": 48,
-                "mode": "raw",
-                "early_blend_steps": 20,
-                "persistence_weight_start": 0.5,
-                "spectral_strength": 0.5,
-            },
-        ]
-    )
+                "k": k0,
+                "mode": mode,
+                "early_blend_steps": early0,
+                "persistence_weight_start": weight0,
+                "spectral_strength": strength0,
+            }
+        )
     deduped = []
     seen: set[tuple[int, str, int, float, float]] = set()
     for row in params:
@@ -2218,6 +2340,35 @@ def _local_retrieval_refinement_params() -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(normalized)
     return deduped
+
+
+def _retrieval_refinement_center(
+    evidence_params: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    for item in evidence_params or []:
+        if not isinstance(item, dict):
+            continue
+        params = item.get("params")
+        if not isinstance(params, dict):
+            continue
+        normalized = _normalize_evidence_params(params)
+        if normalized is not None and "k" in normalized:
+            return normalized
+    return {
+        "k": 48,
+        "mode": "affine",
+        "early_blend_steps": 20,
+        "persistence_weight_start": 0.5,
+        "spectral_strength": 0.5,
+    }
+
+
+def _clamp_int(value: int, lower: int, upper: int) -> int:
+    return max(lower, min(upper, int(value)))
+
+
+def _clamp_float(value: float, lower: float, upper: float) -> float:
+    return round(max(lower, min(upper, float(value))), 6)
 
 
 def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any]:

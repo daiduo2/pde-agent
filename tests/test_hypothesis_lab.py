@@ -134,6 +134,45 @@ def _adaptive_plateau_escape_report(path: Path) -> Path:
     return path
 
 
+def _adaptive_retrieval_refinement_sandbox_report(path: Path) -> Path:
+    payload = {
+        "state_hint": "HYPOTHESIS_LAB_SANDBOX_VERIFIED",
+        "blueprint_id": "bp_task1_retrieval_refinement_local_search_001",
+        "candidate_family": "task1_retrieval_refinement_local_search",
+        "best_candidate": {
+            "candidate_id": "task1_retrieval_refinement_k48_affine_eb20_pw0.6_s0.5",
+            "family": "task1_retrieval_refinement_local_search",
+            "params": {
+                "k": 48,
+                "mode": "affine",
+                "early_blend_steps": 20,
+                "persistence_weight_start": 0.6,
+                "spectral_strength": 0.5,
+            },
+            "segment_score": 47.4,
+            "task1_total_score_proxy": 110.3,
+        },
+        "top_candidates": [
+            {
+                "candidate_id": "task1_retrieval_refinement_k52_affine_eb20_pw0.6_s0.5",
+                "family": "task1_retrieval_refinement_local_search",
+                "params": {
+                    "k": 52,
+                    "mode": "affine",
+                    "early_blend_steps": 20,
+                    "persistence_weight_start": 0.6,
+                    "spectral_strength": 0.5,
+                },
+                "segment_score": 47.0,
+                "task1_total_score_proxy": 109.5,
+            }
+        ],
+        "verifier": {"decision": "promote_to_strategy_proposal"},
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def _scientific_log(path: Path) -> Path:
     path.write_text(
         "\n".join(
@@ -535,6 +574,85 @@ def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidat
     assert blueprints["blueprints"][1]["blueprint_id"] == (
         "bp_task1_retrieval_refinement_001"
     )
+
+
+def test_hypothesis_lab_builds_retrieval_refinement_center_from_sandbox_report(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[
+            _adaptive_retrieval_refinement_sandbox_report(
+                tmp_path / "retrieval_refinement_sandbox.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "adaptive_retrieval_refinement_sandbox"
+    assert card["implementation_hooks"] == ["task1_retrieval_refinement_local_search"]
+    assert card["evidence_status"] == "local_search_center_ready"
+    assert card["evidence"]["params"]["persistence_weight_start"] == 0.6
+    assert card["evidence"]["top_params"][0]["k"] == 52
+
+
+def test_hypothesis_lab_centers_local_search_from_sandbox_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[
+            _adaptive_retrieval_refinement_sandbox_report(
+                tmp_path / "retrieval_refinement_sandbox.json"
+            )
+        ],
+        algorithm_candidate_paths=[
+            _retrieval_refinement_asset_algorithm_candidates(
+                tmp_path / "refinement_candidates.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    local_search_hypothesis = hypotheses["hypotheses"][0]
+
+    assert local_search_hypothesis["candidate_family"] == (
+        "task1_retrieval_refinement_local_search"
+    )
+    assert local_search_hypothesis["evidence_params"][0]["params"][
+        "persistence_weight_start"
+    ] == 0.6
+
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    candidate_params = blueprints["blueprints"][0]["parameter_grid"][
+        "candidate_params"
+    ]
+    weights = {row["persistence_weight_start"] for row in candidate_params}
+    assert 0.55 in weights
+    assert 0.65 in weights
+    assert {
+        "k": 48,
+        "mode": "affine",
+        "early_blend_steps": 20,
+        "persistence_weight_start": 0.6,
+        "spectral_strength": 0.5,
+    } in candidate_params
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
