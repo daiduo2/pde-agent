@@ -410,15 +410,25 @@ def test_hypothesis_lab_builds_retrieval_prior_from_algorithm_candidate(
     assert refinement["sandbox"]["allowed_executor"] == (
         "controlled_numpy_retrieval_refinement"
     )
-    assert refinement["parameter_grid"]["k"] == [12, 20, 32, 48]
-    assert refinement["parameter_grid"]["mode"] == ["affine", "delta", "raw"]
-    assert refinement["parameter_grid"]["early_blend_steps"] == [0, 20, 40]
-    assert refinement["parameter_grid"]["persistence_weight_start"] == [
-        0.0,
-        0.25,
-        0.5,
-    ]
-    assert refinement["parameter_grid"]["spectral_strength"] == [0.0, 0.5, 1.0]
+    assert refinement["search_mode"] == "evidence_focused_coarse_to_fine"
+    candidate_params = refinement["parameter_grid"]["candidate_params"]
+    assert 8 <= len(candidate_params) <= 24
+    assert {
+        "k": 48,
+        "mode": "affine",
+        "early_blend_steps": 20,
+        "persistence_weight_start": 0.5,
+        "spectral_strength": 0.5,
+    } in candidate_params
+    assert {
+        "k": 48,
+        "mode": "affine",
+        "early_blend_steps": 20,
+        "persistence_weight_start": 0.5,
+        "spectral_strength": 1.0,
+    } in candidate_params
+    assert any(row["mode"] == "delta" for row in candidate_params)
+    assert any(row["mode"] == "raw" for row in candidate_params)
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:

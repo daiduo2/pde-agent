@@ -40,13 +40,19 @@ The intended mechanism is:
 
 ## Parameter Space
 
-The first bounded grid is:
+The initial broad design space is:
 
 - `k`: `[12, 20, 32, 48]`
 - `mode`: `["affine", "delta", "raw"]`
 - `early_blend_steps`: `[0, 20, 40]`
 - `persistence_weight_start`: `[0.0, 0.25, 0.5]`
 - `spectral_strength`: `[0.0, 0.5, 1.0]`
+
+The default executable blueprint should not expand that full Cartesian product every heartbeat. It should use an evidence-focused coarse-to-fine shortlist:
+
+- Include pure retrieval anchors for `k=20` and `k=48`.
+- Search the validated high-value region around `k in [32, 48]`, `mode="affine"`, `early_blend_steps in [20, 40]`, `persistence_weight_start in [0.25, 0.5]`, and `spectral_strength in [0.5, 1.0]`.
+- Include one `delta` and one `raw` sentinel at the current best region to detect whether the mode assumption has changed.
 
 Blend rule:
 
@@ -55,7 +61,7 @@ Blend rule:
 - Retrieval weight is `1 - persistence_weight`.
 - After blending, optional spectral smoothing applies to the full prediction array, then the first 10 context frames are restored exactly.
 
-The grid is intentionally small enough for local validation. If it is too slow on the full 100-sample validation set, the implementation may cap the first smoke to a subset, but promotion evidence must be generated on the full Task 1 validation tensor.
+The shortlist is intentionally small enough for full local validation inside heartbeat. If a later run needs to re-open the broad design space, it should do so through a separate exploratory blueprint, not the default heartbeat path.
 
 ## Sandbox And Verification
 

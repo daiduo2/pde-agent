@@ -524,7 +524,7 @@ def design_algorithm_blueprints(
                     "blueprint_id": "bp_task1_retrieval_refinement_001",
                     "hypothesis_id": hypothesis["hypothesis_id"],
                     "candidate_family": "task1_retrieval_refinement",
-                    "search_mode": "horizon_blended_retrieval_prior",
+                    "search_mode": "evidence_focused_coarse_to_fine",
                     "algorithm": {
                         "summary": (
                             "Blend a nearest-neighbor retrieval future with a "
@@ -542,11 +542,7 @@ def design_algorithm_blueprints(
                         ],
                     },
                     "parameter_grid": {
-                        "k": [12, 20, 32, 48],
-                        "mode": ["affine", "delta", "raw"],
-                        "early_blend_steps": [0, 20, 40],
-                        "persistence_weight_start": [0.0, 0.25, 0.5],
-                        "spectral_strength": [0.0, 0.5, 1.0],
+                        "candidate_params": _default_retrieval_refinement_params(),
                     },
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
@@ -1962,6 +1958,20 @@ def _retrieval_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]
 def _retrieval_refinement_parameter_grid(
     grid: dict[str, list[Any]],
 ) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "retrieval refinement candidate_params entries must be objects"
+                )
+            rows.append(_normalize_retrieval_refinement_params(row))
+        if not rows:
+            raise HypothesisLabError(
+                "retrieval refinement candidate_params must not be empty"
+            )
+        return rows
     ks = grid.get("k")
     modes = grid.get("mode")
     early_steps = grid.get("early_blend_steps")
@@ -1984,15 +1994,78 @@ def _retrieval_refinement_parameter_grid(
                 for weight in weight_starts:
                     for strength in strengths:
                         rows.append(
-                            {
-                                "k": int(k),
-                                "mode": str(mode),
-                                "early_blend_steps": int(steps),
-                                "persistence_weight_start": float(weight),
-                                "spectral_strength": float(strength),
-                            }
+                            _normalize_retrieval_refinement_params(
+                                {
+                                    "k": k,
+                                    "mode": mode,
+                                    "early_blend_steps": steps,
+                                    "persistence_weight_start": weight,
+                                    "spectral_strength": strength,
+                                }
+                            )
                         )
     return rows
+
+
+def _default_retrieval_refinement_params() -> list[dict[str, Any]]:
+    params: list[dict[str, Any]] = [
+        {
+            "k": 20,
+            "mode": "affine",
+            "early_blend_steps": 0,
+            "persistence_weight_start": 0.0,
+            "spectral_strength": 0.0,
+        },
+        {
+            "k": 48,
+            "mode": "affine",
+            "early_blend_steps": 0,
+            "persistence_weight_start": 0.0,
+            "spectral_strength": 0.0,
+        },
+    ]
+    for k in [32, 48]:
+        for early_steps in [20, 40]:
+            for weight in [0.25, 0.5]:
+                for strength in [0.5, 1.0]:
+                    params.append(
+                        {
+                            "k": k,
+                            "mode": "affine",
+                            "early_blend_steps": early_steps,
+                            "persistence_weight_start": weight,
+                            "spectral_strength": strength,
+                        }
+                    )
+    params.extend(
+        [
+            {
+                "k": 48,
+                "mode": "delta",
+                "early_blend_steps": 20,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+            },
+            {
+                "k": 48,
+                "mode": "raw",
+                "early_blend_steps": 20,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+            },
+        ]
+    )
+    return params
+
+
+def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "k": int(row["k"]),
+        "mode": str(row["mode"]),
+        "early_blend_steps": int(row["early_blend_steps"]),
+        "persistence_weight_start": float(row["persistence_weight_start"]),
+        "spectral_strength": float(row.get("spectral_strength", 0.0)),
+    }
 
 
 def _candidate_id(params: dict[str, Any]) -> str:
