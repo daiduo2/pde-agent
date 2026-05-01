@@ -1094,6 +1094,166 @@ def test_validate_executable_blueprints_cli_returns_payload(tmp_path: Path) -> N
     assert output_path.exists()
 
 
+def test_run_literature_algorithm_v2_pipeline_chains_promotion_and_registry(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        run_literature_algorithm_v2_pipeline,
+    )
+
+    cards = tmp_path / "algorithm_cards.json"
+    candidate_id = "candidate_card_residual_lightweight_residual_corrector"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_residual",
+                        "source_ids": ["source_residual"],
+                        "claim": "Residual correction can improve rollout.",
+                        "core_mechanism": "Fit a bounded residual map.",
+                        "operator_target": "residual_to_correction",
+                        "mechanism_type": "postprocess",
+                        "mathematical_object": "horizon_residual",
+                        "operation": "Run a residual correction sandbox.",
+                        "implementation_hooks": ["learned_residual_correction"],
+                        "implementation_requirements": {
+                            "requires_training": False,
+                            "requires_checkpoint": False,
+                            "requires_target_data": True,
+                            "requires_new_executor": False,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": True,
+                        },
+                        "preconditions": ["Burgers validation windows exist"],
+                        "expected_observables": ["score improves"],
+                        "failure_modes": ["overfits validation windows"],
+                        "minimal_experiment": "Run residual correction sandbox.",
+                        "evidence_status": "extracted",
+                        "provenance": {
+                            "parse_id": "parse_residual",
+                            "source_content_hash": "hash_residual",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "sandbox_evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_residual_001",
+                "candidate_id": candidate_id,
+                "rules_passed": True,
+                "score": 86.3,
+                "runtime": {"inference_seconds": 12.0},
+                "physics_metrics": {"residual_delta": -0.01},
+                "ablation_metrics": {"score_delta": 0.2},
+                "score_delta_vs_current_best": 0.2,
+                "artifact_paths": [str(tmp_path / "pred.hdf5")],
+                "reproducibility": {"deterministic": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_literature_algorithm_v2_pipeline(
+        algorithm_cards_path=cards,
+        workspace_dir=tmp_path / "workspace",
+        registry_path=tmp_path / "literature_registry.json",
+        current_best_score=86.1,
+        algorithm_candidate_id=candidate_id,
+        sandbox_evidence_paths=[evidence],
+        force=False,
+    )
+
+    assert report["state_hint"] == "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
+    assert report["pipeline_decision"] == "promotion_recorded"
+    assert report["artifacts"]["algorithm_cards_v2_audit_path"]
+    assert report["artifacts"]["executable_blueprint_audit_path"]
+    assert report["artifacts"]["candidate_promotion_path"]
+    assert report["artifacts"]["literature_registry_event_path"]
+    assert report["artifacts"]["hermes_registry_summary_path"]
+    assert report["metrics"]["candidate_count"] == 1
+    assert report["metrics"]["blueprint_issue_count"] == 0
+    assert report["next_command"] == "record-strategy-proposal"
+
+    registry = json.loads((tmp_path / "literature_registry.json").read_text())
+    assert registry["candidate_nodes"][0]["status"] == "promoted"
+
+
+def test_run_literature_algorithm_v2_pipeline_cli_returns_payload(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    cards = tmp_path / "algorithm_cards.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_spectral",
+                        "source_ids": ["source_spectral"],
+                        "claim": "Spectral smoothing stabilizes rollout.",
+                        "core_mechanism": "Damp high frequency modes.",
+                        "operator_target": "postprocess_to_solution",
+                        "mechanism_type": "postprocess",
+                        "mathematical_object": "spectral_filter",
+                        "operation": "Run spectral rollout sandbox.",
+                        "implementation_hooks": ["spectral_rollout_stabilization"],
+                        "implementation_requirements": {
+                            "requires_training": False,
+                            "requires_checkpoint": False,
+                            "requires_target_data": False,
+                            "requires_new_executor": False,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": True,
+                        },
+                        "preconditions": ["Burgers context exists"],
+                        "expected_observables": ["late RMSE improves"],
+                        "failure_modes": ["shock oversmoothing"],
+                        "minimal_experiment": "Run spectral sandbox.",
+                        "evidence_status": "extracted",
+                        "provenance": {"parse_id": "parse_spectral"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-literature-algorithm-v2-pipeline",
+            "--algorithm-cards-path",
+            str(cards),
+            "--workspace-dir",
+            str(tmp_path / "workspace"),
+            "--registry-path",
+            str(tmp_path / "literature_registry.json"),
+            "--current-best-score",
+            "86.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
+    assert payload["metrics"]["candidate_count"] == 1
+    assert payload["next_hint"] == "run-blueprint-sandbox"
+
+
 def test_compile_algorithm_candidates_expands_all_literature_strategy_families(
     tmp_path: Path,
 ) -> None:

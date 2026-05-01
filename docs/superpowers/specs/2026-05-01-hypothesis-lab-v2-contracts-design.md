@@ -328,6 +328,16 @@ The validator must produce machine-readable `issues` with `code`, `path`,
 `target_leakage_risk`; external code maps to `requires_external_code`; schema
 violations map to `blueprint_schema_invalid`.
 
+Hypothesis Lab integration:
+
+- `design_algorithm_blueprints` must attach an `executable_blueprint_audit`
+  summary to its output.
+- The audit must use the same normalization and validation rules as
+  `validate-executable-blueprints`.
+- Existing blueprint consumers can keep using `blueprints`; Hermes can read the
+  audit summary to reject unsafe or malformed executable plans before sandbox
+  execution.
+
 ### SandboxEvidence
 
 Question answered: what happened when the candidate was tested?
@@ -484,6 +494,32 @@ artifacts and write the result back to the candidate node:
 - linked registry event with `reason_codes`
 - parent algorithm `strategy_status` when the algorithm node is known
 
+End-to-end runner:
+
+- CLI command: `run-literature-algorithm-v2-pipeline`
+- Inputs:
+  - `ALGORITHM_CARDS_EXTRACTED`
+  - workspace directory
+  - literature registry path
+  - current best score
+  - optional candidate id and sandbox evidence artifacts
+- Output artifact state: `LITERATURE_ALGORITHM_V2_PIPELINE_RAN`
+
+The runner must execute the verified contract sequence:
+
+1. `validate-algorithm-cards-v2`
+2. `compile-algorithm-candidates`
+3. materialize native `EXECUTABLE_BLUEPRINTS_DESIGNED`
+4. `validate-executable-blueprints`
+5. if sandbox evidence is supplied, `evaluate-algorithm-candidate-promotion`
+6. if promotion was evaluated, `record-literature-registry-event`
+7. `update-literature-registry`
+8. `summarize-literature-registry-for-hermes`
+
+Without sandbox evidence the runner stops before promotion and routes to
+`run-blueprint-sandbox`. With evidence it records promotion or failure and
+routes according to the promotion report.
+
 ## Failure Taxonomy
 
 Failure codes should be shared across registry, Hermes summaries, and logs:
@@ -573,6 +609,13 @@ Hermes decision rules:
 3. Do not rerun candidates listed in `avoid_repetition` unchanged.
 4. Escalate `unsupported_executor` families to bounded executor design.
 5. Promote only candidates with evidence that passes the rubric.
+6. Treat candidate `failure_history` with `retry_allowed == false` as an
+   avoid-repetition signal. Include its `failure_codes`, `recommended_next`,
+   and `retry_allowed` in both `candidate_action_queue` and
+   `avoid_repetition`.
+7. Emit a `candidate_failure_recorded` learning signal when registry failures
+   block retry, so Hermes can learn from negative evidence instead of
+   rediscovering it.
 
 ## Implementation Phases
 

@@ -277,18 +277,10 @@ def summarize_literature_registry_for_hermes(
         current_best_score=float(current_best_score),
     )
     family_summary = _registry_family_summary(candidate_actions)
-    avoid_repetition = [
-        {
-            "candidate_id": action["candidate_id"],
-            "reason": "sandbox_score_below_current_best",
-            "best_score": action.get("best_score"),
-            "current_best_score": float(current_best_score),
-            "recommended_next": "only_retry_with_new_variant_or_ablation",
-        }
-        for action in candidate_actions
-        if action.get("recommended_action") == "refine_or_ablate"
-        and float(action.get("score_delta_vs_current_best", 0.0)) < 0.0
-    ]
+    avoid_repetition = _registry_avoid_repetition(
+        candidate_actions,
+        current_best_score=float(current_best_score),
+    )
     report = {
         "schema_version": 1,
         "state_hint": REGISTRY_SUMMARY_STATE_HINT,
@@ -311,6 +303,40 @@ def summarize_literature_registry_for_hermes(
     }
     _write_json(output_file, report)
     return report
+
+
+def _registry_avoid_repetition(
+    actions: list[dict[str, Any]],
+    *,
+    current_best_score: float,
+) -> list[dict[str, Any]]:
+    avoid = [
+        {
+            "candidate_id": action["candidate_id"],
+            "reason": "sandbox_score_below_current_best",
+            "best_score": action.get("best_score"),
+            "current_best_score": current_best_score,
+            "recommended_next": "only_retry_with_new_variant_or_ablation",
+        }
+        for action in actions
+        if action.get("recommended_action") == "refine_or_ablate"
+        and float(action.get("score_delta_vs_current_best", 0.0)) < 0.0
+    ]
+    for action in actions:
+        if (
+            action.get("reason") == "candidate_failure_history_blocks_retry"
+            and action.get("retry_allowed") is False
+        ):
+            avoid.append(
+                {
+                    "candidate_id": action["candidate_id"],
+                    "reason": action["reason"],
+                    "failure_codes": action.get("failure_codes", []),
+                    "recommended_next": action.get("recommended_next"),
+                    "retry_allowed": False,
+                }
+            )
+    return avoid
 
 
 def _rank_candidates(
@@ -422,7 +448,21 @@ def _registry_candidate_actions(
             "algorithm_node_id": algorithm.get("node_id"),
             "source_ids": candidate.get("source_ids", []),
         }
-        if status == "compiled":
+        failure = _latest_failure_history(candidate)
+        if failure and failure.get("retry_allowed") is False:
+            action.update(
+                {
+                    "recommended_action": "deprioritize",
+                    "next_command": "review-literature-registry",
+                    "priority": 20,
+                    "reason": "candidate_failure_history_blocks_retry",
+                    "failure_codes": failure.get("failure_codes", []),
+                    "recommended_next": failure.get("recommended_next"),
+                    "retry_allowed": False,
+                    "failure_artifact_path": failure.get("artifact_path"),
+                }
+            )
+        elif status == "compiled":
             action.update(
                 {
                     "recommended_action": "run_sandbox",
@@ -527,6 +567,18 @@ def _registry_learning_signals(
                     "recommended_learning_objective": "build_bounded_executor",
                 }
             )
+        elif action.get("reason") == "candidate_failure_history_blocks_retry":
+            signals.append(
+                {
+                    "signal": "candidate_failure_recorded",
+                    "candidate_id": action["candidate_id"],
+                    "candidate_family": action.get("candidate_family"),
+                    "failure_codes": action.get("failure_codes", []),
+                    "recommended_learning_objective": (
+                        "avoid_repetition_until_new_evidence_or_variant"
+                    ),
+                }
+            )
         elif action.get("recommended_action") == "run_sandbox":
             signals.append(
                 {
@@ -538,6 +590,7 @@ def _registry_learning_signals(
             )
     priority = {
         "sandbox_underperformed_current_best": 100,
+        "candidate_failure_recorded": 90,
         "executor_gap_blocks_algorithm_family": 80,
         "candidate_needs_first_sandbox_evidence": 60,
     }
@@ -623,6 +676,14 @@ def _latest_sandbox_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(evidence, list) or not evidence:
         return {}
     latest = evidence[-1]
+    return latest if isinstance(latest, dict) else {}
+
+
+def _latest_failure_history(candidate: dict[str, Any]) -> dict[str, Any]:
+    history = candidate.get("failure_history")
+    if not isinstance(history, list) or not history:
+        return {}
+    latest = history[-1]
     return latest if isinstance(latest, dict) else {}
 
 

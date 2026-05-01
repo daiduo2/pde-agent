@@ -434,6 +434,80 @@ def test_summarize_literature_registry_for_hermes_builds_learning_queue(
     assert family_summary["unsupported"]["recommended_action"] == "design_executor"
 
 
+def test_summarize_literature_registry_for_hermes_uses_failure_history(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_literature_expansion import (
+        summarize_literature_registry_for_hermes,
+    )
+
+    registry_path = tmp_path / "literature_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_REGISTRY_UPDATED",
+                "sources": [],
+                "algorithm_nodes": [
+                    {
+                        "node_id": "algorithm_card_residual",
+                        "algorithm_card_id": "card_residual",
+                        "candidate_ids": ["candidate_residual"],
+                        "strategy_status": "rejected",
+                    }
+                ],
+                "candidate_nodes": [
+                    {
+                        "candidate_id": "candidate_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "status": "rejected",
+                        "executor": "run-blueprint-sandbox",
+                        "source_ids": ["source_residual"],
+                        "failure_history": [
+                            {
+                                "artifact_path": str(tmp_path / "registry_event.json"),
+                                "failure_codes": [
+                                    "sandbox_rule_failed",
+                                    "score_regressed",
+                                ],
+                                "recommended_next": (
+                                    "avoid_repeating_without_new_evidence"
+                                ),
+                                "retry_allowed": False,
+                            }
+                        ],
+                    }
+                ],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = summarize_literature_registry_for_hermes(
+        registry_path=registry_path,
+        output_path=tmp_path / "summary.json",
+        current_best_score=86.0,
+        force=False,
+    )
+
+    action = report["candidate_action_queue"][0]
+    assert action["recommended_action"] == "deprioritize"
+    assert action["reason"] == "candidate_failure_history_blocks_retry"
+    assert action["failure_codes"] == ["sandbox_rule_failed", "score_regressed"]
+    assert action["retry_allowed"] is False
+    assert report["avoid_repetition"] == [
+        {
+            "candidate_id": "candidate_residual",
+            "reason": "candidate_failure_history_blocks_retry",
+            "failure_codes": ["sandbox_rule_failed", "score_regressed"],
+            "recommended_next": "avoid_repeating_without_new_evidence",
+            "retry_allowed": False,
+        }
+    ]
+    assert report["learning_signals"][0]["signal"] == "candidate_failure_recorded"
+
+
 def test_checkpoint_failure_memory_skips_local_checkpoint_family(
     tmp_path: Path,
 ) -> None:

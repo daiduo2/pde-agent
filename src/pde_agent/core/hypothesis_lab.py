@@ -490,6 +490,10 @@ def design_algorithm_blueprints(
     output_path: str | Path | None,
     force: bool,
 ) -> dict[str, Any]:
+    from pde_agent.core.literature_algorithm_lab import (
+        audit_executable_blueprint_payload,
+    )
+
     _require_state(hypotheses, HYPOTHESES_STATE_HINT)
     output_file = Path(output_path) if output_path is not None else None
     _guard_output(output_file, force=force)
@@ -807,11 +811,26 @@ def design_algorithm_blueprints(
                     "risks": hypothesis.get("known_risks", []),
                 }
             )
+    audit = audit_executable_blueprint_payload(
+        {
+            "schema_version": 1,
+            "state_hint": BLUEPRINTS_STATE_HINT,
+            "blueprints": blueprints,
+        }
+    )
     result = {
         "schema_version": 1,
         "state_hint": BLUEPRINTS_STATE_HINT,
         "blueprint_count": len(blueprints),
         "blueprints": blueprints,
+        "executable_blueprint_audit": {
+            "state_hint": audit["state_hint"],
+            "decision": audit["decision"],
+            "issue_count": audit["issue_count"],
+            "issues": audit["issues"],
+            "normalized_blueprint_count": audit["normalized_blueprint_count"],
+            "next_command": audit["next_command"],
+        },
         "next_command": "run-blueprint-sandbox",
     }
     _write_optional_json(output_file, result)

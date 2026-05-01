@@ -31,6 +31,7 @@ FNO_CANDIDATE_ADAPTED_STATE_HINT = "FNO_ARCHITECTURE_CANDIDATE_ADAPTED"
 EXECUTOR_DESIGN_REQUEST_STATE_HINT = "EXECUTOR_DESIGN_REQUEST_CREATED"
 BLOCKED_CANDIDATE_HANDOFF_STATE_HINT = "BLOCKED_CANDIDATE_HANDOFF_BUILT"
 LITERATURE_REGISTRY_UPDATED_STATE_HINT = "LITERATURE_REGISTRY_UPDATED"
+LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT = "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -633,6 +634,152 @@ def validate_executable_blueprints(
     payload = _read_json(blueprint_file)
     output_file = Path(output_path)
     _guard_output(output_file, force=force)
+    report = audit_executable_blueprint_payload(
+        payload,
+        blueprints_path=str(blueprint_file),
+    )
+    report["executable_blueprint_audit_path"] = str(output_file)
+    _write_json(output_file, report)
+    return report
+
+
+def run_literature_algorithm_v2_pipeline(
+    *,
+    algorithm_cards_path: str | Path,
+    workspace_dir: str | Path,
+    registry_path: str | Path,
+    current_best_score: float,
+    algorithm_candidate_id: str | None = None,
+    sandbox_evidence_paths: list[str | Path] | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    from pde_agent.core.hermes_literature_expansion import (
+        summarize_literature_registry_for_hermes,
+    )
+
+    workspace = Path(workspace_dir)
+    workspace.mkdir(parents=True, exist_ok=True)
+    cards_file = _require_file(Path(algorithm_cards_path), "algorithm cards")
+    card_audit_path = workspace / "algorithm_cards_v2_audit.json"
+    candidates_path = workspace / "algorithm_candidates.json"
+    blueprints_path = workspace / "executable_blueprints.json"
+    blueprint_audit_path = workspace / "executable_blueprint_audit.json"
+    registry_file = Path(registry_path)
+    summary_path = workspace / "hermes_registry_summary.json"
+
+    card_audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=cards_file,
+        output_path=card_audit_path,
+        force=force,
+    )
+    candidates = compile_algorithm_candidates(
+        algorithm_cards_path=cards_file,
+        output_path=candidates_path,
+        force=force,
+    )
+    blueprints = _materialize_executable_blueprints_from_candidates(
+        candidates=candidates,
+        output_path=blueprints_path,
+        force=force,
+    )
+    blueprint_audit = validate_executable_blueprints(
+        blueprints_path=blueprints["executable_blueprints_path"],
+        output_path=blueprint_audit_path,
+        force=force,
+    )
+
+    artifacts: dict[str, Any] = {
+        "algorithm_cards_v2_audit_path": card_audit["algorithm_card_v2_audit_path"],
+        "algorithm_candidates_path": candidates["algorithm_candidates_path"],
+        "executable_blueprints_path": blueprints["executable_blueprints_path"],
+        "executable_blueprint_audit_path": blueprint_audit[
+            "executable_blueprint_audit_path"
+        ],
+    }
+    evidence_paths = sandbox_evidence_paths or []
+    promotion = None
+    registry_event = None
+    if evidence_paths:
+        selected_candidate_id = algorithm_candidate_id or _first_candidate_id(candidates)
+        promotion_path = workspace / "candidate_promotion.json"
+        promotion = evaluate_algorithm_candidate_promotion(
+            algorithm_candidates_path=candidates_path,
+            algorithm_candidate_id=selected_candidate_id,
+            sandbox_evidence_paths=evidence_paths,
+            output_path=promotion_path,
+            current_best_score=float(current_best_score),
+            force=force,
+        )
+        event_path = workspace / "literature_registry_event.json"
+        registry_event = record_literature_registry_event(
+            event_source_path=promotion_path,
+            output_path=event_path,
+            force=force,
+        )
+        artifacts["candidate_promotion_path"] = promotion[
+            "algorithm_candidate_promotion_path"
+        ]
+        artifacts["literature_registry_event_path"] = registry_event[
+            "literature_registry_event_path"
+        ]
+
+    event_paths = (
+        [registry_event["literature_registry_event_path"]]
+        if registry_event is not None
+        else []
+    )
+    registry = update_literature_registry(
+        registry_path=registry_file,
+        algorithm_cards_paths=[cards_file],
+        algorithm_candidates_paths=[candidates_path],
+        event_paths=event_paths,
+        force=force,
+    )
+    summary = summarize_literature_registry_for_hermes(
+        registry_path=registry_file,
+        output_path=summary_path,
+        current_best_score=float(current_best_score),
+        force=force,
+    )
+    artifacts["literature_registry_path"] = registry["registry_path"]
+    artifacts["hermes_registry_summary_path"] = summary["summary_path"]
+    pipeline_decision = (
+        "promotion_recorded" if promotion is not None else "awaiting_sandbox_evidence"
+    )
+    next_command = (
+        str(promotion["next_command"])
+        if promotion is not None
+        else str(blueprint_audit["next_command"])
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
+        "workspace_dir": str(workspace),
+        "algorithm_cards_path": str(cards_file),
+        "current_best_score": float(current_best_score),
+        "pipeline_decision": pipeline_decision,
+        "artifacts": artifacts,
+        "metrics": {
+            "card_issue_count": card_audit["issue_count"],
+            "candidate_count": candidates["algorithm_candidate_count"],
+            "blueprint_count": blueprints["blueprint_count"],
+            "blueprint_issue_count": blueprint_audit["issue_count"],
+            "registry_event_count": registry["event_count"],
+            "hermes_candidate_action_count": summary["metrics"][
+                "candidate_action_count"
+            ],
+        },
+        "next_command": next_command,
+    }
+    _write_json(workspace / "literature_algorithm_v2_pipeline.json", report)
+    return report
+
+
+def audit_executable_blueprint_payload(
+    payload: dict[str, Any],
+    *,
+    blueprints_path: str | None = None,
+) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     blueprints_value = payload.get("blueprints")
     if not isinstance(blueprints_value, list):
@@ -653,11 +800,9 @@ def validate_executable_blueprints(
             normalized.append(item)
             _validate_executable_blueprint(item, index=index, issues=issues)
     decision = "approved" if not issues else "rejected"
-    report = {
+    report: dict[str, Any] = {
         "schema_version": 1,
         "state_hint": EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
-        "blueprints_path": str(blueprint_file),
-        "executable_blueprint_audit_path": str(output_file),
         "decision": decision,
         "blueprint_count": len(blueprints),
         "normalized_blueprint_count": len(normalized),
@@ -668,7 +813,8 @@ def validate_executable_blueprints(
         if decision == "approved"
         else "fix-executable-blueprint-dsl",
     }
-    _write_json(output_file, report)
+    if blueprints_path is not None:
+        report["blueprints_path"] = blueprints_path
     return report
 
 
@@ -2693,6 +2839,107 @@ def _normalize_executable_blueprint(
         "expected_artifacts": _blueprint_expected_artifacts(str(candidate_family or "")),
         "source_blueprint_shape": "hypothesis_lab_legacy",
     }
+
+
+def _materialize_executable_blueprints_from_candidates(
+    *,
+    candidates: dict[str, Any],
+    output_path: Path,
+    force: bool,
+) -> dict[str, Any]:
+    _guard_output(output_path, force=force)
+    blueprints = [
+        _executable_blueprint_from_candidate(candidate)
+        for candidate in _object_list(
+            candidates.get("algorithm_candidates"),
+            "algorithm_candidates",
+        )
+    ]
+    report = {
+        "schema_version": 1,
+        "state_hint": "EXECUTABLE_BLUEPRINTS_DESIGNED",
+        "executable_blueprints_path": str(output_path),
+        "blueprint_count": len(blueprints),
+        "blueprints": blueprints,
+        "next_command": "validate-executable-blueprints",
+    }
+    _write_json(output_path, report)
+    return report
+
+
+def _executable_blueprint_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    candidate_id = _nonempty_text(
+        candidate.get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    family = str(candidate.get("candidate_family") or "unknown_family")
+    executor_id = _executor_id_for_candidate(candidate)
+    parameter_grid = (
+        candidate.get("parameter_grid")
+        if isinstance(candidate.get("parameter_grid"), dict)
+        and candidate.get("parameter_grid")
+        else {"enabled": [True]}
+    )
+    return {
+        "blueprint_id": f"bp_{_slug(candidate_id)}_001",
+        "source_candidate_id": candidate_id,
+        "candidate_family": family,
+        "executor_id": executor_id,
+        "baseline": _blueprint_baseline_for_family(family),
+        "transforms": _blueprint_transforms_for_family(
+            family=_blueprint_transform_family_alias(family),
+            parameter_grid=parameter_grid,
+        ),
+        "training_plan": {
+            "mode": "finetune" if family == "official_checkpoint_family" else "none"
+        },
+        "parameter_grid": parameter_grid,
+        "metrics": ["score", "runtime", "burgers_residual"],
+        "safety_policy": {
+            "preserve_context_steps": 10,
+            "forbid_target_leakage": True,
+            "forbid_external_code": True,
+        },
+        "expected_artifacts": _blueprint_expected_artifacts(family),
+    }
+
+
+def _executor_id_for_candidate(candidate: dict[str, Any]) -> str:
+    family = str(candidate.get("candidate_family") or "")
+    if family == "official_checkpoint_family":
+        return "official_checkpoint_candidate_pipeline"
+    if family == "lightweight_residual_corrector":
+        return "controlled_numpy_residual_operator"
+    if family in {"task1_retrieval_prior"}:
+        return "controlled_numpy_retrieval_prior"
+    if family in {"task1_retrieval_refinement"}:
+        return "controlled_numpy_retrieval_refinement"
+    return "controlled_numpy_operator"
+
+
+def _blueprint_transform_family_alias(family: str) -> str:
+    if family == "lightweight_residual_corrector":
+        return "learned_residual_correction"
+    if family == "official_checkpoint_family":
+        return "official_checkpoint_calibration"
+    if family in {
+        "spectral_rollout_stabilization",
+        "operator_correction_postprocess",
+        "physics_residual_regularization",
+        "scheduled_rollout_training",
+    }:
+        return "linear_trend_spectral"
+    return family
+
+
+def _first_candidate_id(candidates: dict[str, Any]) -> str:
+    items = _object_list(candidates.get("algorithm_candidates"), "algorithm_candidates")
+    if not items:
+        raise LiteratureAlgorithmLabError("algorithm candidates must be non-empty")
+    return _nonempty_text(
+        items[0].get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
 
 
 def _has_native_executable_blueprint_shape(blueprint: dict[str, Any]) -> bool:

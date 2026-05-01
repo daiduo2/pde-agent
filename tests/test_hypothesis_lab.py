@@ -531,6 +531,9 @@ def test_hypothesis_lab_builds_retrieval_prior_from_algorithm_candidate(
         output_path=None,
         force=False,
     )
+    assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
+    assert blueprints["executable_blueprint_audit"]["issue_count"] == 0
+    assert blueprints["executable_blueprint_audit"]["normalized_blueprint_count"] == 2
     by_family = {
         blueprint["candidate_family"]: blueprint
         for blueprint in blueprints["blueprints"]

@@ -14,6 +14,7 @@ from pde_agent.core.literature_algorithm_lab import (
     EXECUTOR_TAXONOMY_STATE_HINT,
     EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
+    LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
     LITERATURE_REGISTRY_UPDATED_STATE_HINT,
     LITERATURE_REGISTRY_EVENT_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
@@ -41,6 +42,7 @@ from pde_agent.core.literature_algorithm_lab import (
     plan_candidate_sandbox,
     poll_mineru_parse_task,
     record_literature_registry_event,
+    run_literature_algorithm_v2_pipeline,
     submit_mineru_parse_task,
     update_literature_registry,
     validate_algorithm_cards_v2,
@@ -425,6 +427,35 @@ def validate_executable_blueprints_command(
             "normalized_blueprint_count": report["normalized_blueprint_count"],
             "issue_count": report["issue_count"],
         },
+        next_hint=report["next_command"],
+    )
+
+
+def run_literature_algorithm_v2_pipeline_command(
+    *,
+    algorithm_cards_path: str,
+    workspace_dir: str,
+    registry_path: str,
+    current_best_score: float,
+    algorithm_candidate_id: str | None,
+    sandbox_evidence_paths: list[str],
+    force: bool,
+) -> dict[str, object]:
+    report = run_literature_algorithm_v2_pipeline(
+        algorithm_cards_path=Path(algorithm_cards_path),
+        workspace_dir=Path(workspace_dir),
+        registry_path=Path(registry_path),
+        current_best_score=current_best_score,
+        algorithm_candidate_id=algorithm_candidate_id,
+        sandbox_evidence_paths=[Path(path) for path in sandbox_evidence_paths],
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="run-literature-algorithm-v2-pipeline",
+        state_hint=LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
+        artifacts=report["artifacts"],
+        metrics=report["metrics"],
         next_hint=report["next_command"],
     )
 

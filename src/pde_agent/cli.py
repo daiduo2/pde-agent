@@ -130,6 +130,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
     record_literature_registry_event_command,
+    run_literature_algorithm_v2_pipeline_command,
     submit_mineru_parse_command,
     update_literature_registry_command,
     validate_algorithm_cards_v2_command,
@@ -1178,6 +1179,33 @@ def validate_executable_blueprints_cmd(
             validate_executable_blueprints_command(
                 blueprints_path=blueprints_path,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-literature-algorithm-v2-pipeline")
+def run_literature_algorithm_v2_pipeline_cmd(
+    algorithm_cards_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option(...),
+    registry_path: str = typer.Option(...),
+    current_best_score: float = typer.Option(...),
+    algorithm_candidate_id: str | None = typer.Option(None),
+    sandbox_evidence_paths: list[str] = typer.Option([], "--sandbox-evidence-path"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_literature_algorithm_v2_pipeline_command(
+                algorithm_cards_path=algorithm_cards_path,
+                workspace_dir=workspace_dir,
+                registry_path=registry_path,
+                current_best_score=current_best_score,
+                algorithm_candidate_id=algorithm_candidate_id,
+                sandbox_evidence_paths=sandbox_evidence_paths,
                 force=force,
             )
         )
