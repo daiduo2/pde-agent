@@ -2709,11 +2709,22 @@ def _early_refinement_params(
     k0 = int(center["k"])
     mode0 = str(center["mode"])
     strength0 = float(center["spectral_strength"])
+    early0 = int(center["early_blend_steps"])
+    weight0 = float(center["persistence_weight_start"])
+    primary_anchor = str(center.get("early_anchor", "persistence"))
+    if primary_anchor not in {
+        "retrieval",
+        "persistence",
+        "linear_velocity",
+        "damped_linear_velocity",
+        "retrieval_derivative_match",
+    }:
+        primary_anchor = "persistence"
     modes = [mode0]
     if signals["prioritize_mode"]:
         modes.extend(["affine", "delta", "raw"])
     modes = _dedupe_values(modes)
-    anchors = ["retrieval", "persistence", "linear_velocity"]
+    anchors = [primary_anchor, "persistence", "retrieval", "linear_velocity"]
     if signals["expand_linear_velocity"]:
         anchors.extend(["damped_linear_velocity", "retrieval_derivative_match"])
     anchors = _dedupe_values(anchors)
@@ -2726,14 +2737,37 @@ def _early_refinement_params(
             [_clamp_float(float(value), 0.0, 2.0) for value in spectral_strengths]
         )
     ]
+    k_offsets = [-8, 0, 8, 16]
+    if signals["increase_k"]:
+        k_offsets.append(24)
+    if signals["decrease_k"]:
+        k_offsets.insert(0, -16)
+    k_values = [_clamp_task1_retrieval_k(k0 + offset) for offset in k_offsets]
+    k_values = [int(value) for value in _dedupe_values(k_values)]
+    early_steps_values = [
+        _clamp_int(early0 - 4, 4, 80),
+        early0,
+        _clamp_int(early0 + 4, 4, 80),
+        32,
+    ]
+    early_steps_values = [int(value) for value in _dedupe_values(early_steps_values)]
+    weight_values = [
+        _clamp_float(weight0 - 0.25, 0.0, 1.0),
+        weight0,
+        _clamp_float(weight0 + 0.25, 0.0, 1.0),
+    ]
+    weight_values = [float(value) for value in _dedupe_values(weight_values)]
     rows: list[dict[str, Any]] = []
-    for k in [k0 - 8, k0, k0 + 8]:
-        for early_steps in [8, 12, 16, 20, 24, 32]:
-            for weight in [0.0, 0.25, 0.5, 0.75, 1.0]:
-                for anchor in anchors:
+    core_anchors = [primary_anchor]
+    if primary_anchor != "persistence":
+        core_anchors.append("persistence")
+    for k in k_values:
+        for early_steps in early_steps_values:
+            for weight in weight_values:
+                for anchor in core_anchors:
                     rows.append(
                         {
-                            "k": _clamp_int(k, 4, 128),
+                            "k": k,
                             "mode": mode0,
                             "early_blend_steps": early_steps,
                             "persistence_weight_start": weight,
@@ -2742,28 +2776,51 @@ def _early_refinement_params(
                         }
                     )
     for mode in modes:
-        for anchor in anchors:
-            for early_steps in [12, 20, 24]:
+        for k in _dedupe_values(
+            [
+                _clamp_task1_retrieval_k(k0),
+                _clamp_task1_retrieval_k(k0 + 8),
+                _clamp_task1_retrieval_k(k0 + 16),
+            ]
+        ):
+            for early_steps in _dedupe_values([early0, _clamp_int(early0 + 4, 4, 80)]):
                 rows.append(
                     {
-                        "k": k0,
+                        "k": int(k),
                         "mode": mode,
                         "early_blend_steps": early_steps,
-                        "persistence_weight_start": 0.5,
+                        "persistence_weight_start": weight0,
+                        "spectral_strength": strength0,
+                        "early_anchor": primary_anchor,
+                    }
+                )
+    probe_ks = _dedupe_values(
+        [_clamp_task1_retrieval_k(k0), _clamp_task1_retrieval_k(k0 + 8)]
+    )
+    probe_steps = _dedupe_values([early0, _clamp_int(early0 + 4, 4, 80)])
+    for anchor in anchors:
+        for k in probe_ks:
+            for early_steps in probe_steps:
+                rows.append(
+                    {
+                        "k": int(k),
+                        "mode": mode0,
+                        "early_blend_steps": int(early_steps),
+                        "persistence_weight_start": weight0,
                         "spectral_strength": strength0,
                         "early_anchor": anchor,
                     }
                 )
     for strength in spectral_strengths:
-        for anchor in anchors:
+        for k in probe_ks:
             rows.append(
                 {
-                    "k": k0,
+                    "k": int(k),
                     "mode": mode0,
-                    "early_blend_steps": 24,
-                    "persistence_weight_start": 0.5,
+                    "early_blend_steps": _clamp_int(early0 + 4, 4, 80),
+                    "persistence_weight_start": weight0,
                     "spectral_strength": strength,
-                    "early_anchor": anchor,
+                    "early_anchor": primary_anchor,
                 }
             )
     deduped = []
@@ -2782,7 +2839,7 @@ def _early_refinement_params(
             continue
         seen.add(key)
         deduped.append(normalized)
-    return deduped
+    return deduped[:160]
 
 
 def _early_refinement_signals(
@@ -2829,6 +2886,20 @@ def _early_refinement_signals(
         "prioritize_mode": (
             "mode" in recommended_axes or "prioritize_axis:mode" in directives
         ),
+        "increase_k": any(
+            directive.get("axis") == "k" and directive.get("direction") == "increase"
+            for item in evidence_params or []
+            if isinstance(item, dict)
+            for directive in item.get("search_directives", [])
+            if isinstance(directive, dict)
+        ),
+        "decrease_k": any(
+            directive.get("axis") == "k" and directive.get("direction") == "decrease"
+            for item in evidence_params or []
+            if isinstance(item, dict)
+            for directive in item.get("search_directives", [])
+            if isinstance(directive, dict)
+        ),
     }
 
 
@@ -2852,7 +2923,7 @@ def _early_refinement_experiment_plan(
     center = _retrieval_refinement_center(evidence_params)
     return {
         "plan_id": "xp_task1_early_refinement_001",
-        "decision": "early_segment_objective_search",
+        "decision": "two_stage_budgeted_early_search",
         "objective": {
             "primary": "early_rel_mse",
             "secondary": [
@@ -2862,24 +2933,64 @@ def _early_refinement_experiment_plan(
             ],
             "focus": "reduce_short_horizon_error_before_score_arbitration",
         },
+        "budget_policy": {
+            "max_candidate_budget": 160,
+            "preserve_required_directive_probes": True,
+        },
         "center_params": center,
+        "stage_plan": [
+            {
+                "stage": "axis_screen",
+                "objective": "early_rel_mse",
+                "axes": ["k", "mode", "early_blend_steps"],
+                "purpose": (
+                    "screen cheap high-impact axes before trying every anchor "
+                    "combination"
+                ),
+            },
+            {
+                "stage": "focused_refine",
+                "objective": "guarded_early_rel_mse",
+                "axes": [
+                    "persistence_weight_start",
+                    "spectral_strength",
+                    "early_anchor",
+                ],
+                "purpose": (
+                    "probe directive-required anchors and smoothing only around "
+                    "the current center"
+                ),
+            },
+        ],
         "axis_plan": [
             {
-                "axis": "early_anchor",
+                "axis": "k",
+                "direction": "directed",
+                "reason": "expanded-family evidence favored higher retrieval counts",
+                "budget": 5,
+            },
+            {
+                "axis": "mode",
                 "direction": "compare",
-                "reason": "test whether early drift needs retrieval, persistence, or velocity anchoring",
+                "reason": "v2 diagnosis trend attribution prioritized mode",
                 "budget": 3,
             },
             {
                 "axis": "early_blend_steps",
                 "direction": "short_horizon_grid",
                 "reason": "competition early window is steeply penalized by Rel-MSE",
-                "budget": 6,
+                "budget": 4,
             },
             {
                 "axis": "persistence_weight_start",
                 "direction": "early_anchor_weight_grid",
                 "reason": "separate short-window accuracy from late stability smoothing",
+                "budget": 3,
+            },
+            {
+                "axis": "early_anchor",
+                "direction": "probe_required_directives",
+                "reason": "test derivative-aware anchors without full cross-product expansion",
                 "budget": 5,
             },
         ],
@@ -3109,6 +3220,10 @@ def _retrieval_refinement_center(
 
 def _clamp_int(value: int, lower: int, upper: int) -> int:
     return max(lower, min(upper, int(value)))
+
+
+def _clamp_task1_retrieval_k(value: int) -> int:
+    return _clamp_int(value, 4, 99)
 
 
 def _clamp_float(value: float, lower: float, upper: float) -> float:

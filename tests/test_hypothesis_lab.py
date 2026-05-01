@@ -642,6 +642,10 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
         tmp_path / "early_bottleneck_sandbox.json"
     )
     payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["best_candidate"]["params"]["k"] = 92
+    payload["best_candidate"]["candidate_id"] = (
+        "task1_retrieval_refinement_k92_affine_eb20_pw0.6_s0.5"
+    )
     payload["verifier"] = {
         "decision": "promote_to_strategy_proposal",
         "early_segment_diagnosis": {
@@ -702,6 +706,15 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
         "controlled_numpy_task1_early_refinement"
     )
     assert early["experiment_plan"]["objective"]["primary"] == "early_rel_mse"
+    assert early["experiment_plan"]["decision"] == "two_stage_budgeted_early_search"
+    assert early["experiment_plan"]["budget_policy"] == {
+        "max_candidate_budget": 160,
+        "preserve_required_directive_probes": True,
+    }
+    assert [stage["stage"] for stage in early["experiment_plan"]["stage_plan"]] == [
+        "axis_screen",
+        "focused_refine",
+    ]
     assert early["experiment_plan"]["guardrails"] == [
         "middle_score_non_regression",
         "late_rmse_non_regression",
@@ -712,12 +725,20 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
         for row in early["parameter_grid"]["candidate_params"]
     )
     candidate_params = early["parameter_grid"]["candidate_params"]
+    assert len(candidate_params) <= 160
+    assert max(row["k"] for row in candidate_params) <= 99
     anchors = {row["early_anchor"] for row in candidate_params}
     assert {"damped_linear_velocity", "retrieval_derivative_match"} <= anchors
     modes = {row["mode"] for row in candidate_params}
     assert {"affine", "delta", "raw"} <= modes
     strengths = {row["spectral_strength"] for row in candidate_params}
     assert 0.0 in strengths
+    derivative_probe_count = sum(
+        row["early_anchor"]
+        in {"damped_linear_velocity", "retrieval_derivative_match"}
+        for row in candidate_params
+    )
+    assert 2 <= derivative_probe_count <= 32
     assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
 
 
