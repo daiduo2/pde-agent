@@ -132,6 +132,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
     prepare_bounded_executor_authoring_task_command,
+    prepare_fno_literature_adaptation_task_command,
     prepare_literature_extraction_context_command,
     record_bounded_executor_sandbox_event_command,
     record_literature_registry_event_command,
@@ -1020,6 +1021,25 @@ def prepare_literature_extraction_context_cmd(
         json.dumps(
             prepare_literature_extraction_context_command(
                 paper_parse_path=paper_parse_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("prepare-fno-literature-adaptation-task")
+def prepare_fno_literature_adaptation_task_cmd(
+    literature_extraction_context_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            prepare_fno_literature_adaptation_task_command(
+                literature_extraction_context_path=literature_extraction_context_path,
                 output_path=output_path,
                 force=force,
             )

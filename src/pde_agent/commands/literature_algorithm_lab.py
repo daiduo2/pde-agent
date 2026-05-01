@@ -19,6 +19,7 @@ from pde_agent.core.literature_algorithm_lab import (
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
     EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
+    FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
     LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
     LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
@@ -50,6 +51,7 @@ from pde_agent.core.literature_algorithm_lab import (
     plan_candidate_sandbox,
     poll_mineru_parse_task,
     prepare_bounded_executor_authoring_task,
+    prepare_fno_literature_adaptation_task,
     prepare_literature_extraction_context,
     materialize_bounded_executor_template,
     record_literature_registry_event,
@@ -172,6 +174,35 @@ def prepare_literature_extraction_context_command(
             "source_id": report["source_id"],
             "context_unit_count": report["context_unit_count"],
             "output_state_hint": report["agent_contract"]["output_state_hint"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def prepare_fno_literature_adaptation_task_command(
+    *,
+    literature_extraction_context_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = prepare_fno_literature_adaptation_task(
+        literature_extraction_context_path=Path(literature_extraction_context_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="prepare-fno-literature-adaptation-task",
+        state_hint=FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        artifacts={
+            "fno_literature_adaptation_task_path": report[
+                "fno_literature_adaptation_task_path"
+            ]
+        },
+        metrics={
+            "source_id": report["source_id"],
+            "selected_context_unit_count": report["selected_context_unit_count"],
+            "operator_family": report["operator_family"],
         },
         next_hint=str(report["next_command"]),
     )

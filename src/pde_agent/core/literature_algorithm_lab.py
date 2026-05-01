@@ -39,6 +39,7 @@ LITERATURE_REGISTRY_UPDATED_STATE_HINT = "LITERATURE_REGISTRY_UPDATED"
 LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT = "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
 ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT = "ARXIV_MINERU_PARSE_PIPELINE_RAN"
 LITERATURE_EXTRACTION_CONTEXT_STATE_HINT = "LITERATURE_EXTRACTION_CONTEXT_PREPARED"
+FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT = "FNO_LITERATURE_ADAPTATION_TASK_PREPARED"
 BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT = "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED"
 BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT = "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
 BOUNDED_EXECUTOR_AUDIT_STATE_HINT = "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
@@ -639,6 +640,98 @@ def prepare_literature_extraction_context(
             ],
         },
         "next_command": "agent-extract-algorithm-cards",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def prepare_fno_literature_adaptation_task(
+    *,
+    literature_extraction_context_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    context_file = _require_file(
+        Path(literature_extraction_context_path),
+        "literature extraction context",
+    )
+    context = _read_json(context_file)
+    if context.get("state_hint") != LITERATURE_EXTRACTION_CONTEXT_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "literature extraction context has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    context_units = _object_list(context.get("context_units"), "context_units")
+    selected_units = _fno_relevant_context_units(context_units)
+    selected_ids = [
+        _nonempty_text(unit.get("unit_id"), "unit_id")
+        for unit in selected_units
+    ]
+    report = {
+        "schema_version": 1,
+        "state_hint": FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        "fno_literature_adaptation_task_path": str(output_file),
+        "literature_extraction_context_path": str(context_file),
+        "source_id": context.get("source_id"),
+        "operator_family": "FNO",
+        "selected_context_unit_count": len(selected_units),
+        "selected_context_unit_ids": selected_ids,
+        "reading_focus": [
+            "spectral convolution and Fourier mode truncation",
+            "lifting and projection around Fourier layers",
+            "resolution or discretization generalization claims",
+            "Burgers-specific rollout stability and high-frequency behavior",
+            "training rollout, checkpoint, or calibration procedures",
+            "minimal sandbox experiment implied by the paper mechanism",
+        ],
+        "recommended_hooks": {
+            "existing_executor": [
+                "spectral_rollout_stabilization",
+                "official_checkpoint_calibration",
+                "physics_residual_regularization",
+                "scheduled_rollout_training",
+            ],
+            "requires_bounded_executor": [
+                "fourier_neural_operator_architecture",
+            ],
+        },
+        "algorithm_card_guidance": {
+            "preferred_operator_targets": [
+                "ic_to_trajectory",
+                "context_to_rollout",
+                "postprocess_to_solution",
+            ],
+            "preferred_mechanism_types": [
+                "architecture",
+                "rollout",
+                "postprocess",
+                "checkpoint",
+                "loss",
+            ],
+            "required_observables": [
+                "local judge score or segment score",
+                "late-horizon RMSE or spectral-energy stability",
+                "runtime under task budget",
+                "first-context-step identity preservation",
+            ],
+        },
+        "agent_contract": {
+            "skill_name": "pde-fno-literature-adapter",
+            "base_skill_name": "pde-algorithm-card-extractor",
+            "input_state_hint": LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
+            "output_state_hint": ALGORITHM_CARDS_STATE_HINT,
+            "task": (
+                "Use FNO domain knowledge to turn grounded context units into "
+                "AlgorithmCard v2 records without fabricating claims."
+            ),
+            "forbidden_actions": [
+                "do not infer implementation details absent from the paper context",
+                "do not bypass AlgorithmCard v2 validation",
+                "do not turn an architecture claim into runnable code without bounded executor sandboxing",
+            ],
+        },
+        "next_command": "agent-extract-fno-algorithm-cards",
     }
     _write_json(output_file, report)
     return report
@@ -4258,6 +4351,28 @@ def _materialize_mineru_markdown_from_result(
         local_markdown_path = root / Path(selected_name).name
         local_markdown_path.write_bytes(archive.read(selected_name))
         return str(local_markdown_path)
+
+
+def _fno_relevant_context_units(context_units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected = []
+    for unit in context_units:
+        title = str(unit.get("section_title") or "").lower()
+        text = str(unit.get("text") or "").lower()
+        haystack = f"{title}\n{text}"
+        if any(
+            keyword in haystack
+            for keyword in [
+                "fourier",
+                "spectral",
+                "operator",
+                "convolution",
+                "mode",
+                "resolution",
+                "burgers",
+            ]
+        ):
+            selected.append(unit)
+    return selected or context_units[: min(5, len(context_units))]
 
 
 def _bounded_executor_template_source() -> str:

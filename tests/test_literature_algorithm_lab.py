@@ -472,6 +472,74 @@ def test_prepare_literature_extraction_context_packs_sections(
     assert report["next_command"] == "agent-extract-algorithm-cards"
 
 
+def test_prepare_fno_literature_adaptation_task_selects_operator_units(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        prepare_fno_literature_adaptation_task,
+    )
+
+    context_path = tmp_path / "literature_context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_EXTRACTION_CONTEXT_PREPARED",
+                "source_id": "source_fno",
+                "context_units": [
+                    {
+                        "unit_id": "section_000_title",
+                        "section_title": "Document Title",
+                        "line_start": 1,
+                        "line_end": 1,
+                        "text": "# Fourier Neural Operator",
+                    },
+                    {
+                        "unit_id": "section_001_method",
+                        "section_title": "Fourier Neural Operator",
+                        "line_start": 4,
+                        "line_end": 8,
+                        "text": (
+                            "The Fourier layer parameterizes convolution in "
+                            "Fourier space and truncates high modes."
+                        ),
+                    },
+                    {
+                        "unit_id": "section_002_related",
+                        "section_title": "Related Work",
+                        "line_start": 9,
+                        "line_end": 12,
+                        "text": "Generic neural network background.",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_fno_literature_adaptation_task(
+        literature_extraction_context_path=context_path,
+        output_path=tmp_path / "fno_task.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "FNO_LITERATURE_ADAPTATION_TASK_PREPARED"
+    assert report["operator_family"] == "FNO"
+    assert report["agent_contract"]["skill_name"] == "pde-fno-literature-adapter"
+    assert report["agent_contract"]["base_skill_name"] == "pde-algorithm-card-extractor"
+    assert "fourier_neural_operator_architecture" in report["recommended_hooks"][
+        "requires_bounded_executor"
+    ]
+    assert "spectral_rollout_stabilization" in report["recommended_hooks"][
+        "existing_executor"
+    ]
+    assert report["selected_context_unit_ids"] == [
+        "section_000_title",
+        "section_001_method",
+    ]
+    assert report["next_command"] == "agent-extract-fno-algorithm-cards"
+
+
 def test_build_source_records_normalizes_fixture_sources(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,
