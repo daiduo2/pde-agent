@@ -556,6 +556,67 @@ def test_update_literature_registry_keeps_downloaded_sources_and_attempts(
     assert registry["event_count"] == 5
 
 
+def test_update_literature_registry_records_empty_algorithm_extraction(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        extract_algorithm_cards,
+        update_literature_registry,
+    )
+
+    markdown = tmp_path / "survey.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Survey of PDE Benchmarks",
+                "## Abstract",
+                "This paper discusses datasets and evaluation challenges.",
+                "## Discussion",
+                "The text does not describe a reproducible algorithmic operation.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse = tmp_path / "parse.json"
+    parse.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "parse_id": "parse_source_survey_no_algorithm",
+                "source_id": "source_survey_no_algorithm",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards = tmp_path / "algorithm_cards.json"
+    extract_algorithm_cards(
+        paper_parse_paths=[parse],
+        output_path=cards,
+        force=False,
+    )
+
+    report = update_literature_registry(
+        registry_path=tmp_path / "literature_registry.json",
+        paper_parse_paths=[parse],
+        algorithm_cards_paths=[cards],
+        force=False,
+    )
+
+    registry = json.loads(Path(report["registry_path"]).read_text(encoding="utf-8"))
+    source = registry["sources"][0]
+    assert source["source_id"] == "source_survey_no_algorithm"
+    assert source["parse_status"] == "usable"
+    assert source["algorithm_card_ids"] == []
+    assert source["algorithm_extraction_status"] == "empty"
+    assert source["algorithm_extraction_failure_code"] == "no_algorithmic_claim"
+    assert source["algorithm_extraction_audit"]["extracted_block_count"] == 0
+    event_types = [event["event_type"] for event in registry["events"]]
+    assert event_types == ["paper_parse_ingested", "algorithm_extraction_empty"]
+
+
 def test_update_literature_registry_links_promoted_strategy_to_algorithm_node(
     tmp_path: Path,
 ) -> None:
@@ -2333,6 +2394,94 @@ def test_extract_algorithm_cards_infers_nonstructured_method_section(
     assert card["evidence_spans"]["mechanism"]["line_start"] == 7
     assert card["evidence_spans"]["risk"]["line_start"] == 8
     assert audit["decision"] == "approved"
+
+
+def test_extract_algorithm_cards_records_empty_extraction_artifact(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import extract_algorithm_cards
+
+    markdown = tmp_path / "survey.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Survey of PDE Benchmarks",
+                "## Abstract",
+                "This paper discusses datasets and evaluation challenges.",
+                "## Discussion",
+                "The text mentions Burgers equations but does not describe a reproducible algorithmic operation.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_survey_no_algorithm",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {"abstract": 2, "discussion": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CARDS_EXTRACTED"
+    assert report["algorithm_card_count"] == 0
+    assert report["algorithm_cards"] == []
+    assert report["extraction_status"] == "empty"
+    assert report["failure_code"] == "no_algorithmic_claim"
+    assert report["next_command"] == "update-literature-registry"
+    assert report["extraction_audit"]["scanned_block_count"] == 3
+    assert report["extraction_audit"]["extracted_block_count"] == 0
+    assert report["extraction_audit"]["skipped_blocks"]
+
+
+def test_extract_algorithm_cards_command_reports_empty_status(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.commands.literature_algorithm_lab import (
+        extract_algorithm_cards_command,
+    )
+
+    markdown = tmp_path / "survey.md"
+    markdown.write_text(
+        "# Survey\n## Discussion\nThis paper only discusses benchmark metadata.",
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_cli_empty",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = extract_algorithm_cards_command(
+        paper_parse_paths=[str(parse_path)],
+        output_path=str(tmp_path / "algorithm_cards.json"),
+        force=False,
+    )
+
+    assert payload["metrics"]["algorithm_card_count"] == 0
+    assert payload["metrics"]["extraction_status"] == "empty"
+    assert payload["metrics"]["failure_code"] == "no_algorithmic_claim"
+    assert payload["next_hint"] == "update-literature-registry"
 
 
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:

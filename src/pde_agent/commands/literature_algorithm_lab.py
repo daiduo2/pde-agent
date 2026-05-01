@@ -365,7 +365,11 @@ def extract_algorithm_cards_command(
         command="extract-algorithm-cards",
         state_hint=ALGORITHM_CARDS_STATE_HINT,
         artifacts={"algorithm_cards_path": report["algorithm_cards_path"]},
-        metrics={"algorithm_card_count": report["algorithm_card_count"]},
+        metrics={
+            "algorithm_card_count": report["algorithm_card_count"],
+            "extraction_status": report.get("extraction_status", "extracted"),
+            "failure_code": report.get("failure_code"),
+        },
         next_hint=report["next_command"],
     )
 

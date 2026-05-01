@@ -573,7 +573,42 @@ def update_literature_registry(
             raise LiteratureAlgorithmLabError(
                 "algorithm cards artifact has invalid state_hint"
             )
-        for card in _object_list(payload.get("algorithm_cards"), "algorithm_cards"):
+        cards_value = payload.get("algorithm_cards")
+        card_count = len(cards_value) if isinstance(cards_value, list) else int(
+            payload.get("algorithm_card_count", 0)
+        )
+        if card_count == 0:
+            source_ids = _source_ids_from_algorithm_cards_report(payload)
+            for source_id in source_ids:
+                source = _upsert_registry_source(
+                    registry,
+                    {
+                        "source_id": source_id,
+                        "source_type": "unknown",
+                        "title": source_id,
+                    },
+                )
+                source["algorithm_extraction_status"] = "empty"
+                source["algorithm_extraction_failure_code"] = payload.get(
+                    "failure_code",
+                    "no_algorithmic_claim",
+                )
+                source["algorithm_extraction_audit"] = payload.get(
+                    "extraction_audit",
+                    {},
+                )
+            if source_ids:
+                _registry_event(
+                    registry,
+                    artifact_file=artifact_file,
+                    event_type="algorithm_extraction_empty",
+                    source_ids=source_ids,
+                    reason_codes=[
+                        str(payload.get("failure_code", "no_algorithmic_claim"))
+                    ],
+                )
+            continue
+        for card in _object_list(cards_value, "algorithm_cards"):
             node = _upsert_algorithm_node(registry, card)
             for source_id in node["source_ids"]:
                 source = _upsert_registry_source(
@@ -1206,6 +1241,7 @@ def extract_algorithm_cards(
     output_file = Path(output_path)
     _guard_output(output_file, force=force)
     cards = []
+    extracted_source_ids: list[str] = []
     extraction_audit = {
         "parse_count": len(paper_parse_paths),
         "usable_parse_count": 0,
@@ -1242,6 +1278,8 @@ def extract_algorithm_cards(
         )
         markdown = markdown_file.read_text(encoding="utf-8")
         source_id = _nonempty_text(parse.get("source_id"), "source_id")
+        if source_id not in extracted_source_ids:
+            extracted_source_ids.append(source_id)
         field_blocks, skipped_blocks = _scan_algorithm_card_field_blocks(markdown)
         extraction_audit["scanned_block_count"] += len(field_blocks) + len(
             skipped_blocks
@@ -1277,7 +1315,21 @@ def extract_algorithm_cards(
             fields = dict(field_block["fields"])
             block_markdown = str(field_block["markdown"])
             if "hook" not in fields:
-                fields = _infer_algorithm_fields(block_markdown)
+                try:
+                    fields = _infer_algorithm_fields(block_markdown)
+                except LiteratureAlgorithmLabError:
+                    extraction_audit["skipped_blocks"].append(
+                        {
+                            "source_id": source_id,
+                            "section_title": field_block.get("section_title"),
+                            "block_index": field_block.get("block_index"),
+                            "line_start": field_block.get("line_start"),
+                            "line_end": field_block.get("line_end"),
+                            "reason_code": "no_supported_inference_pattern",
+                            "missing_fields": _missing_algorithm_card_fields(fields),
+                        }
+                    )
+                    continue
             hook = _nonempty_text(fields.get("hook"), "Hook")
             section_title = field_block.get("section_title")
             card = {
@@ -1337,17 +1389,22 @@ def extract_algorithm_cards(
                 )
             )
             cards.append(card)
-    if not cards:
-        raise LiteratureAlgorithmLabError("no usable algorithm cards extracted")
+    extraction_status = "extracted" if cards else "empty"
     report = {
         "schema_version": 1,
         "state_hint": ALGORITHM_CARDS_STATE_HINT,
         "algorithm_cards_path": str(output_file),
         "algorithm_card_count": len(cards),
+        "source_ids": extracted_source_ids,
         "algorithm_cards": cards,
+        "extraction_status": extraction_status,
         "extraction_audit": extraction_audit,
-        "next_command": "compile-algorithm-candidates",
+        "next_command": "compile-algorithm-candidates"
+        if cards
+        else "update-literature-registry",
     }
+    if not cards:
+        report["failure_code"] = "no_algorithmic_claim"
     _write_json(output_file, report)
     return report
 
@@ -3264,6 +3321,29 @@ def _source_ids_from_source_artifact(payload: dict[str, Any]) -> set[Any]:
         for record in payload.get("source_records", [])
         if isinstance(record, dict)
     }
+
+
+def _source_ids_from_algorithm_cards_report(payload: dict[str, Any]) -> list[str]:
+    source_ids = []
+    for source_id in payload.get("source_ids", []):
+        if isinstance(source_id, str) and source_id.strip():
+            source_ids.append(source_id)
+    if source_ids:
+        return sorted(set(source_ids))
+    audit = payload.get("extraction_audit")
+    if not isinstance(audit, dict):
+        return []
+    for key in ["skipped_blocks", "skipped_parses"]:
+        value = audit.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            source_id = item.get("source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                source_ids.append(source_id)
+    return sorted(set(source_ids))
 
 
 def _write_source_search_report(
