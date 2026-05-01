@@ -37,10 +37,13 @@ EARLY_REFINEMENT_ANCHORS = {
     "persistence",
     "linear_velocity",
     "damped_linear_velocity",
+    "scaled_damped_velocity",
     "retrieval_derivative_match",
     "phase_aligned_retrieval",
     "mean_trend_bias",
     "second_order_velocity",
+    "affine_context_calibration",
+    "phase_derivative_hybrid",
 }
 EARLY_HANDOFF_CURVES = {"linear", "cosine", "quadratic"}
 
@@ -2669,6 +2672,13 @@ def _prediction_from_task1_retrieval_refinement(
                 steps=prediction.shape[1],
                 decay=max(4.0, float(early_steps)),
             )
+        elif early_anchor == "scaled_damped_velocity":
+            anchor = _damped_linear_velocity_anchor_prediction(
+                context=context,
+                steps=prediction.shape[1],
+                decay=max(4.0, float(early_steps)),
+                velocity_scale=float(params.get("velocity_scale", 0.5)),
+            )
         elif early_anchor == "retrieval_derivative_match":
             anchor = _retrieval_derivative_match_anchor_prediction(
                 context=context,
@@ -2692,6 +2702,19 @@ def _prediction_from_task1_retrieval_refinement(
                 context=context,
                 steps=prediction.shape[1],
                 decay=max(4.0, float(early_steps)),
+            )
+        elif early_anchor == "affine_context_calibration":
+            anchor = _affine_context_calibration_anchor_prediction(
+                context=context,
+                retrieval=retrieval,
+                decay=max(4.0, float(early_steps)),
+            )
+        elif early_anchor == "phase_derivative_hybrid":
+            anchor = _phase_derivative_hybrid_anchor_prediction(
+                context=context,
+                retrieval=retrieval,
+                decay=max(4.0, float(early_steps)),
+                scale=float(params.get("phase_shift_scale", 1.0)),
             )
         elif early_anchor == "retrieval":
             anchor = retrieval
@@ -2733,6 +2756,7 @@ def _damped_linear_velocity_anchor_prediction(
     context: np.ndarray,
     steps: int,
     decay: float,
+    velocity_scale: float = 1.0,
 ) -> np.ndarray:
     prediction = np.empty((context.shape[0], steps, context.shape[2]), dtype=np.float32)
     prediction[:, : context.shape[1], :] = context
@@ -2744,7 +2768,7 @@ def _damped_linear_velocity_anchor_prediction(
     ).reshape(1, -1, 1)
     damping = np.exp(-(horizon - 1.0) / float(decay))
     prediction[:, context.shape[1] :, :] = (
-        context[:, -1:, :] + horizon * damping * velocity
+        context[:, -1:, :] + float(velocity_scale) * horizon * damping * velocity
     )
     return prediction
 
@@ -2882,6 +2906,58 @@ def _second_order_velocity_anchor_prediction(
     return prediction
 
 
+def _affine_context_calibration_anchor_prediction(
+    *,
+    context: np.ndarray,
+    retrieval: np.ndarray,
+    decay: float,
+) -> np.ndarray:
+    prediction = retrieval.copy()
+    forecast_steps = retrieval.shape[1] - context.shape[1]
+    horizon = np.arange(1, forecast_steps + 1, dtype=np.float32).reshape(1, -1, 1)
+    last_mean = np.mean(context[:, -1:, :], axis=2, keepdims=True)
+    prev_mean = np.mean(context[:, -2:-1, :], axis=2, keepdims=True)
+    mean_velocity = last_mean - prev_mean
+    last_std = np.std(context[:, -1:, :], axis=2, keepdims=True)
+    prev_std = np.std(context[:, -2:-1, :], axis=2, keepdims=True)
+    std_velocity = last_std - prev_std
+    desired_mean = last_mean + horizon * mean_velocity
+    desired_std = np.maximum(
+        np.float32(1e-6),
+        last_std + horizon * std_velocity,
+    )
+    future = retrieval[:, context.shape[1] :, :]
+    future_mean = np.mean(future, axis=2, keepdims=True)
+    future_std = np.maximum(
+        np.float32(1e-6),
+        np.std(future, axis=2, keepdims=True),
+    )
+    calibrated = (future - future_mean) * (desired_std / future_std) + desired_mean
+    damping = np.exp(-(horizon - 1.0) / float(decay))
+    prediction[:, context.shape[1] :, :] = future + damping * (calibrated - future)
+    prediction[:, : context.shape[1], :] = context
+    return prediction
+
+
+def _phase_derivative_hybrid_anchor_prediction(
+    *,
+    context: np.ndarray,
+    retrieval: np.ndarray,
+    decay: float,
+    scale: float,
+) -> np.ndarray:
+    phase_aligned = _phase_aligned_retrieval_anchor_prediction(
+        context=context,
+        retrieval=retrieval,
+        scale=scale,
+    )
+    return _retrieval_derivative_match_anchor_prediction(
+        context=context,
+        retrieval=phase_aligned,
+        decay=decay,
+    )
+
+
 def _early_handoff_weights(
     *,
     forecast_steps: int,
@@ -2938,6 +3014,8 @@ def _candidate_metadata(
         )
         if "phase_shift_scale" in params:
             metadata["phase_shift_scale"] = float(params["phase_shift_scale"])
+        if "velocity_scale" in params:
+            metadata["velocity_scale"] = float(params["velocity_scale"])
     if family == "task1_early_refinement":
         metadata.update(
             {
@@ -3288,6 +3366,7 @@ def _early_refinement_params(
         anchors.extend(
             [
                 "damped_linear_velocity",
+                "scaled_damped_velocity",
                 "retrieval_derivative_match",
                 "second_order_velocity",
             ]
@@ -3296,6 +3375,9 @@ def _early_refinement_params(
         anchors.append("phase_aligned_retrieval")
     if signals["expand_bias_calibration"]:
         anchors.append("mean_trend_bias")
+        anchors.append("affine_context_calibration")
+    if signals["expand_compound_calibration"]:
+        anchors.extend(["phase_derivative_hybrid", "affine_context_calibration"])
     anchors = _dedupe_values(anchors)
     spectral_strengths = [strength0]
     if signals["reduce_smoothing"]:
@@ -3400,6 +3482,9 @@ def _early_refinement_params(
             "phase_aligned_retrieval",
             "mean_trend_bias",
             "second_order_velocity",
+            "scaled_damped_velocity",
+            "affine_context_calibration",
+            "phase_derivative_hybrid",
         }
     ]
     for anchor in mechanism_anchors:
@@ -3418,11 +3503,16 @@ def _early_refinement_params(
                     "early_anchor": anchor,
                     "handoff_curve": curve,
                 }
-                if anchor == "phase_aligned_retrieval":
+                if anchor in {"phase_aligned_retrieval", "phase_derivative_hybrid"}:
                     for scale in phase_shift_scales:
                         shifted = dict(row)
                         shifted["phase_shift_scale"] = float(scale)
                         rows.append(shifted)
+                elif anchor == "scaled_damped_velocity":
+                    for scale in [0.25, 0.5, 0.75]:
+                        scaled = dict(row)
+                        scaled["velocity_scale"] = float(scale)
+                        rows.append(scaled)
                 else:
                     rows.append(row)
     for strength in spectral_strengths:
@@ -3439,7 +3529,7 @@ def _early_refinement_params(
                 }
             )
     deduped = []
-    seen: set[tuple[int, str, int, float, float, str, str, float]] = set()
+    seen: set[tuple[int, str, int, float, float, str, str, float, float]] = set()
     for row in rows:
         normalized = _normalize_retrieval_refinement_params(row)
         key = (
@@ -3451,6 +3541,7 @@ def _early_refinement_params(
             str(normalized.get("early_anchor", "persistence")),
             str(normalized.get("handoff_curve", "linear")),
             float(normalized.get("phase_shift_scale", 1.0)),
+            float(normalized.get("velocity_scale", 1.0)),
         )
         if key in seen:
             continue
@@ -3648,6 +3739,22 @@ def _early_refinement_signals(
             or "amplitude_bias" in triggered_taxonomy
             or "add_short_horizon_affine_bias_calibration" in directives
         ),
+        "expand_compound_calibration": (
+            (
+                "phase_shift" in bottlenecks
+                or "phase_shift" in triggered_taxonomy
+                or "add_phase_alignment_or_derivative_distance_candidates"
+                in directives
+            )
+            and (
+                "amplitude_bias" in bottlenecks
+                or "amplitude_bias" in triggered_taxonomy
+                or "initial_derivative_mismatch" in bottlenecks
+                or "initial_derivative_mismatch" in triggered_taxonomy
+                or "add_short_horizon_affine_bias_calibration" in directives
+                or "expand_linear_velocity_anchor_search" in directives
+            )
+        ),
         "increase_smoothing": (
             "high_frequency_noise" in bottlenecks
             or "high_frequency_noise" in triggered_taxonomy
@@ -3713,10 +3820,22 @@ def _early_refinement_experiment_plan(
         axis_plan_by_bottleneck["derivative_consistency"] = {
             "candidate_hooks": [
                 "damped_linear_velocity",
+                "scaled_damped_velocity",
                 "retrieval_derivative_match",
                 "second_order_velocity",
             ],
             "reason": "initial derivative mismatch requires velocity-consistent anchors",
+        }
+    if signals["expand_compound_calibration"]:
+        axis_plan_by_bottleneck["compound_transport_calibration"] = {
+            "candidate_hooks": [
+                "phase_derivative_hybrid",
+                "affine_context_calibration",
+            ],
+            "reason": (
+                "combined phase, derivative, or amplitude evidence requires "
+                "compound early anchors"
+            ),
         }
     return {
         "plan_id": "xp_task1_early_refinement_001",
@@ -4048,9 +4167,11 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
         if early_anchor not in EARLY_REFINEMENT_ANCHORS:
             raise HypothesisLabError(
                 "retrieval refinement early_anchor must be one of retrieval, "
-                "persistence, linear_velocity, damped_linear_velocity, or "
+                "persistence, linear_velocity, damped_linear_velocity, "
+                "scaled_damped_velocity, or "
                 "retrieval_derivative_match, phase_aligned_retrieval, "
-                "mean_trend_bias, or second_order_velocity"
+                "mean_trend_bias, second_order_velocity, "
+                "affine_context_calibration, or phase_derivative_hybrid"
             )
         normalized["early_anchor"] = early_anchor
     if "handoff_curve" in row:
@@ -4067,6 +4188,14 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
             0.0,
             2.0,
         )
+    if "velocity_scale" in row:
+        normalized["velocity_scale"] = _clamp_float(
+            float(row["velocity_scale"]),
+            0.0,
+            1.5,
+        )
+    elif normalized.get("early_anchor") == "scaled_damped_velocity":
+        normalized["velocity_scale"] = 0.5
     return normalized
 
 
@@ -4085,6 +4214,8 @@ def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
                 suffix += f"_h{handoff_curve}"
             if "phase_shift_scale" in params:
                 suffix += f"_ps{float(params['phase_shift_scale']):g}"
+            if "velocity_scale" in params:
+                suffix += f"_vs{float(params['velocity_scale']):g}"
         return (
             f"{prefix}"
             f"_k{int(params['k'])}"
