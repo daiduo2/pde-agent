@@ -129,6 +129,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
     submit_mineru_parse_command,
+    update_literature_registry_command,
 )
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
@@ -956,6 +957,39 @@ def build_literature_source_records_cmd(
             build_literature_source_records_command(
                 source_fixture_path=source_fixture_path,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("update-literature-registry")
+def update_literature_registry_cmd(
+    registry_path: str = typer.Option(...),
+    downloaded_source_paths: list[str] = typer.Option(
+        [],
+        "--downloaded-source-path",
+    ),
+    paper_parse_paths: list[str] = typer.Option([], "--paper-parse-path"),
+    algorithm_cards_paths: list[str] = typer.Option([], "--algorithm-cards-path"),
+    algorithm_candidates_paths: list[str] = typer.Option(
+        [],
+        "--algorithm-candidates-path",
+    ),
+    event_paths: list[str] = typer.Option([], "--event-path"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            update_literature_registry_command(
+                registry_path=registry_path,
+                downloaded_source_paths=downloaded_source_paths,
+                paper_parse_paths=paper_parse_paths,
+                algorithm_cards_paths=algorithm_cards_paths,
+                algorithm_candidates_paths=algorithm_candidates_paths,
+                event_paths=event_paths,
                 force=force,
             )
         )

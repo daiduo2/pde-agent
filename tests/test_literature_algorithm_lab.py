@@ -413,6 +413,285 @@ def test_build_source_records_rejects_missing_raw_file(tmp_path: Path) -> None:
         )
 
 
+def test_update_literature_registry_keeps_downloaded_sources_and_attempts(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import update_literature_registry
+
+    raw = tmp_path / "fno.pdf"
+    raw.write_bytes(b"%PDF fno")
+    downloaded = tmp_path / "downloaded_fno.json"
+    downloaded.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "SOURCE_DOCUMENT_DOWNLOADED",
+                "source_record": {
+                    "source_id": "arxiv_paper_fno",
+                    "source_type": "arxiv_paper",
+                    "title": "Fourier Neural Operator",
+                    "url": "https://arxiv.org/abs/2010.08895",
+                    "local_raw_path": str(raw),
+                    "content_hash": "hash-fno",
+                    "retrieval_query": "Burgers FNO",
+                    "license_note": "arXiv paper",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    markdown = tmp_path / "full.md"
+    markdown.write_text("# Fourier Neural Operator\n", encoding="utf-8")
+    parse = tmp_path / "parse.json"
+    parse.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "parse_id": "parse_arxiv_paper_fno",
+                "source_id": "arxiv_paper_fno",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards = tmp_path / "cards.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_arxiv_paper_fno_fourier",
+                        "source_ids": ["arxiv_paper_fno"],
+                        "claim": "FNO learns PDE solution operators.",
+                        "core_mechanism": "Fourier kernels parameterize operators.",
+                        "implementation_hooks": [
+                            "fourier_neural_operator_architecture"
+                        ],
+                        "evidence_status": "extracted",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_fno_blocked",
+                        "parent_algorithm_card_id": "card_arxiv_paper_fno_fourier",
+                        "candidate_family": "unsupported",
+                        "hypothesis": "FNO improves Burgers rollout.",
+                        "executor_spec": {
+                            "cli_command": "blocked_requires_executor_design",
+                            "unsupported_hook": "fourier_neural_operator_architecture",
+                        },
+                        "source_grounding": {
+                            "source_ids": ["arxiv_paper_fno"],
+                            "algorithm_card_id": "card_arxiv_paper_fno_fourier",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    handoff = tmp_path / "handoff.json"
+    handoff.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BLOCKED_CANDIDATE_HANDOFF_BUILT",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "blocked_evidence_summary": {
+                    "blocked": True,
+                    "reason_codes": ["requires_executor_design"],
+                    "source_grounding": {
+                        "source_ids": ["arxiv_paper_fno"],
+                        "algorithm_card_id": "card_arxiv_paper_fno_fourier",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = update_literature_registry(
+        registry_path=tmp_path / "literature_registry.json",
+        downloaded_source_paths=[downloaded],
+        paper_parse_paths=[parse],
+        algorithm_cards_paths=[cards],
+        algorithm_candidates_paths=[candidates],
+        event_paths=[handoff],
+        force=False,
+    )
+
+    assert report["state_hint"] == "LITERATURE_REGISTRY_UPDATED"
+    registry = json.loads(Path(report["registry_path"]).read_text(encoding="utf-8"))
+    assert registry["source_count"] == 1
+    source = registry["sources"][0]
+    assert source["source_id"] == "arxiv_paper_fno"
+    assert source["source_type"] == "arxiv_paper"
+    assert source["title"] == "Fourier Neural Operator"
+    assert source["download_status"] == "downloaded"
+    assert source["parse_status"] == "usable"
+    assert source["algorithm_card_ids"] == ["card_arxiv_paper_fno_fourier"]
+    algorithm = registry["algorithm_nodes"][0]
+    assert algorithm["node_id"] == "algorithm_card_arxiv_paper_fno_fourier"
+    assert algorithm["strategy_status"] == "blocked"
+    assert algorithm["candidate_ids"] == ["candidate_fno_blocked"]
+    candidate = registry["candidate_nodes"][0]
+    assert candidate["candidate_id"] == "candidate_fno_blocked"
+    assert candidate["status"] == "blocked"
+    assert registry["event_count"] == 5
+
+
+def test_update_literature_registry_links_promoted_strategy_to_algorithm_node(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import update_literature_registry
+
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_residual",
+                        "parent_algorithm_card_id": "card_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "hypothesis": "Residual correction improves rollout.",
+                        "executor_spec": {"cli_command": "run-blueprint-sandbox"},
+                        "source_grounding": {
+                            "source_ids": ["source_residual_paper"],
+                            "algorithm_card_id": "card_residual",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    proposal = tmp_path / "strategy_proposal.json"
+    proposal.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "STRATEGY_PROPOSAL_RECORDED",
+                "strategy_id": "candidate_residual",
+                "source_type": "external_retrieval",
+                "implementation_plan": {
+                    "algorithm_candidate_id": "candidate_residual",
+                    "source_grounding": {
+                        "source_ids": ["source_residual_paper"],
+                        "algorithm_card_id": "card_residual",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = update_literature_registry(
+        registry_path=tmp_path / "literature_registry.json",
+        algorithm_candidates_paths=[candidates],
+        event_paths=[proposal],
+        force=False,
+    )
+
+    registry = json.loads(Path(report["registry_path"]).read_text(encoding="utf-8"))
+    algorithm = registry["algorithm_nodes"][0]
+    candidate = registry["candidate_nodes"][0]
+    assert algorithm["node_id"] == "algorithm_card_residual"
+    assert algorithm["strategy_status"] == "strategy_proposed"
+    assert algorithm["strategy_ids"] == ["candidate_residual"]
+    assert candidate["status"] == "promoted"
+    assert registry["events"][-1]["event_type"] == "strategy_proposal_recorded"
+
+
+def test_update_literature_registry_links_checkpoint_sandbox_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import update_literature_registry
+
+    candidates = tmp_path / "adapted_candidate.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "FNO_ARCHITECTURE_CANDIDATE_ADAPTED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_fno_checkpoint",
+                        "parent_algorithm_card_id": "card_fno",
+                        "candidate_family": "official_checkpoint_family",
+                        "executor_spec": {
+                            "cli_command": "run-checkpoint-family-sandbox"
+                        },
+                        "resource_bindings": {"checkpoint_paths": ["fno.pt"]},
+                        "source_grounding": {
+                            "source_ids": ["source_fno"],
+                            "algorithm_card_id": "card_fno",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sandbox = tmp_path / "checkpoint_family_sandbox_report.json"
+    sandbox.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "CHECKPOINT_FAMILY_SANDBOX_RAN",
+                "best_candidate": {
+                    "checkpoint_path": "fno.pt",
+                    "score": 83.6,
+                    "rules_passed": True,
+                    "inference_time": 5.9,
+                    "calibration_weight": 0.0,
+                },
+                "top_candidates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = update_literature_registry(
+        registry_path=tmp_path / "literature_registry.json",
+        algorithm_candidates_paths=[candidates],
+        event_paths=[sandbox],
+        force=False,
+    )
+
+    registry = json.loads(Path(report["registry_path"]).read_text(encoding="utf-8"))
+    algorithm = registry["algorithm_nodes"][0]
+    candidate = registry["candidate_nodes"][0]
+    assert algorithm["strategy_status"] == "sandbox_verified"
+    assert candidate["status"] == "sandbox_verified"
+    assert candidate["sandbox_evidence"] == [
+        {
+            "artifact_path": str(sandbox),
+            "best_score": 83.6,
+            "rules_passed": True,
+            "inference_time": 5.9,
+            "calibration_weight": 0.0,
+        }
+    ]
+    assert registry["events"][-1]["event_type"] == "candidate_sandbox_verified"
+
+
 def test_ingest_mineru_parse_scores_markdown_quality(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import (
         build_literature_source_records,

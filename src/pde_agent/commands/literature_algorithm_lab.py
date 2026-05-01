@@ -11,6 +11,7 @@ from pde_agent.core.literature_algorithm_lab import (
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
+    LITERATURE_REGISTRY_UPDATED_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
     MINERU_TASK_POLLED_STATE_HINT,
     MINERU_TASK_SUBMITTED_STATE_HINT,
@@ -35,6 +36,7 @@ from pde_agent.core.literature_algorithm_lab import (
     plan_candidate_sandbox,
     poll_mineru_parse_task,
     submit_mineru_parse_task,
+    update_literature_registry,
 )
 
 
@@ -149,6 +151,42 @@ def build_literature_source_records_command(
         state_hint=SOURCE_RECORDS_STATE_HINT,
         artifacts={"source_records_path": report["source_records_path"]},
         metrics={"source_count": report["source_count"]},
+        next_hint=report["next_command"],
+    )
+
+
+def update_literature_registry_command(
+    *,
+    registry_path: str,
+    downloaded_source_paths: list[str],
+    paper_parse_paths: list[str],
+    algorithm_cards_paths: list[str],
+    algorithm_candidates_paths: list[str],
+    event_paths: list[str],
+    force: bool,
+) -> dict[str, object]:
+    report = update_literature_registry(
+        registry_path=Path(registry_path),
+        downloaded_source_paths=[Path(path) for path in downloaded_source_paths],
+        paper_parse_paths=[Path(path) for path in paper_parse_paths],
+        algorithm_cards_paths=[Path(path) for path in algorithm_cards_paths],
+        algorithm_candidates_paths=[
+            Path(path) for path in algorithm_candidates_paths
+        ],
+        event_paths=[Path(path) for path in event_paths],
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="update-literature-registry",
+        state_hint=LITERATURE_REGISTRY_UPDATED_STATE_HINT,
+        artifacts={"literature_registry_path": report["registry_path"]},
+        metrics={
+            "source_count": report["source_count"],
+            "algorithm_node_count": report["algorithm_node_count"],
+            "candidate_node_count": report["candidate_node_count"],
+            "event_count": report["event_count"],
+        },
         next_hint=report["next_command"],
     )
 
