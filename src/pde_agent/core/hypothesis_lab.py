@@ -625,6 +625,9 @@ def design_algorithm_blueprints(
                 }
             )
         if hypothesis.get("candidate_family") == "task1_retrieval_refinement_local_search":
+            candidate_params = _local_retrieval_refinement_params(
+                hypothesis.get("evidence_params", [])
+            )
             blueprints.append(
                 {
                     "blueprint_id": "bp_task1_retrieval_refinement_local_search_001",
@@ -645,10 +648,12 @@ def design_algorithm_blueprints(
                         ],
                     },
                     "parameter_grid": {
-                        "candidate_params": _local_retrieval_refinement_params(
-                            hypothesis.get("evidence_params", [])
-                        ),
+                        "candidate_params": candidate_params,
                     },
+                    "experiment_plan": _retrieval_refinement_experiment_plan(
+                        evidence_params=hypothesis.get("evidence_params", []),
+                        candidate_budget=len(candidate_params),
+                    ),
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
                         "allowed_executor": "controlled_numpy_retrieval_refinement",
@@ -2469,6 +2474,70 @@ def _retrieval_refinement_search_directives_from_evidence(
             seen.add(key)
             directives.append({"axis": axis, "direction": direction})
     return directives
+
+
+def _retrieval_refinement_experiment_plan(
+    *,
+    evidence_params: list[dict[str, Any]] | None,
+    candidate_budget: int,
+) -> dict[str, Any]:
+    directives = _retrieval_refinement_search_directives_from_evidence(
+        evidence_params
+    )
+    if directives:
+        axis_plan = [
+            {
+                "axis": directive["axis"],
+                "direction": directive["direction"],
+                "reason": directive.get("reason", "top_candidate_score_trend"),
+                "budget": 3,
+            }
+            for directive in directives
+        ]
+        decision = "axis_directed_local_search"
+        focus = "score_trend"
+    else:
+        axis_plan = [
+            {
+                "axis": axis,
+                "direction": "bidirectional",
+                "reason": "no_clear_axis_trend",
+                "budget": 2,
+            }
+            for axis in [
+                "k",
+                "early_blend_steps",
+                "persistence_weight_start",
+                "spectral_strength",
+            ]
+        ]
+        decision = "centered_local_search"
+        focus = "local_neighborhood"
+    return {
+        "plan_id": "xp_task1_retrieval_refinement_local_search_001",
+        "decision": decision,
+        "objective": {
+            "primary": "task1_total_score_proxy",
+            "secondary": [
+                "early_rel_mse",
+                "middle_rel_mse",
+                "late_rmse",
+                "inference_seconds",
+            ],
+            "focus": focus,
+        },
+        "axis_plan": axis_plan,
+        "candidate_budget": int(candidate_budget),
+        "stop_criteria": [
+            "stop_if_no_candidate_improves_seed",
+            "stop_if_context_prefix_validation_fails",
+            "stop_if_inference_budget_exceeded",
+        ],
+        "switch_criteria": [
+            "switch_family_after_repeated_axis_plateau",
+            "switch_family_if_score_regresses_on_heldout_split",
+        ],
+    }
 
 
 def _directed_retrieval_refinement_params(

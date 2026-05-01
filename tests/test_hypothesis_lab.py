@@ -748,6 +748,51 @@ def test_hypothesis_lab_expands_axis_when_sandbox_top_candidates_show_trend(
     assert 0.9 in weights
 
 
+def test_hypothesis_lab_blueprint_records_experiment_plan_from_axis_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[
+            _adaptive_retrieval_refinement_weight_trend_report(
+                tmp_path / "weight_trend_sandbox.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    blueprint = blueprints["blueprints"][0]
+    plan = blueprint["experiment_plan"]
+    assert plan["plan_id"] == "xp_task1_retrieval_refinement_local_search_001"
+    assert plan["decision"] == "axis_directed_local_search"
+    assert plan["objective"]["primary"] == "task1_total_score_proxy"
+    assert plan["objective"]["focus"] == "score_trend"
+    assert {
+        "axis": "persistence_weight_start",
+        "direction": "increase",
+        "reason": "top_candidate_score_trend",
+        "budget": 3,
+    } in plan["axis_plan"]
+    assert plan["candidate_budget"] == len(
+        blueprint["parameter_grid"]["candidate_params"]
+    )
+    assert "stop_if_no_candidate_improves_seed" in plan["stop_criteria"]
+    assert "switch_family_after_repeated_axis_plateau" in plan["switch_criteria"]
+
+
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
 
