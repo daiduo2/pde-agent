@@ -11,6 +11,7 @@ from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
     ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
     BOUNDED_EXECUTOR_AUDIT_STATE_HINT,
+    BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT,
     BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT,
     BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
     BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT,
@@ -48,6 +49,7 @@ from pde_agent.core.literature_algorithm_lab import (
     normalize_openalex_search_results,
     plan_candidate_sandbox,
     poll_mineru_parse_task,
+    prepare_bounded_executor_authoring_task,
     prepare_literature_extraction_context,
     materialize_bounded_executor_template,
     record_literature_registry_event,
@@ -885,6 +887,51 @@ def record_bounded_executor_sandbox_event_command(
             "algorithm_candidate_id": report["algorithm_candidate_id"],
             "event_type": report["event_type"],
             "retry_allowed": report["retry_allowed"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def prepare_bounded_executor_authoring_task_command(
+    *,
+    design_spec_path: str,
+    manifest_path: str,
+    executor_path: str,
+    context_path: str,
+    target_path: str,
+    output_path: str,
+    sandbox_output_dir: str,
+    audit_output_path: str,
+    event_output_path: str,
+    submission_id: str,
+    force: bool,
+) -> dict[str, object]:
+    report = prepare_bounded_executor_authoring_task(
+        design_spec_path=Path(design_spec_path),
+        manifest_path=Path(manifest_path),
+        executor_path=Path(executor_path),
+        context_path=Path(context_path),
+        target_path=Path(target_path),
+        output_path=Path(output_path),
+        sandbox_output_dir=Path(sandbox_output_dir),
+        audit_output_path=Path(audit_output_path),
+        event_output_path=Path(event_output_path),
+        submission_id=submission_id,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="prepare-bounded-executor-authoring-task",
+        state_hint=BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT,
+        artifacts={
+            "bounded_executor_authoring_task_path": report[
+                "bounded_executor_authoring_task_path"
+            ],
+            "executor_path": report["executor_path"],
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "validation_command_count": len(report["validation_commands"]),
         },
         next_hint=report["next_command"],
     )

@@ -3446,6 +3446,68 @@ def test_run_bounded_executor_sandbox_and_record_event(tmp_path: Path) -> None:
     assert event["next_command"] == "update-literature-registry"
 
 
+def test_prepare_bounded_executor_authoring_task_contract(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        materialize_bounded_executor_template,
+        prepare_bounded_executor_authoring_task,
+    )
+
+    design_path = tmp_path / "bounded_executor_design_spec.json"
+    design_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "requested_executor_id": "bounded_fno_architecture_executor",
+                "hypothesis": "Use a bounded spectral extrapolator.",
+                "mechanism": "Fit a trend in context and preserve low frequencies.",
+                "source_grounding": {
+                    "source_ids": ["source_fno"],
+                    "algorithm_card_id": "card_fno",
+                },
+                "executor_api": {
+                    "function_name": "predict",
+                    "required_args": ["context", "candidate", "params"],
+                },
+                "security_policy": {
+                    "allowed_imports": ["numpy", "math", "typing"],
+                    "forbidden_calls": ["open", "eval", "exec", "__import__"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    materialized = materialize_bounded_executor_template(
+        design_spec_path=design_path,
+        output_dir=tmp_path / "executor",
+        force=False,
+    )
+
+    report = prepare_bounded_executor_authoring_task(
+        design_spec_path=design_path,
+        manifest_path=materialized["manifest_path"],
+        executor_path=materialized["executor_path"],
+        context_path=tmp_path / "context.hdf5",
+        target_path=tmp_path / "target.hdf5",
+        output_path=tmp_path / "authoring_task.json",
+        sandbox_output_dir=tmp_path / "sandbox",
+        audit_output_path=tmp_path / "audit.json",
+        event_output_path=tmp_path / "event.json",
+        submission_id="bounded-authoring-smoke",
+        force=False,
+    )
+
+    assert report["state_hint"] == "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED"
+    assert report["algorithm_candidate_id"] == "candidate_fno_blocked"
+    assert report["allowed_edit_paths"] == [materialized["executor_path"]]
+    assert str(tmp_path / "target.hdf5") not in report["allowed_read_paths"]
+    assert report["agent_contract"]["skill_name"] == "pde-bounded-executor-author"
+    assert "validate-bounded-executor-implementation" in report["validation_commands"][0]
+    assert "run-bounded-executor-sandbox" in report["validation_commands"][1]
+    assert report["next_command"] == "agent-author-bounded-executor"
+
+
 def test_adapt_fno_architecture_candidate_to_checkpoint_resource(
     tmp_path: Path,
 ) -> None:

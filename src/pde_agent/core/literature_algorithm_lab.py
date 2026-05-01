@@ -43,6 +43,7 @@ BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT = "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED"
 BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT = "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
 BOUNDED_EXECUTOR_AUDIT_STATE_HINT = "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
 BOUNDED_EXECUTOR_SANDBOX_STATE_HINT = "BOUNDED_EXECUTOR_SANDBOX_RAN"
+BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT = "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED"
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -2549,6 +2550,113 @@ def record_bounded_executor_sandbox_event(
     return report
 
 
+def prepare_bounded_executor_authoring_task(
+    *,
+    design_spec_path: str | Path,
+    manifest_path: str | Path,
+    executor_path: str | Path,
+    context_path: str | Path,
+    target_path: str | Path,
+    output_path: str | Path,
+    sandbox_output_dir: str | Path,
+    audit_output_path: str | Path,
+    event_output_path: str | Path,
+    submission_id: str,
+    force: bool,
+) -> dict[str, Any]:
+    design_file = _require_file(Path(design_spec_path), "bounded executor design spec")
+    design = _read_json(design_file)
+    if design.get("state_hint") != BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor design spec has invalid state_hint"
+        )
+    manifest_file = _require_file(Path(manifest_path), "bounded executor manifest")
+    executor_file = _require_file(Path(executor_path), "bounded executor source")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    candidate_id = _nonempty_text(
+        design.get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    audit_path = Path(audit_output_path)
+    sandbox_dir = Path(sandbox_output_dir)
+    event_path = Path(event_output_path)
+    validation_command = (
+        "uv run --frozen pde-agent validate-bounded-executor-implementation "
+        f"--design-spec-path {design_file} "
+        f"--manifest-path {manifest_file} "
+        f"--executor-path {executor_file} "
+        f"--output-path {audit_path} --force"
+    )
+    sandbox_command = (
+        "uv run --frozen pde-agent run-bounded-executor-sandbox "
+        f"--design-spec-path {design_file} "
+        f"--manifest-path {manifest_file} "
+        f"--executor-path {executor_file} "
+        f"--context-path {Path(context_path)} "
+        f"--target-path {Path(target_path)} "
+        f"--output-dir {sandbox_dir} "
+        f"--submission-id {_shell_safe_token(submission_id)} --force"
+    )
+    event_command = (
+        "uv run --frozen pde-agent record-bounded-executor-sandbox-event "
+        f"--sandbox-report-path {sandbox_dir / 'bounded_executor_sandbox_report.json'} "
+        f"--output-path {event_path} --force"
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT,
+        "bounded_executor_authoring_task_path": str(output_file),
+        "algorithm_candidate_id": candidate_id,
+        "requested_executor_id": design.get("requested_executor_id"),
+        "design_spec_path": str(design_file),
+        "manifest_path": str(manifest_file),
+        "executor_path": str(executor_file),
+        "allowed_edit_paths": [str(executor_file)],
+        "allowed_read_paths": [
+            str(design_file),
+            str(manifest_file),
+            str(executor_file),
+            str(Path(context_path)),
+        ],
+        "forbidden_read_paths": [str(Path(target_path))],
+        "agent_contract": {
+            "skill_name": "pde-bounded-executor-author",
+            "task": "Edit only executor_path and implement predict(context, candidate, params).",
+            "success_criteria": [
+                "static audit decision approved",
+                "sandbox rules_passed true",
+                "first 10 context steps preserved exactly",
+                "metric_results and registry event written",
+            ],
+            "forbidden_actions": [
+                "read target_path manually",
+                "edit any file outside allowed_edit_paths",
+                "import modules outside security_policy.allowed_imports",
+                "use file, network, shell, eval, exec, or dynamic import",
+            ],
+            "implementation_guidance": [
+                "Use design_spec hypothesis and mechanism to guide the rollout rule.",
+                "Keep the implementation small and reversible.",
+                "If the mechanism is unclear, implement a conservative baseline and record the limitation through the sandbox result.",
+            ],
+        },
+        "validation_commands": [
+            validation_command,
+            sandbox_command,
+            event_command,
+        ],
+        "expected_artifacts": {
+            "audit_output_path": str(audit_path),
+            "sandbox_report_path": str(sandbox_dir / "bounded_executor_sandbox_report.json"),
+            "event_output_path": str(event_path),
+        },
+        "next_command": "agent-author-bounded-executor",
+    }
+    _write_json(output_file, report)
+    return report
+
+
 def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
     candidate_id = _algorithm_candidate_id(
         card_id=str(card["algorithm_card_id"]),
@@ -4324,6 +4432,13 @@ def _load_bounded_executor_module(source_file: Path) -> Any:
     if not hasattr(module, "predict"):
         raise LiteratureAlgorithmLabError("bounded executor missing predict function")
     return module
+
+
+def _shell_safe_token(value: str) -> str:
+    token = _nonempty_text(value, "token")
+    if not re.fullmatch(r"[A-Za-z0-9_.=-]+", token):
+        raise LiteratureAlgorithmLabError(f"unsafe shell token: {value}")
+    return token
 
 
 def _source_candidate(

@@ -131,6 +131,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     normalize_openalex_sources_command,
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
+    prepare_bounded_executor_authoring_task_command,
     prepare_literature_extraction_context_command,
     record_bounded_executor_sandbox_event_command,
     record_literature_registry_event_command,
@@ -1498,6 +1499,41 @@ def record_bounded_executor_sandbox_event_cmd(
             record_bounded_executor_sandbox_event_command(
                 sandbox_report_path=sandbox_report_path,
                 output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("prepare-bounded-executor-authoring-task")
+def prepare_bounded_executor_authoring_task_cmd(
+    design_spec_path: str = typer.Option(...),
+    manifest_path: str = typer.Option(...),
+    executor_path: str = typer.Option(...),
+    context_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    sandbox_output_dir: str = typer.Option(...),
+    audit_output_path: str = typer.Option(...),
+    event_output_path: str = typer.Option(...),
+    submission_id: str = typer.Option("team_hermes"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            prepare_bounded_executor_authoring_task_command(
+                design_spec_path=design_spec_path,
+                manifest_path=manifest_path,
+                executor_path=executor_path,
+                context_path=context_path,
+                target_path=target_path,
+                output_path=output_path,
+                sandbox_output_dir=sandbox_output_dir,
+                audit_output_path=audit_output_path,
+                event_output_path=event_output_path,
+                submission_id=submission_id,
                 force=force,
             )
         )
