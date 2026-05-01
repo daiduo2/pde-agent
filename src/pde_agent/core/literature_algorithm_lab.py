@@ -1206,29 +1206,67 @@ def extract_algorithm_cards(
     output_file = Path(output_path)
     _guard_output(output_file, force=force)
     cards = []
+    extraction_audit = {
+        "parse_count": len(paper_parse_paths),
+        "usable_parse_count": 0,
+        "low_quality_parse_count": 0,
+        "scanned_block_count": 0,
+        "extracted_block_count": 0,
+        "skipped_parses": [],
+        "skipped_blocks": [],
+    }
     for parse_path in paper_parse_paths:
         parse = _read_json(_require_file(Path(parse_path), "paper parse"))
         if parse.get("state_hint") != PAPER_PARSE_STATE_HINT:
             raise LiteratureAlgorithmLabError("paper parse has invalid state_hint")
         if parse.get("parse_quality", {}).get("quality") != "usable":
+            extraction_audit["low_quality_parse_count"] += 1
+            extraction_audit["skipped_parses"].append(
+                {
+                    "paper_parse_path": str(Path(parse_path)),
+                    "source_id": parse.get("source_id"),
+                    "reason_code": "parse_quality_not_usable",
+                    "quality": parse.get("parse_quality", {}).get("quality"),
+                    "quality_flags": parse.get("parse_quality", {}).get(
+                        "quality_flags",
+                        [],
+                    ),
+                }
+            )
             continue
+        extraction_audit["usable_parse_count"] += 1
         markdown_file = _require_file(
             Path(_nonempty_text(parse.get("markdown_path"), "markdown_path")),
             "parsed markdown",
         )
         markdown = markdown_file.read_text(encoding="utf-8")
-        field_blocks = _extract_algorithm_card_field_blocks(markdown)
+        source_id = _nonempty_text(parse.get("source_id"), "source_id")
+        field_blocks, skipped_blocks = _scan_algorithm_card_field_blocks(markdown)
+        extraction_audit["scanned_block_count"] += len(field_blocks) + len(
+            skipped_blocks
+        )
+        extraction_audit["extracted_block_count"] += len(field_blocks)
+        for skipped_block in skipped_blocks:
+            extraction_audit["skipped_blocks"].append(
+                {"source_id": source_id, **skipped_block}
+            )
         if not field_blocks:
             field_blocks = [
                 {
                     "fields": _extract_colon_fields(markdown),
+                    "field_spans": _extract_colon_field_spans(
+                        markdown,
+                        line_offset=0,
+                        section_title=None,
+                    ),
                     "markdown": markdown,
                     "section_title": None,
                     "block_index": 0,
                     "source_shape": "whole_document",
+                    "line_start": 1,
+                    "line_end": len(markdown.splitlines()) or 1,
                 }
             ]
-        source_id = _nonempty_text(parse.get("source_id"), "source_id")
         for field_block in field_blocks:
             fields = dict(field_block["fields"])
             block_markdown = str(field_block["markdown"])
@@ -1261,6 +1299,20 @@ def extract_algorithm_cards(
                     fields.get("minimal experiment"),
                     "Minimal Experiment",
                 ),
+                "evidence_spans": _evidence_spans_for_fields(
+                    field_block.get("field_spans")
+                    if isinstance(field_block.get("field_spans"), dict)
+                    else {},
+                    [
+                        "claim",
+                        "mechanism",
+                        "operation",
+                        "hook",
+                        "observable",
+                        "risk",
+                        "minimal experiment",
+                    ],
+                ),
                 "evidence_status": "extracted",
             }
             card.update(
@@ -1287,6 +1339,7 @@ def extract_algorithm_cards(
         "algorithm_cards_path": str(output_file),
         "algorithm_card_count": len(cards),
         "algorithm_cards": cards,
+        "extraction_audit": extraction_audit,
         "next_command": "compile-algorithm-candidates",
     }
     _write_json(output_file, report)
@@ -2574,30 +2627,87 @@ def _extract_colon_fields(markdown: str) -> dict[str, str]:
     return fields
 
 
+def _extract_colon_field_spans(
+    markdown: str,
+    *,
+    line_offset: int,
+    section_title: str | None,
+) -> dict[str, dict[str, Any]]:
+    spans: dict[str, dict[str, Any]] = {}
+    for local_line_number, line in enumerate(markdown.splitlines(), start=1):
+        if ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        key = label.strip().lower()
+        if not key or not value.strip():
+            continue
+        absolute_line = line_offset + local_line_number
+        span = {
+            "text": line.strip(),
+            "value": value.strip(),
+            "line_start": absolute_line,
+            "line_end": absolute_line,
+        }
+        if section_title:
+            span["section_title"] = section_title
+        spans[key] = span
+    return spans
+
+
 def _extract_algorithm_card_field_blocks(markdown: str) -> list[dict[str, Any]]:
+    extracted, _ = _scan_algorithm_card_field_blocks(markdown)
+    return extracted
+
+
+def _scan_algorithm_card_field_blocks(
+    markdown: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     blocks = _markdown_heading_blocks(markdown)
     algorithm_blocks = []
+    skipped_blocks = []
     for block in blocks:
         fields = _extract_colon_fields(str(block["markdown"]))
+        missing_fields = _missing_algorithm_card_fields(fields)
         if _has_complete_algorithm_card_fields(fields):
             algorithm_blocks.append(
                 {
                     "fields": fields,
+                    "field_spans": _extract_colon_field_spans(
+                        str(block["markdown"]),
+                        line_offset=int(block["line_start"]) - 1,
+                        section_title=block["section_title"]
+                        if isinstance(block["section_title"], str)
+                        else None,
+                    ),
                     "markdown": block["markdown"],
                     "section_title": block["section_title"],
                     "block_index": block["block_index"],
                     "source_shape": "structured_section",
+                    "line_start": block["line_start"],
+                    "line_end": block["line_end"],
                 }
             )
-    return algorithm_blocks
+            continue
+        skipped_blocks.append(
+            {
+                "section_title": block["section_title"],
+                "block_index": block["block_index"],
+                "line_start": block["line_start"],
+                "line_end": block["line_end"],
+                "reason_code": "missing_algorithm_card_fields",
+                "missing_fields": missing_fields,
+            }
+        )
+    return algorithm_blocks, skipped_blocks
 
 
 def _markdown_heading_blocks(markdown: str) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     current_title: str | None = None
     current_lines: list[str] = []
+    current_start_line = 1
     current_index = 0
-    for line in markdown.splitlines():
+    for line_number, line in enumerate(markdown.splitlines(), start=1):
         heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", line)
         if heading:
             if current_lines:
@@ -2606,26 +2716,52 @@ def _markdown_heading_blocks(markdown: str) -> list[dict[str, Any]]:
                         "section_title": current_title,
                         "markdown": "\n".join(current_lines).strip(),
                         "block_index": current_index,
+                        "line_start": current_start_line,
+                        "line_end": line_number - 1,
                     }
                 )
                 current_index += 1
             current_title = heading.group(2).strip()
             current_lines = [line]
+            current_start_line = line_number
             continue
         current_lines.append(line)
     if current_lines:
+        line_count = len(markdown.splitlines())
         blocks.append(
             {
                 "section_title": current_title,
                 "markdown": "\n".join(current_lines).strip(),
                 "block_index": current_index,
+                "line_start": current_start_line,
+                "line_end": line_count,
             }
         )
     return [block for block in blocks if str(block["markdown"]).strip()]
 
 
 def _has_complete_algorithm_card_fields(fields: dict[str, str]) -> bool:
-    return all(key in fields for key in ["claim", "mechanism", "operation", "hook"])
+    return not _missing_algorithm_card_fields(fields)
+
+
+def _missing_algorithm_card_fields(fields: dict[str, str]) -> list[str]:
+    return [
+        key
+        for key in ["claim", "mechanism", "operation", "hook"]
+        if key not in fields
+    ]
+
+
+def _evidence_spans_for_fields(
+    spans: dict[str, Any],
+    field_names: list[str],
+) -> dict[str, Any]:
+    evidence = {}
+    for field_name in field_names:
+        span = spans.get(field_name)
+        if isinstance(span, dict):
+            evidence[field_name.replace(" ", "_")] = span
+    return evidence
 
 
 def _algorithm_card_id(

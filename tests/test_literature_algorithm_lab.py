@@ -2192,6 +2192,79 @@ def test_extract_algorithm_cards_reads_multiple_structured_sections(
     assert audit["issue_count"] == 0
 
 
+def test_extract_algorithm_cards_records_audit_and_evidence_spans(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import extract_algorithm_cards
+
+    markdown = tmp_path / "grounded.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Burgers Operator Stabilization Notes",
+                "## Abstract",
+                "This note contains prose that should be scanned but not extracted.",
+                "## Method",
+                "### Residual Corrector",
+                "Claim: Residual correction reduces short-horizon checkpoint bias.",
+                "Mechanism: Learn a residual operator from local validation windows.",
+                "Operation: Fit and apply a horizon-decayed residual correction.",
+                "Hook: learned_residual_correction",
+                "Observable: lower early Rel-MSE.",
+                "Risk: can overfit validation windows.",
+                "Minimal Experiment: compare checkpoint rollout against residual-corrected rollout.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_grounded_method",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {
+                    "abstract": 2,
+                    "method": 4,
+                    "residual corrector": 5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+
+    audit = report["extraction_audit"]
+    assert audit["parse_count"] == 1
+    assert audit["usable_parse_count"] == 1
+    assert audit["scanned_block_count"] == 4
+    assert audit["extracted_block_count"] == 1
+    skipped_titles = {
+        block["section_title"]
+        for block in audit["skipped_blocks"]
+        if block["reason_code"] == "missing_algorithm_card_fields"
+    }
+    assert "Abstract" in skipped_titles
+    assert "Method" in skipped_titles
+
+    card = report["algorithm_cards"][0]
+    spans = card["evidence_spans"]
+    assert spans["claim"]["line_start"] == 6
+    assert spans["claim"]["line_end"] == 6
+    assert spans["claim"]["text"].startswith("Claim: Residual correction")
+    assert spans["mechanism"]["line_start"] == 7
+    assert spans["operation"]["line_start"] == 8
+    assert spans["minimal_experiment"]["line_start"] == 12
+
+
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
 
