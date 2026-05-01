@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.util
 import json
 import re
 import time
@@ -37,6 +39,10 @@ LITERATURE_REGISTRY_UPDATED_STATE_HINT = "LITERATURE_REGISTRY_UPDATED"
 LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT = "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
 ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT = "ARXIV_MINERU_PARSE_PIPELINE_RAN"
 LITERATURE_EXTRACTION_CONTEXT_STATE_HINT = "LITERATURE_EXTRACTION_CONTEXT_PREPARED"
+BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT = "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED"
+BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT = "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
+BOUNDED_EXECUTOR_AUDIT_STATE_HINT = "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
+BOUNDED_EXECUTOR_SANDBOX_STATE_HINT = "BOUNDED_EXECUTOR_SANDBOX_RAN"
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -2198,6 +2204,351 @@ def build_blocked_candidate_handoff(
     return report
 
 
+def create_bounded_executor_design_spec(
+    *,
+    executor_design_request_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    request = _read_json(
+        _require_file(Path(executor_design_request_path), "executor design request")
+    )
+    if request.get("state_hint") != EXECUTOR_DESIGN_REQUEST_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "executor design request has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    candidate_id = _nonempty_text(
+        request.get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    requested_executor_id = _nonempty_text(
+        request.get("requested_executor_id"),
+        "requested_executor_id",
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT,
+        "bounded_executor_design_spec_path": str(output_file),
+        "executor_design_request_path": str(Path(executor_design_request_path)),
+        "algorithm_candidate_id": candidate_id,
+        "candidate_family": request.get("candidate_family"),
+        "requested_executor_id": requested_executor_id,
+        "hypothesis": request.get("hypothesis"),
+        "mechanism": request.get("mechanism"),
+        "source_grounding": request.get("source_grounding")
+        if isinstance(request.get("source_grounding"), dict)
+        else {},
+        "executor_api": {
+            "function_name": "predict",
+            "required_args": ["context", "candidate", "params"],
+            "context_shape": ["N", 10, "X"],
+            "prediction_shape": ["N", 200, "X"],
+            "returns": "numpy.ndarray with first 10 steps exactly preserved",
+        },
+        "security_policy": {
+            "allowed_imports": ["numpy", "math", "typing"],
+            "forbidden_calls": [
+                "open",
+                "eval",
+                "exec",
+                "compile",
+                "__import__",
+                "input",
+                "getattr",
+            ],
+            "forbidden_numpy_calls": [
+                "load",
+                "save",
+                "savez",
+                "savez_compressed",
+                "fromfile",
+                "memmap",
+            ],
+            "forbidden_actions": [
+                "read or write arbitrary files",
+                "perform network access",
+                "execute shell commands",
+                "mutate input arrays in place",
+                "use target labels inside predict",
+            ],
+        },
+        "sandbox_contract": {
+            "required_inputs": [
+                "design_spec_path",
+                "manifest_path",
+                "executor_path",
+                "context_path",
+                "target_path",
+                "output_dir",
+            ],
+            "metrics": [
+                "segment_score",
+                "task1_prediction_score",
+                "score_delta_vs_persistence",
+                "inference_seconds",
+                "context_preserved",
+            ],
+            "promotion_event_command": "record-bounded-executor-sandbox-event",
+        },
+        "minimal_experiment": request.get("minimal_experiment", {}),
+        "risk_controls": request.get("risk_controls", []),
+        "next_command": "materialize-bounded-executor-template",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def materialize_bounded_executor_template(
+    *,
+    design_spec_path: str | Path,
+    output_dir: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    design_file = _require_file(Path(design_spec_path), "bounded executor design spec")
+    design = _read_json(design_file)
+    if design.get("state_hint") != BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor design spec has invalid state_hint"
+        )
+    root = Path(output_dir)
+    manifest_path = root / "manifest.json"
+    executor_path = root / "executor.py"
+    report_path = root / "bounded_executor_template.json"
+    for path in [manifest_path, executor_path, report_path]:
+        _guard_output(path, force=force)
+    root.mkdir(parents=True, exist_ok=True)
+    candidate_id = _nonempty_text(
+        design.get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    manifest = {
+        "schema_version": 1,
+        "algorithm_candidate_id": candidate_id,
+        "requested_executor_id": design.get("requested_executor_id"),
+        "design_spec_path": str(design_file),
+        "implementation_status": "scaffold_baseline",
+        "entrypoint": "executor.py:predict",
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    executor_path.write_text(_bounded_executor_template_source(), encoding="utf-8")
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT,
+        "bounded_executor_template_path": str(report_path),
+        "design_spec_path": str(design_file),
+        "manifest_path": str(manifest_path),
+        "executor_path": str(executor_path),
+        "algorithm_candidate_id": candidate_id,
+        "implementation_status": "scaffold_baseline",
+        "next_command": "validate-bounded-executor-implementation",
+    }
+    _write_json(report_path, report)
+    return report
+
+
+def validate_bounded_executor_implementation(
+    *,
+    design_spec_path: str | Path,
+    manifest_path: str | Path,
+    executor_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    design = _read_json(
+        _require_file(Path(design_spec_path), "bounded executor design spec")
+    )
+    if design.get("state_hint") != BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor design spec has invalid state_hint"
+        )
+    manifest_file = _require_file(Path(manifest_path), "bounded executor manifest")
+    manifest = _read_json(manifest_file)
+    source_file = _require_file(Path(executor_path), "bounded executor source")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    issues = _audit_bounded_executor_source(
+        source_file.read_text(encoding="utf-8"),
+        design=design,
+    )
+    decision = "approved" if not issues else "rejected"
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_AUDIT_STATE_HINT,
+        "bounded_executor_audit_path": str(output_file),
+        "design_spec_path": str(Path(design_spec_path)),
+        "manifest_path": str(manifest_file),
+        "executor_path": str(source_file),
+        "algorithm_candidate_id": manifest.get("algorithm_candidate_id")
+        or design.get("algorithm_candidate_id"),
+        "decision": decision,
+        "issue_count": len(issues),
+        "issues": issues,
+        "next_command": "run-bounded-executor-sandbox"
+        if decision == "approved"
+        else "revise-bounded-executor",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def run_bounded_executor_sandbox(
+    *,
+    design_spec_path: str | Path,
+    manifest_path: str | Path,
+    executor_path: str | Path,
+    context_path: str | Path,
+    target_path: str | Path,
+    output_dir: str | Path,
+    submission_id: str,
+    force: bool,
+) -> dict[str, Any]:
+    from pde_agent.core.manual_operator_tuning import (
+        load_hdf5_tensor,
+        make_persistence_prediction,
+        score_prediction_arrays,
+    )
+
+    design = _read_json(
+        _require_file(Path(design_spec_path), "bounded executor design spec")
+    )
+    if design.get("state_hint") != BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor design spec has invalid state_hint"
+        )
+    manifest = _read_json(_require_file(Path(manifest_path), "bounded executor manifest"))
+    source_file = _require_file(Path(executor_path), "bounded executor source")
+    audit_issues = _audit_bounded_executor_source(
+        source_file.read_text(encoding="utf-8"),
+        design=design,
+    )
+    if audit_issues:
+        raise LiteratureAlgorithmLabError("bounded executor failed static audit")
+    root = Path(output_dir)
+    report_path = root / "bounded_executor_sandbox_report.json"
+    prediction_path = root / "prediction.npz"
+    _guard_output(report_path, force=force)
+    _guard_output(prediction_path, force=force)
+    root.mkdir(parents=True, exist_ok=True)
+    context = load_hdf5_tensor(context_path)
+    if context.shape[1] != 10:
+        context = context[:, :10, :]
+    target = load_hdf5_tensor(target_path)
+    candidate = {
+        "algorithm_candidate_id": design.get("algorithm_candidate_id"),
+        "requested_executor_id": design.get("requested_executor_id"),
+        "hypothesis": design.get("hypothesis"),
+        "mechanism": design.get("mechanism"),
+        "source_grounding": design.get("source_grounding", {}),
+    }
+    params = {"horizon": int(target.shape[1])}
+    module = _load_bounded_executor_module(source_file)
+    start = time.perf_counter()
+    prediction = module.predict(context.copy(), candidate, params)
+    inference_seconds = time.perf_counter() - start
+    np = __import__("numpy")
+    prediction = np.asarray(prediction)
+    if prediction.shape != target.shape:
+        raise LiteratureAlgorithmLabError(
+            f"bounded executor prediction shape {prediction.shape} != target {target.shape}"
+        )
+    context_preserved = bool(
+        np.allclose(prediction[:, : context.shape[1], :], context, atol=1e-6)
+    )
+    score = score_prediction_arrays(prediction=prediction, target=target)
+    persistence = make_persistence_prediction(context)
+    baseline_score = score_prediction_arrays(prediction=persistence, target=target)
+    score_delta = float(score["segment_score"]) - float(baseline_score["segment_score"])
+    np.savez_compressed(prediction_path, prediction=prediction)
+    rules_passed = context_preserved and prediction.shape == target.shape
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
+        "bounded_executor_sandbox_path": str(report_path),
+        "submission_id": _nonempty_text(submission_id, "submission_id"),
+        "design_spec_path": str(Path(design_spec_path)),
+        "manifest_path": str(Path(manifest_path)),
+        "executor_path": str(source_file),
+        "algorithm_candidate_id": candidate["algorithm_candidate_id"],
+        "requested_executor_id": candidate["requested_executor_id"],
+        "source_grounding": candidate["source_grounding"],
+        "implementation_status": manifest.get("implementation_status"),
+        "rules_passed": rules_passed,
+        "context_preserved": context_preserved,
+        "metric_results": {
+            "segment_score": score["segment_score"],
+            "task1_prediction_score": score["task1_prediction_score"],
+            "baseline_segment_score": baseline_score["segment_score"],
+            "baseline_task1_prediction_score": baseline_score[
+                "task1_prediction_score"
+            ],
+            "score_delta_vs_persistence": score_delta,
+            "inference_seconds": inference_seconds,
+        },
+        "segments": score["segments"],
+        "artifacts": {
+            "prediction_path": str(prediction_path),
+            "sandbox_report_path": str(report_path),
+        },
+        "next_command": "record-bounded-executor-sandbox-event"
+        if rules_passed
+        else "revise-bounded-executor",
+    }
+    _write_json(report_path, report)
+    return report
+
+
+def record_bounded_executor_sandbox_event(
+    *,
+    sandbox_report_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    sandbox_file = _require_file(Path(sandbox_report_path), "bounded executor sandbox")
+    sandbox = _read_json(sandbox_file)
+    if sandbox.get("state_hint") != BOUNDED_EXECUTOR_SANDBOX_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor sandbox has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    rules_passed = bool(sandbox.get("rules_passed"))
+    grounding = (
+        sandbox.get("source_grounding")
+        if isinstance(sandbox.get("source_grounding"), dict)
+        else {}
+    )
+    source_ids = [item for item in grounding.get("source_ids", []) if isinstance(item, str)]
+    report = {
+        "schema_version": 1,
+        "state_hint": LITERATURE_REGISTRY_EVENT_STATE_HINT,
+        "literature_registry_event_path": str(output_file),
+        "event_source_path": str(sandbox_file),
+        "event_type": "candidate_sandbox_verified"
+        if rules_passed
+        else "candidate_sandbox_failed",
+        "algorithm_candidate_id": sandbox.get("algorithm_candidate_id"),
+        "candidate_family": "bounded_executor",
+        "evidence_id": sandbox.get("bounded_executor_sandbox_path"),
+        "decision": "sandbox_verified" if rules_passed else "sandbox_failed",
+        "failure_codes": [] if rules_passed else ["bounded_executor_sandbox_failed"],
+        "source_ids": source_ids,
+        "algorithm_card_id": grounding.get("algorithm_card_id"),
+        "recommended_next": "evaluate-algorithm-candidate-promotion"
+        if rules_passed
+        else "revise-bounded-executor",
+        "retry_allowed": not rules_passed,
+        "metric_results": sandbox.get("metric_results", {}),
+        "next_command": "update-literature-registry",
+    }
+    _write_json(output_file, report)
+    return report
+
+
 def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
     candidate_id = _algorithm_candidate_id(
         card_id=str(card["algorithm_card_id"]),
@@ -3799,6 +4150,180 @@ def _materialize_mineru_markdown_from_result(
         local_markdown_path = root / Path(selected_name).name
         local_markdown_path.write_bytes(archive.read(selected_name))
         return str(local_markdown_path)
+
+
+def _bounded_executor_template_source() -> str:
+    return '''"""Bounded PDE executor scaffold.
+
+Agent edits should stay inside predict(context, candidate, params).
+The verifier allows only a small import surface and rejects file/network/shell access.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+IMPLEMENTATION_STATUS = "scaffold_baseline"
+
+
+def predict(context, candidate, params):
+    """Return a (N, horizon, X) rollout while preserving the context window."""
+    array = np.asarray(context)
+    if array.ndim != 3:
+        raise ValueError("context must have shape (N, T, X)")
+    horizon = int(params.get("horizon", 200))
+    if horizon < array.shape[1]:
+        raise ValueError("horizon must be at least the context length")
+    prediction = np.empty((array.shape[0], horizon, array.shape[2]), dtype=array.dtype)
+    context_steps = array.shape[1]
+    prediction[:, :context_steps, :] = array
+    prediction[:, context_steps:, :] = array[:, context_steps - 1 : context_steps, :]
+    return prediction
+'''
+
+
+def _audit_bounded_executor_source(
+    source: str,
+    *,
+    design: dict[str, Any],
+) -> list[dict[str, Any]]:
+    policy = design.get("security_policy") if isinstance(design.get("security_policy"), dict) else {}
+    allowed_imports = set(_text_list(policy.get("allowed_imports", []), "allowed_imports"))
+    forbidden_calls = set(_text_list(policy.get("forbidden_calls", []), "forbidden_calls"))
+    forbidden_numpy_calls = set(
+        _text_list(policy.get("forbidden_numpy_calls", []), "forbidden_numpy_calls")
+        if isinstance(policy.get("forbidden_numpy_calls"), list)
+        else []
+    )
+    api = design.get("executor_api") if isinstance(design.get("executor_api"), dict) else {}
+    function_name = str(api.get("function_name") or "predict")
+    required_args = [
+        str(item)
+        for item in api.get("required_args", ["context", "candidate", "params"])
+        if isinstance(item, str)
+    ]
+    issues: list[dict[str, Any]] = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return [
+            {
+                "code": "syntax_error",
+                "message": str(exc),
+                "line": exc.lineno,
+            }
+        ]
+    found_function = False
+    import_aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root_name = alias.name.split(".", 1)[0]
+                if root_name not in allowed_imports:
+                    issues.append(
+                        {
+                            "code": "disallowed_import",
+                            "module": alias.name,
+                            "line": node.lineno,
+                        }
+                    )
+                import_aliases[alias.asname or root_name] = root_name
+        elif isinstance(node, ast.ImportFrom):
+            module = (node.module or "").split(".", 1)[0]
+            if module == "__future__":
+                continue
+            if module not in allowed_imports:
+                issues.append(
+                    {
+                        "code": "disallowed_import",
+                        "module": node.module,
+                        "line": node.lineno,
+                    }
+                )
+            for alias in node.names:
+                if module == "numpy" and alias.name in forbidden_numpy_calls:
+                    issues.append(
+                        {
+                            "code": "forbidden_numpy_import",
+                            "module": node.module,
+                            "name": alias.name,
+                            "line": node.lineno,
+                        }
+                    )
+                import_aliases[alias.asname or alias.name] = module
+        elif isinstance(node, ast.FunctionDef) and node.name == function_name:
+            found_function = True
+            args = [arg.arg for arg in node.args.args]
+            if args[: len(required_args)] != required_args:
+                issues.append(
+                    {
+                        "code": "invalid_predict_signature",
+                        "expected_args": required_args,
+                        "actual_args": args,
+                        "line": node.lineno,
+                    }
+                )
+        elif isinstance(node, ast.Call):
+            call_name = _ast_call_name(node.func)
+            if call_name in forbidden_calls:
+                issues.append(
+                    {
+                        "code": "forbidden_call",
+                        "call": call_name,
+                        "line": node.lineno,
+                    }
+                )
+            if "." in call_name:
+                receiver, attr = call_name.split(".", 1)
+                root_module = import_aliases.get(receiver, receiver)
+                if root_module == "numpy" and attr in forbidden_numpy_calls:
+                    issues.append(
+                        {
+                            "code": "forbidden_numpy_call",
+                            "call": call_name,
+                            "line": node.lineno,
+                        }
+                    )
+            else:
+                root_module = import_aliases.get(call_name)
+                if root_module == "numpy" and call_name in forbidden_numpy_calls:
+                    issues.append(
+                        {
+                            "code": "forbidden_numpy_call",
+                            "call": call_name,
+                            "line": node.lineno,
+                        }
+                    )
+    if not found_function:
+        issues.append(
+            {
+                "code": "missing_predict_function",
+                "function_name": function_name,
+            }
+        )
+    return issues
+
+
+def _ast_call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _ast_call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def _load_bounded_executor_module(source_file: Path) -> Any:
+    module_name = f"_pde_agent_bounded_executor_{_slug(source_file.stem)}_{_sha256_file(source_file)[:12]}"
+    spec = importlib.util.spec_from_file_location(module_name, source_file)
+    if spec is None or spec.loader is None:
+        raise LiteratureAlgorithmLabError(f"cannot load executor module: {source_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "predict"):
+        raise LiteratureAlgorithmLabError("bounded executor missing predict function")
+    return module
 
 
 def _source_candidate(

@@ -3223,6 +3223,229 @@ def test_create_executor_design_request_from_blocked_fno_candidate(
     assert report["next_command"] == "build-blocked-candidate-handoff"
 
 
+def test_create_bounded_executor_design_spec_from_request(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        create_bounded_executor_design_spec,
+    )
+
+    request_path = tmp_path / "executor_design_request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "EXECUTOR_DESIGN_REQUEST_CREATED",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "candidate_family": "unsupported",
+                "requested_executor_id": "bounded_fno_architecture_executor",
+                "hypothesis": "FNO improves Burgers rollout.",
+                "mechanism": "Fourier kernels learn global modes.",
+                "source_grounding": {
+                    "source_ids": ["source_fno"],
+                    "algorithm_card_id": "card_fno",
+                },
+                "minimal_experiment": {"level": 2},
+                "risk_controls": ["require local sandbox score before promotion"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = create_bounded_executor_design_spec(
+        executor_design_request_path=request_path,
+        output_path=tmp_path / "bounded_executor_design_spec.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED"
+    assert report["algorithm_candidate_id"] == "candidate_fno_blocked"
+    assert report["requested_executor_id"] == "bounded_fno_architecture_executor"
+    assert report["executor_api"]["function_name"] == "predict"
+    assert report["executor_api"]["required_args"] == ["context", "candidate", "params"]
+    assert "numpy" in report["security_policy"]["allowed_imports"]
+    assert "open" in report["security_policy"]["forbidden_calls"]
+    assert report["next_command"] == "materialize-bounded-executor-template"
+
+
+def test_materialize_and_validate_bounded_executor_template(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        materialize_bounded_executor_template,
+        validate_bounded_executor_implementation,
+    )
+
+    design_path = tmp_path / "bounded_executor_design_spec.json"
+    design_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "requested_executor_id": "bounded_fno_architecture_executor",
+                "source_grounding": {
+                    "source_ids": ["source_fno"],
+                    "algorithm_card_id": "card_fno",
+                },
+                "executor_api": {
+                    "function_name": "predict",
+                    "required_args": ["context", "candidate", "params"],
+                },
+                "security_policy": {
+                    "allowed_imports": ["numpy", "math", "typing"],
+                    "forbidden_calls": ["open", "eval", "exec", "__import__"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    materialized = materialize_bounded_executor_template(
+        design_spec_path=design_path,
+        output_dir=tmp_path / "executor",
+        force=False,
+    )
+    audit = validate_bounded_executor_implementation(
+        design_spec_path=design_path,
+        manifest_path=materialized["manifest_path"],
+        executor_path=materialized["executor_path"],
+        output_path=tmp_path / "executor_audit.json",
+        force=False,
+    )
+
+    assert materialized["state_hint"] == "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
+    assert Path(materialized["manifest_path"]).exists()
+    assert Path(materialized["executor_path"]).exists()
+    assert audit["state_hint"] == "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
+    assert audit["decision"] == "approved"
+    assert audit["issue_count"] == 0
+    assert audit["next_command"] == "run-bounded-executor-sandbox"
+
+
+def test_validate_bounded_executor_rejects_unsafe_import(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        validate_bounded_executor_implementation,
+    )
+
+    design_path = tmp_path / "bounded_executor_design_spec.json"
+    design_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED",
+                "algorithm_candidate_id": "candidate_unsafe",
+                "requested_executor_id": "bounded_unsafe_executor",
+                "security_policy": {
+                    "allowed_imports": ["numpy"],
+                    "forbidden_calls": ["open", "eval", "exec", "__import__"],
+                },
+                "executor_api": {
+                    "function_name": "predict",
+                    "required_args": ["context", "candidate", "params"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({"algorithm_candidate_id": "candidate_unsafe"}),
+        encoding="utf-8",
+    )
+    executor_path = tmp_path / "executor.py"
+    executor_path.write_text(
+        "import os\n\ndef predict(context, candidate, params):\n    return context\n",
+        encoding="utf-8",
+    )
+
+    audit = validate_bounded_executor_implementation(
+        design_spec_path=design_path,
+        manifest_path=manifest_path,
+        executor_path=executor_path,
+        output_path=tmp_path / "audit.json",
+        force=False,
+    )
+
+    assert audit["decision"] == "rejected"
+    assert audit["issue_count"] == 1
+    assert audit["issues"][0]["code"] == "disallowed_import"
+    assert audit["next_command"] == "revise-bounded-executor"
+
+
+def test_run_bounded_executor_sandbox_and_record_event(tmp_path: Path) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        materialize_bounded_executor_template,
+        record_bounded_executor_sandbox_event,
+        run_bounded_executor_sandbox,
+    )
+
+    np = __import__("numpy")
+    context = np.zeros((2, 10, 256), dtype=np.float32)
+    context[:, :, :] = np.linspace(0.0, 1.0, 10, dtype=np.float32)[None, :, None]
+    target = np.empty((2, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    target[:, 10:, :] = context[:, -1:, :]
+    context_path = _write_hdf5(tmp_path / "context.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "target.hdf5", target)
+    design_path = tmp_path / "bounded_executor_design_spec.json"
+    design_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED",
+                "algorithm_candidate_id": "candidate_fno_blocked",
+                "requested_executor_id": "bounded_fno_architecture_executor",
+                "hypothesis": "Use a bounded executor.",
+                "mechanism": "Template persistence baseline.",
+                "source_grounding": {
+                    "source_ids": ["source_fno"],
+                    "algorithm_card_id": "card_fno",
+                },
+                "executor_api": {
+                    "function_name": "predict",
+                    "required_args": ["context", "candidate", "params"],
+                },
+                "security_policy": {
+                    "allowed_imports": ["numpy", "math", "typing"],
+                    "forbidden_calls": ["open", "eval", "exec", "__import__"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    materialized = materialize_bounded_executor_template(
+        design_spec_path=design_path,
+        output_dir=tmp_path / "executor",
+        force=False,
+    )
+
+    sandbox = run_bounded_executor_sandbox(
+        design_spec_path=design_path,
+        manifest_path=materialized["manifest_path"],
+        executor_path=materialized["executor_path"],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="bounded-smoke",
+        force=False,
+    )
+    event = record_bounded_executor_sandbox_event(
+        sandbox_report_path=sandbox["bounded_executor_sandbox_path"],
+        output_path=tmp_path / "event.json",
+        force=False,
+    )
+
+    assert sandbox["state_hint"] == "BOUNDED_EXECUTOR_SANDBOX_RAN"
+    assert sandbox["rules_passed"] is True
+    assert sandbox["context_preserved"] is True
+    assert sandbox["metric_results"]["score_delta_vs_persistence"] == pytest.approx(0.0)
+    assert Path(sandbox["artifacts"]["prediction_path"]).exists()
+    assert sandbox["next_command"] == "record-bounded-executor-sandbox-event"
+    assert event["state_hint"] == "LITERATURE_REGISTRY_EVENT_RECORDED"
+    assert event["event_type"] == "candidate_sandbox_verified"
+    assert event["algorithm_candidate_id"] == "candidate_fno_blocked"
+    assert event["next_command"] == "update-literature-registry"
+
+
 def test_adapt_fno_architecture_candidate_to_checkpoint_resource(
     tmp_path: Path,
 ) -> None:

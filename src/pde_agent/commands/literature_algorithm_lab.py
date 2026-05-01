@@ -10,6 +10,10 @@ from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CARDS_STATE_HINT,
     ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
     ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
+    BOUNDED_EXECUTOR_AUDIT_STATE_HINT,
+    BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT,
+    BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
+    BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT,
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
@@ -32,6 +36,7 @@ from pde_agent.core.literature_algorithm_lab import (
     build_executor_taxonomy,
     build_literature_source_records,
     compile_algorithm_candidates,
+    create_bounded_executor_design_spec,
     create_executor_design_request,
     download_mineru_parse_result,
     download_source_document,
@@ -44,12 +49,16 @@ from pde_agent.core.literature_algorithm_lab import (
     plan_candidate_sandbox,
     poll_mineru_parse_task,
     prepare_literature_extraction_context,
+    materialize_bounded_executor_template,
     record_literature_registry_event,
+    record_bounded_executor_sandbox_event,
     run_arxiv_mineru_parse_pipeline,
+    run_bounded_executor_sandbox,
     run_literature_algorithm_v2_pipeline,
     submit_mineru_parse_task,
     update_literature_registry,
     validate_algorithm_cards_v2,
+    validate_bounded_executor_implementation,
     validate_executable_blueprints,
 )
 
@@ -721,6 +730,161 @@ def build_blocked_candidate_handoff_command(
             "requires_executor": report["blocked_evidence_summary"][
                 "requires_executor"
             ],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def create_bounded_executor_design_spec_command(
+    *,
+    executor_design_request_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = create_bounded_executor_design_spec(
+        executor_design_request_path=Path(executor_design_request_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="create-bounded-executor-design-spec",
+        state_hint=BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT,
+        artifacts={
+            "bounded_executor_design_spec_path": report[
+                "bounded_executor_design_spec_path"
+            ]
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "requested_executor_id": report["requested_executor_id"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def materialize_bounded_executor_template_command(
+    *,
+    design_spec_path: str,
+    output_dir: str,
+    force: bool,
+) -> dict[str, object]:
+    report = materialize_bounded_executor_template(
+        design_spec_path=Path(design_spec_path),
+        output_dir=Path(output_dir),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="materialize-bounded-executor-template",
+        state_hint=BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT,
+        artifacts={
+            "bounded_executor_template_path": report[
+                "bounded_executor_template_path"
+            ],
+            "manifest_path": report["manifest_path"],
+            "executor_path": report["executor_path"],
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "implementation_status": report["implementation_status"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def validate_bounded_executor_implementation_command(
+    *,
+    design_spec_path: str,
+    manifest_path: str,
+    executor_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = validate_bounded_executor_implementation(
+        design_spec_path=Path(design_spec_path),
+        manifest_path=Path(manifest_path),
+        executor_path=Path(executor_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="validate-bounded-executor-implementation",
+        state_hint=BOUNDED_EXECUTOR_AUDIT_STATE_HINT,
+        artifacts={"bounded_executor_audit_path": report["bounded_executor_audit_path"]},
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "decision": report["decision"],
+            "issue_count": report["issue_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def run_bounded_executor_sandbox_command(
+    *,
+    design_spec_path: str,
+    manifest_path: str,
+    executor_path: str,
+    context_path: str,
+    target_path: str,
+    output_dir: str,
+    submission_id: str,
+    force: bool,
+) -> dict[str, object]:
+    report = run_bounded_executor_sandbox(
+        design_spec_path=Path(design_spec_path),
+        manifest_path=Path(manifest_path),
+        executor_path=Path(executor_path),
+        context_path=Path(context_path),
+        target_path=Path(target_path),
+        output_dir=Path(output_dir),
+        submission_id=submission_id,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="run-bounded-executor-sandbox",
+        state_hint=BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
+        artifacts=report["artifacts"],
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "rules_passed": report["rules_passed"],
+            "score_delta_vs_persistence": report["metric_results"][
+                "score_delta_vs_persistence"
+            ],
+            "inference_seconds": report["metric_results"]["inference_seconds"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def record_bounded_executor_sandbox_event_command(
+    *,
+    sandbox_report_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = record_bounded_executor_sandbox_event(
+        sandbox_report_path=Path(sandbox_report_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="record-bounded-executor-sandbox-event",
+        state_hint=LITERATURE_REGISTRY_EVENT_STATE_HINT,
+        artifacts={
+            "literature_registry_event_path": report[
+                "literature_registry_event_path"
+            ],
+            "event_source_path": report["event_source_path"],
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "event_type": report["event_type"],
+            "retry_allowed": report["retry_allowed"],
         },
         next_hint=report["next_command"],
     )

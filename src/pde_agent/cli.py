@@ -118,24 +118,29 @@ from pde_agent.commands.literature_algorithm_lab import (
     build_executor_taxonomy_command,
     build_literature_source_records_command,
     compile_algorithm_candidates_command,
+    create_bounded_executor_design_spec_command,
     create_executor_design_request_command,
     download_mineru_result_command,
     download_source_document_command,
     evaluate_algorithm_candidate_promotion_command,
     extract_algorithm_cards_command,
     ingest_mineru_parse_command,
+    materialize_bounded_executor_template_command,
     normalize_arxiv_sources_command,
     normalize_github_sources_command,
     normalize_openalex_sources_command,
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
     prepare_literature_extraction_context_command,
+    record_bounded_executor_sandbox_event_command,
     record_literature_registry_event_command,
     run_arxiv_mineru_parse_pipeline_command,
+    run_bounded_executor_sandbox_command,
     run_literature_algorithm_v2_pipeline_command,
     submit_mineru_parse_command,
     update_literature_registry_command,
     validate_algorithm_cards_v2_command,
+    validate_bounded_executor_implementation_command,
     validate_executable_blueprints_command,
 )
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
@@ -1383,6 +1388,115 @@ def build_blocked_candidate_handoff_cmd(
         json.dumps(
             build_blocked_candidate_handoff_command(
                 executor_design_request_path=executor_design_request_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("create-bounded-executor-design-spec")
+def create_bounded_executor_design_spec_cmd(
+    executor_design_request_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            create_bounded_executor_design_spec_command(
+                executor_design_request_path=executor_design_request_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("materialize-bounded-executor-template")
+def materialize_bounded_executor_template_cmd(
+    design_spec_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            materialize_bounded_executor_template_command(
+                design_spec_path=design_spec_path,
+                output_dir=output_dir,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("validate-bounded-executor-implementation")
+def validate_bounded_executor_implementation_cmd(
+    design_spec_path: str = typer.Option(...),
+    manifest_path: str = typer.Option(...),
+    executor_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            validate_bounded_executor_implementation_command(
+                design_spec_path=design_spec_path,
+                manifest_path=manifest_path,
+                executor_path=executor_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-bounded-executor-sandbox")
+def run_bounded_executor_sandbox_cmd(
+    design_spec_path: str = typer.Option(...),
+    manifest_path: str = typer.Option(...),
+    executor_path: str = typer.Option(...),
+    context_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    submission_id: str = typer.Option("team_hermes"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_bounded_executor_sandbox_command(
+                design_spec_path=design_spec_path,
+                manifest_path=manifest_path,
+                executor_path=executor_path,
+                context_path=context_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                submission_id=submission_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("record-bounded-executor-sandbox-event")
+def record_bounded_executor_sandbox_event_cmd(
+    sandbox_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_bounded_executor_sandbox_event_command(
+                sandbox_report_path=sandbox_report_path,
                 output_path=output_path,
                 force=force,
             )
