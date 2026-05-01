@@ -645,9 +645,31 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
     payload["verifier"] = {
         "decision": "promote_to_strategy_proposal",
         "early_segment_diagnosis": {
+            "schema_version": 2,
             "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
             "decision": "early_segment_bottleneck",
             "reason_codes": ["early_score_low", "early_weaker_than_late"],
+            "bottleneck_type": "initial_derivative_mismatch",
+            "error_taxonomy": {
+                "initial_derivative_mismatch": {"triggered": True},
+                "over_smoothing": {"triggered": True},
+            },
+            "candidate_trend_attribution": {
+                "primary_metric": "early_rel_mse",
+                "recommended_axis": "mode",
+            },
+            "action_directives": [
+                {
+                    "directive": "expand_linear_velocity_anchor_search",
+                    "target_family": "task1_early_refinement",
+                    "rationale": "primary early bottleneck is initial_derivative_mismatch",
+                },
+                {
+                    "directive": "prioritize_axis:mode",
+                    "target_family": "task1_early_refinement",
+                    "rationale": "mode axis has the largest early-rel-mse spread",
+                },
+            ],
             "objective_recommendation": {
                 "primary": "early_rel_mse",
                 "next_candidate_family": "task1_early_refinement",
@@ -689,6 +711,13 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
         row["early_anchor"] == "linear_velocity"
         for row in early["parameter_grid"]["candidate_params"]
     )
+    candidate_params = early["parameter_grid"]["candidate_params"]
+    anchors = {row["early_anchor"] for row in candidate_params}
+    assert {"damped_linear_velocity", "retrieval_derivative_match"} <= anchors
+    modes = {row["mode"] for row in candidate_params}
+    assert {"affine", "delta", "raw"} <= modes
+    strengths = {row["spectral_strength"] for row in candidate_params}
+    assert 0.0 in strengths
     assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
 
 
@@ -1567,6 +1596,68 @@ def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
     assert sandbox["verifier"]["early_segment_diagnosis"]["objective_recommendation"][
         "next_candidate_family"
     ] == "task1_early_refinement"
+
+
+def test_hypothesis_lab_sandbox_executes_derivative_aware_early_anchors(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.1, 0.2]):
+        for step in range(200):
+            target[sample, step, :] = (
+                np.float32(offset)
+                + np.float32(0.003 * step)
+                + np.float32(0.15) * np.sin(x + np.float32(0.01 * step))
+            )
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_early_refinement_001",
+        "candidate_family": "task1_early_refinement",
+        "search_mode": "early_segment_objective_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 16,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "damped_linear_velocity",
+                },
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 16,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "retrieval_derivative_match",
+                },
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    anchors = {row["params"]["early_anchor"] for row in sandbox["top_candidates"]}
+    assert anchors == {"damped_linear_velocity", "retrieval_derivative_match"}
+    assert sandbox["best_candidate"]["metadata"]["early_anchor"] in anchors
+    assert sandbox["verifier"]["selection_objective"]["primary"] == "early_rel_mse"
 
 
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(

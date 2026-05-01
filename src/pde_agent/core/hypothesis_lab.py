@@ -436,6 +436,7 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
                 "segment_score": evidence.get("segment_score"),
                 "search_directives": evidence.get("search_directives", []),
+                "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
             }
         )
     rows.sort(
@@ -2247,6 +2248,18 @@ def _prediction_from_task1_retrieval_refinement(
         early_anchor = str(params.get("early_anchor", "persistence"))
         if early_anchor == "linear_velocity":
             anchor = _linear_velocity_anchor_prediction(context, prediction.shape[1])
+        elif early_anchor == "damped_linear_velocity":
+            anchor = _damped_linear_velocity_anchor_prediction(
+                context=context,
+                steps=prediction.shape[1],
+                decay=max(4.0, float(early_steps)),
+            )
+        elif early_anchor == "retrieval_derivative_match":
+            anchor = _retrieval_derivative_match_anchor_prediction(
+                context=context,
+                retrieval=retrieval,
+                decay=max(4.0, float(early_steps)),
+            )
         elif early_anchor == "retrieval":
             anchor = retrieval
         horizon = np.arange(forecast_steps, dtype=np.float32)
@@ -2276,6 +2289,51 @@ def _linear_velocity_anchor_prediction(context: np.ndarray, steps: int) -> np.nd
         dtype=np.float32,
     ).reshape(1, -1, 1)
     prediction[:, context.shape[1] :, :] = context[:, -1:, :] + horizon * velocity
+    return prediction
+
+
+def _damped_linear_velocity_anchor_prediction(
+    *,
+    context: np.ndarray,
+    steps: int,
+    decay: float,
+) -> np.ndarray:
+    prediction = np.empty((context.shape[0], steps, context.shape[2]), dtype=np.float32)
+    prediction[:, : context.shape[1], :] = context
+    velocity = context[:, -1:, :] - context[:, -2:-1, :]
+    horizon = np.arange(
+        1,
+        steps - context.shape[1] + 1,
+        dtype=np.float32,
+    ).reshape(1, -1, 1)
+    damping = np.exp(-(horizon - 1.0) / float(decay))
+    prediction[:, context.shape[1] :, :] = (
+        context[:, -1:, :] + horizon * damping * velocity
+    )
+    return prediction
+
+
+def _retrieval_derivative_match_anchor_prediction(
+    *,
+    context: np.ndarray,
+    retrieval: np.ndarray,
+    decay: float,
+) -> np.ndarray:
+    prediction = retrieval.copy()
+    velocity = context[:, -1:, :] - context[:, -2:-1, :]
+    desired_first = context[:, -1:, :] + velocity
+    first_future = retrieval[:, context.shape[1] : context.shape[1] + 1, :]
+    correction = desired_first - first_future
+    horizon = np.arange(
+        0,
+        retrieval.shape[1] - context.shape[1],
+        dtype=np.float32,
+    ).reshape(1, -1, 1)
+    damping = np.exp(-horizon / float(decay))
+    prediction[:, context.shape[1] :, :] = (
+        prediction[:, context.shape[1] :, :] + damping * correction
+    )
+    prediction[:, : context.shape[1], :] = context
     return prediction
 
 
@@ -2647,14 +2705,32 @@ def _early_refinement_params(
     evidence_params: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     center = _retrieval_refinement_center(evidence_params)
+    signals = _early_refinement_signals(evidence_params)
     k0 = int(center["k"])
     mode0 = str(center["mode"])
     strength0 = float(center["spectral_strength"])
+    modes = [mode0]
+    if signals["prioritize_mode"]:
+        modes.extend(["affine", "delta", "raw"])
+    modes = _dedupe_values(modes)
+    anchors = ["retrieval", "persistence", "linear_velocity"]
+    if signals["expand_linear_velocity"]:
+        anchors.extend(["damped_linear_velocity", "retrieval_derivative_match"])
+    anchors = _dedupe_values(anchors)
+    spectral_strengths = [strength0]
+    if signals["reduce_smoothing"]:
+        spectral_strengths.extend([0.0, 0.25, 0.5])
+    spectral_strengths = [
+        float(value)
+        for value in _dedupe_values(
+            [_clamp_float(float(value), 0.0, 2.0) for value in spectral_strengths]
+        )
+    ]
     rows: list[dict[str, Any]] = []
     for k in [k0 - 8, k0, k0 + 8]:
         for early_steps in [8, 12, 16, 20, 24, 32]:
             for weight in [0.0, 0.25, 0.5, 0.75, 1.0]:
-                for anchor in ["retrieval", "persistence", "linear_velocity"]:
+                for anchor in anchors:
                     rows.append(
                         {
                             "k": _clamp_int(k, 4, 128),
@@ -2665,16 +2741,31 @@ def _early_refinement_params(
                             "early_anchor": anchor,
                         }
                     )
-    rows.append(
-        {
-            "k": k0,
-            "mode": "delta",
-            "early_blend_steps": 12,
-            "persistence_weight_start": 0.5,
-            "spectral_strength": strength0,
-            "early_anchor": "linear_velocity",
-        }
-    )
+    for mode in modes:
+        for anchor in anchors:
+            for early_steps in [12, 20, 24]:
+                rows.append(
+                    {
+                        "k": k0,
+                        "mode": mode,
+                        "early_blend_steps": early_steps,
+                        "persistence_weight_start": 0.5,
+                        "spectral_strength": strength0,
+                        "early_anchor": anchor,
+                    }
+                )
+    for strength in spectral_strengths:
+        for anchor in anchors:
+            rows.append(
+                {
+                    "k": k0,
+                    "mode": mode0,
+                    "early_blend_steps": 24,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": strength,
+                    "early_anchor": anchor,
+                }
+            )
     deduped = []
     seen: set[tuple[int, str, int, float, float, str]] = set()
     for row in rows:
@@ -2691,6 +2782,65 @@ def _early_refinement_params(
             continue
         seen.add(key)
         deduped.append(normalized)
+    return deduped
+
+
+def _early_refinement_signals(
+    evidence_params: list[dict[str, Any]] | None,
+) -> dict[str, bool]:
+    directives: set[str] = set()
+    bottlenecks: set[str] = set()
+    triggered_taxonomy: set[str] = set()
+    recommended_axes: set[str] = set()
+    for item in evidence_params or []:
+        if not isinstance(item, dict):
+            continue
+        diagnosis = item.get("early_segment_diagnosis")
+        if not isinstance(diagnosis, dict):
+            continue
+        bottleneck = diagnosis.get("bottleneck_type")
+        if isinstance(bottleneck, str):
+            bottlenecks.add(bottleneck)
+        trend = diagnosis.get("candidate_trend_attribution")
+        if isinstance(trend, dict) and isinstance(trend.get("recommended_axis"), str):
+            recommended_axes.add(str(trend["recommended_axis"]))
+        taxonomy = diagnosis.get("error_taxonomy")
+        if isinstance(taxonomy, dict):
+            for name, payload in taxonomy.items():
+                if isinstance(payload, dict) and payload.get("triggered"):
+                    triggered_taxonomy.add(str(name))
+        for directive in diagnosis.get("action_directives", []):
+            if isinstance(directive, dict) and isinstance(
+                directive.get("directive"),
+                str,
+            ):
+                directives.add(str(directive["directive"]))
+    return {
+        "expand_linear_velocity": (
+            "expand_linear_velocity_anchor_search" in directives
+            or "initial_derivative_mismatch" in bottlenecks
+            or "initial_derivative_mismatch" in triggered_taxonomy
+        ),
+        "reduce_smoothing": (
+            "over_smoothing" in bottlenecks
+            or "over_smoothing" in triggered_taxonomy
+            or "reduce_early_smoothing_and_anchor_weight" in directives
+        ),
+        "prioritize_mode": (
+            "mode" in recommended_axes or "prioritize_axis:mode" in directives
+        ),
+    }
+
+
+def _dedupe_values(values: list[Any]) -> list[Any]:
+    deduped = []
+    seen: set[str] = set()
+    for value in values:
+        key = str(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
     return deduped
 
 
@@ -2975,10 +3125,17 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
     }
     if "early_anchor" in row:
         early_anchor = str(row["early_anchor"])
-        if early_anchor not in {"retrieval", "persistence", "linear_velocity"}:
+        if early_anchor not in {
+            "retrieval",
+            "persistence",
+            "linear_velocity",
+            "damped_linear_velocity",
+            "retrieval_derivative_match",
+        }:
             raise HypothesisLabError(
-                "retrieval refinement early_anchor must be retrieval, "
-                "persistence, or linear_velocity"
+                "retrieval refinement early_anchor must be one of retrieval, "
+                "persistence, linear_velocity, damped_linear_velocity, or "
+                "retrieval_derivative_match"
             )
         normalized["early_anchor"] = early_anchor
     return normalized
