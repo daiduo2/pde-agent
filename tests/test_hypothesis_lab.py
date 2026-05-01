@@ -742,6 +742,83 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
     assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
 
 
+def test_hypothesis_lab_designs_phase_and_bias_aware_early_candidates(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    report_path = _adaptive_retrieval_refinement_sandbox_report(
+        tmp_path / "phase_bias_bottleneck_sandbox.json"
+    )
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["verifier"] = {
+        "decision": "keep_as_evidence",
+        "early_segment_diagnosis": {
+            "schema_version": 2,
+            "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
+            "decision": "early_segment_bottleneck",
+            "reason_codes": ["early_rel_mse_high"],
+            "bottleneck_type": "phase_shift",
+            "error_taxonomy": {
+                "phase_shift": {"triggered": True},
+                "amplitude_bias": {"triggered": True},
+                "high_frequency_noise": {"triggered": True},
+            },
+            "candidate_trend_attribution": {
+                "primary_metric": "early_rel_mse",
+                "recommended_axis": "early_blend_steps",
+            },
+            "action_directives": [
+                {
+                    "directive": "add_phase_alignment_or_derivative_distance_candidates",
+                    "target_family": "task1_early_refinement",
+                    "rationale": "phase shift dominates the short-horizon error",
+                },
+                {
+                    "directive": "add_short_horizon_affine_bias_calibration",
+                    "target_family": "task1_early_refinement",
+                    "rationale": "mean amplitude bias is active",
+                },
+            ],
+            "objective_recommendation": {
+                "primary": "early_rel_mse",
+                "next_candidate_family": "task1_early_refinement",
+            },
+        },
+    }
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[report_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    early = blueprints["blueprints"][0]
+    candidate_params = early["parameter_grid"]["candidate_params"]
+    anchors = {row["early_anchor"] for row in candidate_params}
+    assert {"phase_aligned_retrieval", "mean_trend_bias"} <= anchors
+    assert any(row.get("handoff_curve") == "cosine" for row in candidate_params)
+    assert any(row.get("handoff_curve") == "quadratic" for row in candidate_params)
+    assert any(row.get("phase_shift_scale") == 0.5 for row in candidate_params)
+    assert any(row["spectral_strength"] > 0.5 for row in candidate_params)
+    assert len(candidate_params) <= 160
+    plan = early["experiment_plan"]
+    assert "phase_alignment" in plan["axis_plan_by_bottleneck"]
+    assert "bias_calibration" in plan["axis_plan_by_bottleneck"]
+
+
 def test_hypothesis_lab_builds_retrieval_refinement_center_from_sandbox_report(
     tmp_path: Path,
 ) -> None:
@@ -1798,6 +1875,75 @@ def test_hypothesis_lab_sandbox_executes_derivative_aware_early_anchors(
     assert anchors == {"damped_linear_velocity", "retrieval_derivative_match"}
     assert sandbox["best_candidate"]["metadata"]["early_anchor"] in anchors
     assert sandbox["verifier"]["selection_objective"]["primary"] == "early_rel_mse"
+
+
+def test_hypothesis_lab_sandbox_executes_phase_bias_and_curved_handoff(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.15, 0.3]):
+        for step in range(200):
+            target[sample, step, :] = (
+                np.float32(offset)
+                + np.float32(0.002 * step)
+                + np.float32(0.12) * np.sin(x + np.float32(0.03 * step))
+            )
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_early_refinement_001",
+        "candidate_family": "task1_early_refinement",
+        "search_mode": "early_segment_objective_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 18,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "phase_aligned_retrieval",
+                    "phase_shift_scale": 0.5,
+                    "handoff_curve": "cosine",
+                },
+                {
+                    "k": 1,
+                    "mode": "affine",
+                    "early_blend_steps": 18,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": 0.0,
+                    "early_anchor": "mean_trend_bias",
+                    "handoff_curve": "quadratic",
+                },
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    anchors = {row["metadata"]["early_anchor"] for row in sandbox["top_candidates"]}
+    assert anchors == {"phase_aligned_retrieval", "mean_trend_bias"}
+    curves = {row["metadata"]["handoff_curve"] for row in sandbox["top_candidates"]}
+    assert curves == {"cosine", "quadratic"}
+    assert sandbox["best_candidate"]["metadata"]["early_anchor"] in anchors
+    assert sandbox["verifier"]["pareto_promotion_gate"]["objective_axes"][
+        "early_rel_mse"
+    ]["metric"] == "early_rel_mse_delta_vs_baseline"
 
 
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(

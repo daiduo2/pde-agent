@@ -31,6 +31,17 @@ BLUEPRINTS_STATE_HINT = "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED"
 VERIFIED_BLUEPRINTS_STATE_HINT = "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED"
 SANDBOX_STATE_HINT = "HYPOTHESIS_LAB_SANDBOX_VERIFIED"
 RUN_STATE_HINT = "HYPOTHESIS_LAB_RAN"
+EARLY_REFINEMENT_ANCHORS = {
+    "retrieval",
+    "persistence",
+    "linear_velocity",
+    "damped_linear_velocity",
+    "retrieval_derivative_match",
+    "phase_aligned_retrieval",
+    "mean_trend_bias",
+    "second_order_velocity",
+}
+EARLY_HANDOFF_CURVES = {"linear", "cosine", "quadratic"}
 
 
 class HypothesisLabError(RuntimeError):
@@ -2268,11 +2279,32 @@ def _prediction_from_task1_retrieval_refinement(
                 retrieval=retrieval,
                 decay=max(4.0, float(early_steps)),
             )
+        elif early_anchor == "phase_aligned_retrieval":
+            anchor = _phase_aligned_retrieval_anchor_prediction(
+                context=context,
+                retrieval=retrieval,
+                scale=float(params.get("phase_shift_scale", 1.0)),
+            )
+        elif early_anchor == "mean_trend_bias":
+            anchor = _mean_trend_bias_anchor_prediction(
+                context=context,
+                retrieval=retrieval,
+                decay=max(4.0, float(early_steps)),
+            )
+        elif early_anchor == "second_order_velocity":
+            anchor = _second_order_velocity_anchor_prediction(
+                context=context,
+                steps=prediction.shape[1],
+                decay=max(4.0, float(early_steps)),
+            )
         elif early_anchor == "retrieval":
             anchor = retrieval
-        horizon = np.arange(forecast_steps, dtype=np.float32)
-        weights = weight_start * np.clip(1.0 - horizon / float(early_steps), 0.0, 1.0)
-        weights = weights.reshape(1, forecast_steps, 1)
+        weights = _early_handoff_weights(
+            forecast_steps=forecast_steps,
+            early_steps=early_steps,
+            weight_start=weight_start,
+            curve=str(params.get("handoff_curve", "linear")),
+        )
         prediction[:, context.shape[1] :, :] = (
             weights * anchor[:, context.shape[1] :, :]
             + (1.0 - weights) * retrieval[:, context.shape[1] :, :]
@@ -2345,6 +2377,131 @@ def _retrieval_derivative_match_anchor_prediction(
     return prediction
 
 
+def _phase_aligned_retrieval_anchor_prediction(
+    *,
+    context: np.ndarray,
+    retrieval: np.ndarray,
+    scale: float,
+) -> np.ndarray:
+    prediction = retrieval.copy()
+    shifts = _context_integer_phase_shifts(context)
+    forecast_steps = retrieval.shape[1] - context.shape[1]
+    for sample_index, per_step_shift in enumerate(shifts):
+        for horizon_index in range(forecast_steps):
+            shift = _clamp_int(
+                round(float(per_step_shift) * float(scale) * float(horizon_index + 1)),
+                -8,
+                8,
+            )
+            if shift == 0:
+                continue
+            frame_index = context.shape[1] + horizon_index
+            prediction[sample_index, frame_index, :] = np.roll(
+                prediction[sample_index, frame_index, :],
+                shift=shift,
+            )
+    prediction[:, : context.shape[1], :] = context
+    return prediction
+
+
+def _context_integer_phase_shifts(context: np.ndarray) -> np.ndarray:
+    previous = context[:, -2, :]
+    current = context[:, -1, :]
+    shifts = np.zeros((context.shape[0],), dtype=np.int32)
+    for sample_index in range(context.shape[0]):
+        best_shift = 0
+        best_mse = float("inf")
+        for shift in range(-3, 4):
+            mse = float(
+                np.mean(
+                    (
+                        np.roll(previous[sample_index], shift)
+                        - current[sample_index]
+                    )
+                    ** 2
+                )
+            )
+            if mse < best_mse:
+                best_mse = mse
+                best_shift = shift
+        shifts[sample_index] = best_shift
+    return shifts
+
+
+def _mean_trend_bias_anchor_prediction(
+    *,
+    context: np.ndarray,
+    retrieval: np.ndarray,
+    decay: float,
+) -> np.ndarray:
+    prediction = retrieval.copy()
+    forecast_steps = retrieval.shape[1] - context.shape[1]
+    horizon = np.arange(1, forecast_steps + 1, dtype=np.float32).reshape(1, -1, 1)
+    mean_velocity = np.mean(
+        context[:, -1:, :] - context[:, -2:-1, :],
+        axis=2,
+        keepdims=True,
+    )
+    last_mean = np.mean(context[:, -1:, :], axis=2, keepdims=True)
+    desired_mean = last_mean + horizon * mean_velocity
+    retrieval_mean = np.mean(
+        retrieval[:, context.shape[1] :, :],
+        axis=2,
+        keepdims=True,
+    )
+    damping = np.exp(-(horizon - 1.0) / float(decay))
+    prediction[:, context.shape[1] :, :] = (
+        prediction[:, context.shape[1] :, :]
+        + damping * (desired_mean - retrieval_mean)
+    )
+    prediction[:, : context.shape[1], :] = context
+    return prediction
+
+
+def _second_order_velocity_anchor_prediction(
+    *,
+    context: np.ndarray,
+    steps: int,
+    decay: float,
+) -> np.ndarray:
+    prediction = np.empty((context.shape[0], steps, context.shape[2]), dtype=np.float32)
+    prediction[:, : context.shape[1], :] = context
+    velocity = context[:, -1:, :] - context[:, -2:-1, :]
+    acceleration = (
+        context[:, -1:, :]
+        - 2.0 * context[:, -2:-1, :]
+        + context[:, -3:-2, :]
+    )
+    horizon = np.arange(
+        1,
+        steps - context.shape[1] + 1,
+        dtype=np.float32,
+    ).reshape(1, -1, 1)
+    damping = np.exp(-(horizon - 1.0) / float(decay))
+    prediction[:, context.shape[1] :, :] = (
+        context[:, -1:, :]
+        + horizon * damping * velocity
+        + 0.5 * horizon * (horizon - 1.0) * damping * acceleration
+    )
+    return prediction
+
+
+def _early_handoff_weights(
+    *,
+    forecast_steps: int,
+    early_steps: int,
+    weight_start: float,
+    curve: str,
+) -> np.ndarray:
+    horizon = np.arange(forecast_steps, dtype=np.float32)
+    progress = np.clip(1.0 - horizon / float(early_steps), 0.0, 1.0)
+    if curve == "cosine":
+        progress = 0.5 * (1.0 - np.cos(np.pi * progress))
+    elif curve == "quadratic":
+        progress = progress**2
+    return (float(weight_start) * progress).reshape(1, forecast_steps, 1)
+
+
 def _candidate_metadata(
     *,
     family: str,
@@ -2380,8 +2537,11 @@ def _candidate_metadata(
                     params["persistence_weight_start"]
                 ),
                 "spectral_strength": float(params.get("spectral_strength", 0.0)),
+                "handoff_curve": str(params.get("handoff_curve", "linear")),
             }
         )
+        if "phase_shift_scale" in params:
+            metadata["phase_shift_scale"] = float(params["phase_shift_scale"])
     if family == "task1_early_refinement":
         metadata.update(
             {
@@ -2720,13 +2880,7 @@ def _early_refinement_params(
     early0 = int(center["early_blend_steps"])
     weight0 = float(center["persistence_weight_start"])
     primary_anchor = str(center.get("early_anchor", "persistence"))
-    if primary_anchor not in {
-        "retrieval",
-        "persistence",
-        "linear_velocity",
-        "damped_linear_velocity",
-        "retrieval_derivative_match",
-    }:
+    if primary_anchor not in EARLY_REFINEMENT_ANCHORS:
         primary_anchor = "persistence"
     modes = [mode0]
     if signals["prioritize_mode"]:
@@ -2734,17 +2888,36 @@ def _early_refinement_params(
     modes = _dedupe_values(modes)
     anchors = [primary_anchor, "persistence", "retrieval", "linear_velocity"]
     if signals["expand_linear_velocity"]:
-        anchors.extend(["damped_linear_velocity", "retrieval_derivative_match"])
+        anchors.extend(
+            [
+                "damped_linear_velocity",
+                "retrieval_derivative_match",
+                "second_order_velocity",
+            ]
+        )
+    if signals["expand_phase_alignment"]:
+        anchors.append("phase_aligned_retrieval")
+    if signals["expand_bias_calibration"]:
+        anchors.append("mean_trend_bias")
     anchors = _dedupe_values(anchors)
     spectral_strengths = [strength0]
     if signals["reduce_smoothing"]:
         spectral_strengths.extend([0.0, 0.25, 0.5])
+    if signals["increase_smoothing"]:
+        spectral_strengths.extend([0.75, 1.0, 1.5])
     spectral_strengths = [
         float(value)
         for value in _dedupe_values(
             [_clamp_float(float(value), 0.0, 2.0) for value in spectral_strengths]
         )
     ]
+    handoff_curves = ["linear"]
+    if signals["expand_handoff_curves"]:
+        handoff_curves.extend(["cosine", "quadratic"])
+    handoff_curves = [str(value) for value in _dedupe_values(handoff_curves)]
+    phase_shift_scales = [1.0]
+    if signals["expand_phase_alignment"]:
+        phase_shift_scales.insert(0, 0.5)
     k_offsets = [-8, 0, 8, 16]
     if signals["increase_k"]:
         k_offsets.append(24)
@@ -2781,6 +2954,7 @@ def _early_refinement_params(
                             "persistence_weight_start": weight,
                             "spectral_strength": strength0,
                             "early_anchor": anchor,
+                            "handoff_curve": "linear",
                         }
                     )
     for mode in modes:
@@ -2800,6 +2974,7 @@ def _early_refinement_params(
                         "persistence_weight_start": weight0,
                         "spectral_strength": strength0,
                         "early_anchor": primary_anchor,
+                        "handoff_curve": "linear",
                     }
                 )
     probe_ks = _dedupe_values(
@@ -2817,8 +2992,42 @@ def _early_refinement_params(
                         "persistence_weight_start": weight0,
                         "spectral_strength": strength0,
                         "early_anchor": anchor,
+                        "handoff_curve": "linear",
                     }
                 )
+    mechanism_anchors = [
+        anchor
+        for anchor in anchors
+        if anchor
+        in {
+            "phase_aligned_retrieval",
+            "mean_trend_bias",
+            "second_order_velocity",
+        }
+    ]
+    for anchor in mechanism_anchors:
+        for curve in handoff_curves:
+            for k in probe_ks:
+                row = {
+                    "k": int(k),
+                    "mode": mode0,
+                    "early_blend_steps": _clamp_int(early0 + 4, 4, 80),
+                    "persistence_weight_start": _clamp_float(
+                        max(weight0, 0.5),
+                        0.0,
+                        1.0,
+                    ),
+                    "spectral_strength": strength0,
+                    "early_anchor": anchor,
+                    "handoff_curve": curve,
+                }
+                if anchor == "phase_aligned_retrieval":
+                    for scale in phase_shift_scales:
+                        shifted = dict(row)
+                        shifted["phase_shift_scale"] = float(scale)
+                        rows.append(shifted)
+                else:
+                    rows.append(row)
     for strength in spectral_strengths:
         for k in probe_ks:
             rows.append(
@@ -2829,10 +3038,11 @@ def _early_refinement_params(
                     "persistence_weight_start": weight0,
                     "spectral_strength": strength,
                     "early_anchor": primary_anchor,
+                    "handoff_curve": "linear",
                 }
             )
     deduped = []
-    seen: set[tuple[int, str, int, float, float, str]] = set()
+    seen: set[tuple[int, str, int, float, float, str, str, float]] = set()
     for row in rows:
         normalized = _normalize_retrieval_refinement_params(row)
         key = (
@@ -2842,6 +3052,8 @@ def _early_refinement_params(
             float(normalized["persistence_weight_start"]),
             float(normalized["spectral_strength"]),
             str(normalized.get("early_anchor", "persistence")),
+            str(normalized.get("handoff_curve", "linear")),
+            float(normalized.get("phase_shift_scale", 1.0)),
         )
         if key in seen:
             continue
@@ -2894,6 +3106,29 @@ def _early_refinement_signals(
         "prioritize_mode": (
             "mode" in recommended_axes or "prioritize_axis:mode" in directives
         ),
+        "expand_phase_alignment": (
+            "phase_shift" in bottlenecks
+            or "phase_shift" in triggered_taxonomy
+            or "add_phase_alignment_or_derivative_distance_candidates" in directives
+        ),
+        "expand_bias_calibration": (
+            "amplitude_bias" in bottlenecks
+            or "amplitude_bias" in triggered_taxonomy
+            or "add_short_horizon_affine_bias_calibration" in directives
+        ),
+        "increase_smoothing": (
+            "high_frequency_noise" in bottlenecks
+            or "high_frequency_noise" in triggered_taxonomy
+            or "increase_early_spectral_damping" in directives
+        ),
+        "expand_handoff_curves": (
+            "early_blend_steps" in recommended_axes
+            or "persistence_weight_start" in recommended_axes
+            or "phase_shift" in bottlenecks
+            or "amplitude_bias" in bottlenecks
+            or "phase_shift" in triggered_taxonomy
+            or "amplitude_bias" in triggered_taxonomy
+        ),
         "increase_k": any(
             directive.get("axis") == "k" and directive.get("direction") == "increase"
             for item in evidence_params or []
@@ -2929,6 +3164,27 @@ def _early_refinement_experiment_plan(
     candidate_budget: int,
 ) -> dict[str, Any]:
     center = _retrieval_refinement_center(evidence_params)
+    signals = _early_refinement_signals(evidence_params)
+    axis_plan_by_bottleneck: dict[str, dict[str, Any]] = {}
+    if signals["expand_phase_alignment"]:
+        axis_plan_by_bottleneck["phase_alignment"] = {
+            "candidate_hooks": ["phase_aligned_retrieval", "phase_shift_scale"],
+            "reason": "phase_shift diagnosis requires transport-aware early anchors",
+        }
+    if signals["expand_bias_calibration"]:
+        axis_plan_by_bottleneck["bias_calibration"] = {
+            "candidate_hooks": ["mean_trend_bias", "curved_handoff"],
+            "reason": "amplitude_bias diagnosis requires short-horizon mean correction",
+        }
+    if signals["expand_linear_velocity"]:
+        axis_plan_by_bottleneck["derivative_consistency"] = {
+            "candidate_hooks": [
+                "damped_linear_velocity",
+                "retrieval_derivative_match",
+                "second_order_velocity",
+            ],
+            "reason": "initial derivative mismatch requires velocity-consistent anchors",
+        }
     return {
         "plan_id": "xp_task1_early_refinement_001",
         "decision": "two_stage_budgeted_early_search",
@@ -3002,6 +3258,7 @@ def _early_refinement_experiment_plan(
                 "budget": 5,
             },
         ],
+        "axis_plan_by_bottleneck": axis_plan_by_bottleneck,
         "guardrails": [
             "middle_score_non_regression",
             "late_rmse_non_regression",
@@ -3248,19 +3505,28 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
     }
     if "early_anchor" in row:
         early_anchor = str(row["early_anchor"])
-        if early_anchor not in {
-            "retrieval",
-            "persistence",
-            "linear_velocity",
-            "damped_linear_velocity",
-            "retrieval_derivative_match",
-        }:
+        if early_anchor not in EARLY_REFINEMENT_ANCHORS:
             raise HypothesisLabError(
                 "retrieval refinement early_anchor must be one of retrieval, "
                 "persistence, linear_velocity, damped_linear_velocity, or "
-                "retrieval_derivative_match"
+                "retrieval_derivative_match, phase_aligned_retrieval, "
+                "mean_trend_bias, or second_order_velocity"
             )
         normalized["early_anchor"] = early_anchor
+    if "handoff_curve" in row:
+        handoff_curve = str(row["handoff_curve"])
+        if handoff_curve not in EARLY_HANDOFF_CURVES:
+            raise HypothesisLabError(
+                "retrieval refinement handoff_curve must be one of linear, "
+                "cosine, or quadratic"
+            )
+        normalized["handoff_curve"] = handoff_curve
+    if "phase_shift_scale" in row:
+        normalized["phase_shift_scale"] = _clamp_float(
+            float(row["phase_shift_scale"]),
+            0.0,
+            2.0,
+        )
     return normalized
 
 
@@ -3274,6 +3540,11 @@ def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
         suffix = ""
         if family == "task1_early_refinement":
             suffix = f"_a{params.get('early_anchor', 'persistence')}"
+            handoff_curve = str(params.get("handoff_curve", "linear"))
+            if handoff_curve != "linear":
+                suffix += f"_h{handoff_curve}"
+            if "phase_shift_scale" in params:
+                suffix += f"_ps{float(params['phase_shift_scale']):g}"
         return (
             f"{prefix}"
             f"_k{int(params['k'])}"
