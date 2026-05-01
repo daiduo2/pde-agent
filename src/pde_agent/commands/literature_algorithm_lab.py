@@ -9,12 +9,14 @@ from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
     ALGORITHM_CARDS_STATE_HINT,
     ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
+    ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
     EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
     LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
+    LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
     LITERATURE_REGISTRY_UPDATED_STATE_HINT,
     LITERATURE_REGISTRY_EVENT_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
@@ -41,7 +43,9 @@ from pde_agent.core.literature_algorithm_lab import (
     normalize_openalex_search_results,
     plan_candidate_sandbox,
     poll_mineru_parse_task,
+    prepare_literature_extraction_context,
     record_literature_registry_event,
+    run_arxiv_mineru_parse_pipeline,
     run_literature_algorithm_v2_pipeline,
     submit_mineru_parse_task,
     update_literature_registry,
@@ -96,6 +100,70 @@ def normalize_github_sources_command(
         force=force,
     )
     return _source_search_payload("normalize-github-sources", report)
+
+
+def run_arxiv_mineru_parse_pipeline_command(
+    *,
+    query: str,
+    output_dir: str,
+    mode: str,
+    model_version: str,
+    max_results: int,
+    selected_index: int,
+    max_polls: int,
+    poll_interval_seconds: float,
+    force: bool,
+) -> dict[str, object]:
+    token = None if mode == "agent_url" else os.environ.get("MINERU_API_TOKEN")
+    report = run_arxiv_mineru_parse_pipeline(
+        query=query,
+        output_dir=Path(output_dir),
+        token=token,
+        mode=mode,
+        model_version=model_version,
+        max_results=max_results,
+        selected_index=selected_index,
+        max_polls=max_polls,
+        poll_interval_seconds=poll_interval_seconds,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="run-arxiv-mineru-parse-pipeline",
+        state_hint=ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
+        artifacts=report["artifacts"],
+        metrics={
+            "selected_source_id": report["selected_source_id"],
+            "mineru_state": report["mineru_state"],
+            "mineru_mode": report["mineru_mode"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def prepare_literature_extraction_context_command(
+    *,
+    paper_parse_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = prepare_literature_extraction_context(
+        paper_parse_path=Path(paper_parse_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="prepare-literature-extraction-context",
+        state_hint=LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
+        artifacts={"literature_extraction_context_path": str(Path(output_path))},
+        metrics={
+            "source_id": report["source_id"],
+            "context_unit_count": report["context_unit_count"],
+            "output_state_hint": report["agent_contract"]["output_state_hint"],
+        },
+        next_hint=str(report["next_command"]),
+    )
 
 
 def _source_search_payload(command: str, report: dict[str, object]) -> dict[str, object]:

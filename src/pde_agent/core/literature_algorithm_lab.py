@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -32,6 +35,8 @@ EXECUTOR_DESIGN_REQUEST_STATE_HINT = "EXECUTOR_DESIGN_REQUEST_CREATED"
 BLOCKED_CANDIDATE_HANDOFF_STATE_HINT = "BLOCKED_CANDIDATE_HANDOFF_BUILT"
 LITERATURE_REGISTRY_UPDATED_STATE_HINT = "LITERATURE_REGISTRY_UPDATED"
 LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT = "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
+ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT = "ARXIV_MINERU_PARSE_PIPELINE_RAN"
+LITERATURE_EXTRACTION_CONTEXT_STATE_HINT = "LITERATURE_EXTRACTION_CONTEXT_PREPARED"
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -396,6 +401,240 @@ def normalize_arxiv_search_results(
         candidates=candidates,
         output_file=output_file,
     )
+
+
+def run_arxiv_mineru_parse_pipeline(
+    *,
+    query: str,
+    output_dir: str | Path,
+    token: str | None,
+    mode: str,
+    model_version: str,
+    max_results: int,
+    selected_index: int,
+    max_polls: int,
+    poll_interval_seconds: float,
+    downloader: Any | None = None,
+    mineru_client: Any | None = None,
+    force: bool,
+) -> dict[str, Any]:
+    retrieval_query = _nonempty_text(query, "query")
+    if max_results <= 0:
+        raise LiteratureAlgorithmLabError("max_results must be positive")
+    if selected_index < 0:
+        raise LiteratureAlgorithmLabError("selected_index must be non-negative")
+    if max_polls <= 0:
+        raise LiteratureAlgorithmLabError("max_polls must be positive")
+    if poll_interval_seconds < 0:
+        raise LiteratureAlgorithmLabError("poll_interval_seconds must be non-negative")
+
+    root = Path(output_dir)
+    raw_dir = root / "raw"
+    cache_dir = root / "cache"
+    mineru_dir = root / "mineru"
+    mineru_result_dir = mineru_dir / "result"
+    report_path = root / "arxiv_mineru_parse_pipeline.json"
+    _guard_output(report_path, force=force)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    mineru_dir.mkdir(parents=True, exist_ok=True)
+
+    fetch = downloader or _download_bytes
+    arxiv_url = _arxiv_api_query_url(retrieval_query, max_results=max_results)
+    arxiv_xml_path = raw_dir / "arxiv_search.xml"
+    _guard_output(arxiv_xml_path, force=force)
+    arxiv_xml = fetch(arxiv_url)
+    if not isinstance(arxiv_xml, bytes) or not arxiv_xml:
+        raise LiteratureAlgorithmLabError("arXiv response must be non-empty bytes")
+    arxiv_xml_path.write_bytes(arxiv_xml)
+
+    candidates = normalize_arxiv_search_results(
+        search_results_path=arxiv_xml_path,
+        query=retrieval_query,
+        output_path=root / "source_candidates.json",
+        force=force,
+    )
+    source_candidates = _object_list(candidates.get("source_candidates"), "source_candidates")
+    if selected_index >= len(source_candidates):
+        raise LiteratureAlgorithmLabError(
+            f"selected_index out of range for {len(source_candidates)} candidates"
+        )
+    selected = source_candidates[selected_index]
+    selected_source_id = _nonempty_text(selected.get("source_id"), "source_id")
+
+    downloaded = download_source_document(
+        source_candidates_path=candidates["source_candidates_path"],
+        source_id=selected_source_id,
+        output_path=root / "downloaded_source.json",
+        cache_dir=cache_dir,
+        downloader=downloader,
+        force=force,
+    )
+    mineru_task = submit_mineru_parse_task(
+        downloaded_source_path=downloaded["downloaded_source_path"],
+        output_path=mineru_dir / "task.json",
+        mode=mode,
+        token=token,
+        model_version=model_version,
+        client=mineru_client,
+        force=force,
+    )
+
+    latest_poll: dict[str, Any] | None = None
+    for poll_index in range(1, max_polls + 1):
+        latest_poll = poll_mineru_parse_task(
+            mineru_task_path=mineru_task["mineru_task_path"],
+            output_path=mineru_dir / f"poll_{poll_index:03d}.json",
+            token=token,
+            client=mineru_client,
+            force=force,
+        )
+        if latest_poll.get("state") == "done":
+            break
+        if poll_index < max_polls and poll_interval_seconds:
+            time.sleep(poll_interval_seconds)
+
+    if latest_poll is None:
+        raise LiteratureAlgorithmLabError("MinerU polling did not run")
+
+    result: dict[str, Any] | None = None
+    local_markdown_path = None
+    if latest_poll.get("state") == "done":
+        result = download_mineru_parse_result(
+            mineru_poll_path=latest_poll["mineru_poll_path"],
+            output_path=mineru_dir / "result.json",
+            output_dir=mineru_result_dir,
+            client=mineru_client,
+            force=force,
+        )
+        local_markdown_path = _materialize_mineru_markdown_from_result(
+            result_report=result,
+            output_dir=mineru_result_dir,
+        )
+
+    artifacts = {
+        "arxiv_search_url": arxiv_url,
+        "arxiv_search_xml_path": str(arxiv_xml_path),
+        "source_candidates_path": candidates["source_candidates_path"],
+        "downloaded_source_path": downloaded["downloaded_source_path"],
+        "source_records_path": downloaded["downloaded_source_path"],
+        "mineru_task_path": mineru_task["mineru_task_path"],
+        "latest_mineru_poll_path": latest_poll["mineru_poll_path"],
+        "mineru_result_path": result["mineru_result_path"] if result else None,
+        "local_markdown_path": local_markdown_path,
+        "local_zip_path": result.get("local_zip_path") if result else None,
+    }
+    next_command = "ingest-mineru-parse" if local_markdown_path else "poll-mineru-parse"
+    report = {
+        "schema_version": 1,
+        "state_hint": ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
+        "query": retrieval_query,
+        "selected_index": selected_index,
+        "selected_source_id": selected_source_id,
+        "selected_title": selected.get("title"),
+        "mineru_state": latest_poll.get("state"),
+        "mineru_mode": mineru_task.get("mineru_mode"),
+        "artifacts": artifacts,
+        "suggested_ingest_args": {
+            "source_records_path": downloaded["downloaded_source_path"],
+            "source_id": selected_source_id,
+            "markdown_path": local_markdown_path,
+            "asset_dir": str(mineru_result_dir),
+        },
+        "next_command": next_command,
+    }
+    _write_json(report_path, report)
+    return report
+
+
+def prepare_literature_extraction_context(
+    *,
+    paper_parse_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    parse_file = _require_file(Path(paper_parse_path), "paper parse")
+    parse = _read_json(parse_file)
+    if parse.get("state_hint") != PAPER_PARSE_STATE_HINT:
+        raise LiteratureAlgorithmLabError("paper parse has invalid state_hint")
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    source_id = _nonempty_text(parse.get("source_id"), "source_id")
+    markdown_file = _require_file(
+        Path(_nonempty_text(parse.get("markdown_path"), "markdown_path")),
+        "parsed markdown",
+    )
+    markdown = markdown_file.read_text(encoding="utf-8")
+    context_units = []
+    for block in _markdown_heading_blocks(markdown):
+        section_title = block.get("section_title")
+        text = str(block["markdown"]).strip()
+        if (
+            int(block["block_index"]) == 0
+            and block["line_start"] == block["line_end"]
+            and text.startswith("# ")
+        ):
+            section_title = "Document Title"
+        unit_id = f"section_{int(block['block_index']):03d}_{_slug(str(section_title or 'preamble'))}"
+        context_units.append(
+            {
+                "unit_id": unit_id,
+                "source_id": source_id,
+                "section_title": section_title,
+                "block_index": block["block_index"],
+                "line_start": block["line_start"],
+                "line_end": block["line_end"],
+                "char_count": len(text),
+                "contains_formula": "$$" in text or "\\(" in text or "\\[" in text,
+                "text": text,
+            }
+        )
+    report = {
+        "schema_version": 1,
+        "state_hint": LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
+        "paper_parse_path": str(parse_file),
+        "source_id": source_id,
+        "markdown_path": str(markdown_file),
+        "parse_quality": parse.get("parse_quality", {}),
+        "section_index": parse.get("section_index", {}),
+        "context_unit_count": len(context_units),
+        "context_units": context_units,
+        "agent_contract": {
+            "output_state_hint": ALGORITHM_CARDS_STATE_HINT,
+            "output_schema": "AlgorithmCard v2 report",
+            "grounding_rules": [
+                "Every algorithmic claim must cite evidence_spans from context_units.",
+                "Do not invent paper claims that are absent from the context text.",
+                "Use domain expertise to interpret mechanisms, but preserve source grounding.",
+                "Return extraction_status empty with failure_code no_algorithmic_claim when no actionable algorithm is present.",
+            ],
+            "allowed_existing_hooks": sorted(HOOK_TO_FAMILY),
+            "unsupported_hook_policy": (
+                "Use a new descriptive hook only when the paper mechanism cannot be "
+                "represented by an allowed_existing_hook; such hooks will be routed "
+                "through executor design before sandbox execution."
+            ),
+            "required_card_fields": [
+                "algorithm_card_id",
+                "source_ids",
+                "claim",
+                "core_mechanism",
+                "operation",
+                "implementation_hooks",
+                "expected_observables",
+                "failure_modes",
+                "minimal_experiment",
+                "evidence_spans",
+                "evidence_status",
+                "operator_target",
+                "mechanism_type",
+                "mathematical_object",
+                "implementation_requirements",
+            ],
+        },
+        "next_command": "agent-extract-algorithm-cards",
+    }
+    _write_json(output_file, report)
+    return report
 
 
 def normalize_github_search_results(
@@ -3516,6 +3755,16 @@ def _extension_for_url(url: str) -> str:
     return ".bin"
 
 
+def _arxiv_api_query_url(query: str, *, max_results: int) -> str:
+    return "https://export.arxiv.org/api/query?" + urlencode(
+        {
+            "search_query": f"all:{query}",
+            "start": 0,
+            "max_results": max_results,
+        }
+    )
+
+
 def _download_bytes(url: str) -> bytes:
     request = Request(
         url,
@@ -3523,6 +3772,33 @@ def _download_bytes(url: str) -> bytes:
     )
     with urlopen(request, timeout=60) as response:
         return response.read()
+
+
+def _materialize_mineru_markdown_from_result(
+    *,
+    result_report: dict[str, Any],
+    output_dir: str | Path,
+) -> str | None:
+    markdown_path = result_report.get("local_markdown_path")
+    if isinstance(markdown_path, str) and markdown_path.strip():
+        return str(_require_file(Path(markdown_path), "MinerU markdown"))
+    zip_path = result_report.get("local_zip_path")
+    if not isinstance(zip_path, str) or not zip_path.strip():
+        return None
+    archive_path = _require_file(Path(zip_path), "MinerU result zip")
+    root = Path(output_dir) / "extracted"
+    root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        selected_name = "full.md" if "full.md" in names else None
+        if selected_name is None:
+            markdown_names = [name for name in names if name.lower().endswith(".md")]
+            if not markdown_names:
+                return None
+            selected_name = sorted(markdown_names, key=lambda name: (len(name), name))[0]
+        local_markdown_path = root / Path(selected_name).name
+        local_markdown_path.write_bytes(archive.read(selected_name))
+        return str(local_markdown_path)
 
 
 def _source_candidate(

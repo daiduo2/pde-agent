@@ -129,7 +129,9 @@ from pde_agent.commands.literature_algorithm_lab import (
     normalize_openalex_sources_command,
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
+    prepare_literature_extraction_context_command,
     record_literature_registry_event_command,
+    run_arxiv_mineru_parse_pipeline_command,
     run_literature_algorithm_v2_pipeline_command,
     submit_mineru_parse_command,
     update_literature_registry_command,
@@ -927,6 +929,37 @@ def normalize_github_sources_cmd(
     )
 
 
+@app.command("run-arxiv-mineru-parse-pipeline")
+def run_arxiv_mineru_parse_pipeline_cmd(
+    query: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    mode: str = typer.Option("precise_url"),
+    model_version: str = typer.Option("vlm"),
+    max_results: int = typer.Option(5),
+    selected_index: int = typer.Option(0),
+    max_polls: int = typer.Option(3),
+    poll_interval_seconds: float = typer.Option(5.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_arxiv_mineru_parse_pipeline_command(
+                query=query,
+                output_dir=output_dir,
+                mode=mode,
+                model_version=model_version,
+                max_results=max_results,
+                selected_index=selected_index,
+                max_polls=max_polls,
+                poll_interval_seconds=poll_interval_seconds,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("download-source-document")
 def download_source_document_cmd(
     source_candidates_path: str = typer.Option(...),
@@ -962,6 +995,25 @@ def build_literature_source_records_cmd(
         json.dumps(
             build_literature_source_records_command(
                 source_fixture_path=source_fixture_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("prepare-literature-extraction-context")
+def prepare_literature_extraction_context_cmd(
+    paper_parse_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            prepare_literature_extraction_context_command(
+                paper_parse_path=paper_parse_path,
                 output_path=output_path,
                 force=force,
             )

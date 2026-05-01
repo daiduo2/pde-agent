@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -333,6 +335,141 @@ def test_poll_and_download_mineru_result(tmp_path: Path) -> None:
     assert download_report["state_hint"] == "MINERU_PARSE_RESULT_DOWNLOADED"
     assert Path(download_report["local_markdown_path"]).exists()
     assert download_report["next_command"] == "ingest-mineru-parse"
+
+
+def test_run_arxiv_mineru_parse_pipeline_materializes_markdown(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        run_arxiv_mineru_parse_pipeline,
+    )
+
+    arxiv_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2010.08895v3</id>
+    <title>Fourier Neural Operator for Parametric Partial Differential Equations</title>
+    <updated>2021-05-01T00:00:00Z</updated>
+    <published>2020-10-17T00:00:00Z</published>
+    <link href="https://arxiv.org/pdf/2010.08895v3" type="application/pdf" title="pdf"/>
+  </entry>
+</feed>
+""".encode()
+
+    class FakeMinerUClient:
+        def post_json(
+            self, endpoint: str, payload: dict[str, object], token: str | None
+        ) -> dict[str, object]:
+            assert token == "token-for-test"
+            assert payload["url"] == "https://arxiv.org/pdf/2010.08895v3"
+            return {"code": 0, "data": {"task_id": "task-fno"}}
+
+        def get_json(self, endpoint: str, token: str | None) -> dict[str, object]:
+            assert token == "token-for-test"
+            return {
+                "code": 0,
+                "data": {
+                    "state": "done",
+                    "full_zip_url": "https://mineru.example/result.zip",
+                },
+            }
+
+        def download_bytes(self, url: str) -> bytes:
+            assert url == "https://mineru.example/result.zip"
+            buffer = BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr(
+                    "full.md",
+                    "# FNO\n\n## Abstract\nText\n\n## Method\nFourier Neural Operator text\n$$x$$",
+                )
+            return buffer.getvalue()
+
+    def fake_downloader(url: str) -> bytes:
+        if "export.arxiv.org" in url:
+            return arxiv_xml
+        if url == "https://arxiv.org/pdf/2010.08895v3":
+            return b"%PDF fno"
+        raise AssertionError(f"unexpected download url: {url}")
+
+    report = run_arxiv_mineru_parse_pipeline(
+        query="Fourier Neural Operator Burgers",
+        output_dir=tmp_path / "run",
+        token="token-for-test",
+        mode="precise_url",
+        model_version="vlm",
+        max_results=1,
+        selected_index=0,
+        max_polls=1,
+        poll_interval_seconds=0.0,
+        downloader=fake_downloader,
+        mineru_client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert report["state_hint"] == "ARXIV_MINERU_PARSE_PIPELINE_RAN"
+    assert report["selected_source_id"].startswith("arxiv_paper_fourier")
+    assert report["mineru_state"] == "done"
+    assert Path(report["artifacts"]["local_markdown_path"]).exists()
+    assert report["next_command"] == "ingest-mineru-parse"
+    assert "token-for-test" not in json.dumps(report)
+
+
+def test_prepare_literature_extraction_context_packs_sections(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        prepare_literature_extraction_context,
+    )
+
+    markdown = tmp_path / "paper.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Fourier Neural Operator",
+                "## Abstract",
+                "We learn operators for PDEs.",
+                "## Fourier Neural Operator",
+                "The kernel integral operator is parameterized in Fourier space.",
+                "The Fourier layer multiplies low-frequency modes by learned weights.",
+                "## Experiments",
+                "Burgers equation is evaluated.",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse = tmp_path / "parse.json"
+    parse.write_text(
+        json.dumps(
+            {
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_fno",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {"abstract": 2, "fourier neural operator": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_literature_extraction_context(
+        paper_parse_path=parse,
+        output_path=tmp_path / "context.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "LITERATURE_EXTRACTION_CONTEXT_PREPARED"
+    assert report["source_id"] == "source_fno"
+    assert report["context_unit_count"] == 4
+    method_unit = next(
+        unit
+        for unit in report["context_units"]
+        if unit["section_title"] == "Fourier Neural Operator"
+    )
+    assert method_unit["line_start"] == 4
+    assert "Fourier layer" in method_unit["text"]
+    assert report["agent_contract"]["output_state_hint"] == "ALGORITHM_CARDS_EXTRACTED"
+    assert report["next_command"] == "agent-extract-algorithm-cards"
 
 
 def test_build_source_records_normalizes_fixture_sources(tmp_path: Path) -> None:
