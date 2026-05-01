@@ -479,6 +479,51 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=40,
         ),
         _entry(
+            strategy_id="task1_retrieval_refinement_v0",
+            title="Task 1 retrieval refinement with early-horizon anchoring",
+            model_families=["DataInference", "RetrievalPrior", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "task1_accuracy_plateau",
+                "persistence_plateau",
+                "early_window_rel_mse",
+                "middle_window_rel_mse",
+                "long_horizon_drift",
+            ],
+            hypothesis=(
+                "The validated Task 1 kNN retrieval prior can be improved by "
+                "using a larger affine neighbor set and blending persistence into "
+                "only the earliest forecast steps before returning to retrieval."
+            ),
+            mechanism=(
+                "Run the Hypothesis Lab retrieval-refinement shortlist centered on "
+                "k=48, affine mode, 20-step early blending, 0.5 persistence anchor, "
+                "and moderate spectral smoothing; retain raw and delta sentinels "
+                "as assumption checks."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "task1_retrieval_refinement",
+                "judge-hermes-submission",
+            ],
+            expected_observables=[
+                "Task 1 proxy improves over task1_retrieval_prior_v0",
+                "early and middle segment scores improve without late-window regression",
+                "heartbeat runtime remains suitable for repeated local iteration",
+            ],
+            known_risks=[
+                "leave-one-out validation can overestimate hidden-test transfer",
+                "persistence anchoring may underfit rapidly changing early dynamics",
+                "spectral smoothing can damp rare sharp structures",
+            ],
+            acceptance_criteria=[
+                "full Task 1 validation proxy remains above 110",
+                "first 10 context frames are preserved exactly",
+                "best candidate metadata records k, mode, early blend, persistence weight, and smoothing",
+            ],
+            priority=0,
+        ),
+        _entry(
             strategy_id="task1_retrieval_prior_v0",
             title="Task 1 affine kNN trajectory retrieval prior",
             model_families=["DataInference", "RetrievalPrior", "all"],

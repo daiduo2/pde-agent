@@ -293,6 +293,50 @@ def _retrieval_asset_algorithm_candidates(path: Path) -> Path:
     return path
 
 
+def _retrieval_refinement_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": (
+                    "candidate_local_strategy_task1_retrieval_refinement_v0"
+                ),
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "DataInference",
+                "hypothesis": (
+                    "The validated Task 1 retrieval refinement should be reused "
+                    "as the default local plateau escape strategy."
+                ),
+                "mechanism": (
+                    "Run the bounded retrieval refinement shortlist around "
+                    "k48 affine early-blend candidates."
+                ),
+                "executor_spec": {
+                    "cli_command": "run-hypothesis-lab",
+                    "implementation_hooks": [
+                        "run-hypothesis-lab",
+                        "task1_retrieval_refinement",
+                    ],
+                },
+                "expected_observables": [
+                    "Task 1 proxy remains above the previous retrieval prior"
+                ],
+                "risk_controls": ["validation retrieval can overfit hidden tests"],
+                "source_grounding": {
+                    "algorithm_card_id": "local_strategy_task1_retrieval_refinement_v0",
+                    "source_ids": ["task1_retrieval_refinement_v0"],
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -429,6 +473,43 @@ def test_hypothesis_lab_builds_retrieval_prior_from_algorithm_candidate(
     } in candidate_params
     assert any(row["mode"] == "delta" for row in candidate_params)
     assert any(row["mode"] == "raw" for row in candidate_params)
+
+
+def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _retrieval_refinement_asset_algorithm_candidates(
+                tmp_path / "refinement_candidates.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "task1_retrieval_refinement"
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "task1_retrieval_refinement"
+    )
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    assert blueprints["blueprints"][0]["blueprint_id"] == (
+        "bp_task1_retrieval_refinement_001"
+    )
 
 
 def test_hypothesis_lab_builds_cards_from_literature_notes(tmp_path: Path) -> None:

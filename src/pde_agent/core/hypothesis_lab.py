@@ -134,13 +134,18 @@ def generate_hypotheses(
             grouped_cards.setdefault("learned_residual_correction", []).append(card)
         if "task1_retrieval_prior" in hooks:
             grouped_cards.setdefault("task1_retrieval_prior", []).append(card)
+        if "task1_retrieval_refinement" in hooks:
+            grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
     hypotheses = []
-    if "task1_retrieval_prior" in grouped_cards:
-        source_cards = grouped_cards["task1_retrieval_prior"]
+    retrieval_refinement_cards = [
+        *grouped_cards.get("task1_retrieval_refinement", []),
+        *grouped_cards.get("task1_retrieval_prior", []),
+    ]
+    if retrieval_refinement_cards:
         hypotheses.append(
             {
                 "hypothesis_id": "h_task1_retrieval_refinement_001",
-                "source_card_ids": [card["card_id"] for card in source_cards],
+                "source_card_ids": [card["card_id"] for card in retrieval_refinement_cards],
                 "candidate_family": "task1_retrieval_refinement",
                 "mechanism": (
                     "Refine the Task 1 retrieval prior by sweeping retrieval modes, "
@@ -148,15 +153,23 @@ def generate_hypotheses(
                     "optional spectral smoothing to target weak early/middle windows "
                     "without losing late-window stability."
                 ),
-                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "preconditions": _merge_card_list(
+                    retrieval_refinement_cards,
+                    "preconditions",
+                ),
                 "expected_observables": _merge_card_list(
-                    source_cards,
+                    retrieval_refinement_cards,
                     "expected_observables",
                 ),
-                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "known_risks": _merge_card_list(
+                    retrieval_refinement_cards,
+                    "known_risks",
+                ),
                 "priority": -4,
             }
         )
+    if "task1_retrieval_prior" in grouped_cards:
+        source_cards = grouped_cards["task1_retrieval_prior"]
         hypotheses.append(
             {
                 "hypothesis_id": "h_task1_retrieval_prior_001",
@@ -1348,6 +1361,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
     }
     supported = {
         "task1_retrieval_prior",
+        "task1_retrieval_refinement",
         "linear_trend_spectral",
         "linear_trend_spectral_escape",
         "linear_trend_late_spectral_ramp",

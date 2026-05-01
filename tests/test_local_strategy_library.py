@@ -114,7 +114,7 @@ def test_lookup_local_strategies_exposes_hypothesis_lab_linear_trend_spectral(
         applicable_pde="1D Burgers",
         model_family="DataInference",
         failure_modes=["persistence_plateau", "long_horizon_drift"],
-        max_results=2,
+        max_results=3,
         output_path=None,
     )
 
@@ -127,7 +127,7 @@ def test_lookup_local_strategies_exposes_hypothesis_lab_linear_trend_spectral(
     assert "linear_trend_spectral" in linear["implementation_hooks"]
 
 
-def test_lookup_local_strategies_exposes_task1_retrieval_prior(
+def test_lookup_local_strategies_exposes_task1_retrieval_refinement(
     tmp_path: Path,
 ) -> None:
     from pde_agent.core.local_strategy_library import (
@@ -147,11 +147,9 @@ def test_lookup_local_strategies_exposes_task1_retrieval_prior(
         output_path=None,
     )
 
-    assert result["matches"][0]["strategy_id"] == "task1_retrieval_prior_v0"
-    assert "predict-task1-retrieval-prior" in result["matches"][0][
-        "implementation_hooks"
-    ]
-    assert "materialize-competition-candidate" in result["matches"][0][
+    assert result["matches"][0]["strategy_id"] == "task1_retrieval_refinement_v0"
+    assert "run-hypothesis-lab" in result["matches"][0]["implementation_hooks"]
+    assert "task1_retrieval_refinement" in result["matches"][0][
         "implementation_hooks"
     ]
 
