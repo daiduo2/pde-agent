@@ -40,6 +40,10 @@ LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT = "LITERATURE_ALGORITHM_V2_PIPELINE_
 ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT = "ARXIV_MINERU_PARSE_PIPELINE_RAN"
 LITERATURE_EXTRACTION_CONTEXT_STATE_HINT = "LITERATURE_EXTRACTION_CONTEXT_PREPARED"
 FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT = "FNO_LITERATURE_ADAPTATION_TASK_PREPARED"
+DEEPONET_LITERATURE_ADAPTATION_TASK_STATE_HINT = (
+    "DEEPONET_LITERATURE_ADAPTATION_TASK_PREPARED"
+)
+UNET_LITERATURE_ADAPTATION_TASK_STATE_HINT = "UNET_LITERATURE_ADAPTATION_TASK_PREPARED"
 BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT = "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED"
 BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT = "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
 BOUNDED_EXECUTOR_AUDIT_STATE_HINT = "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
@@ -645,38 +649,22 @@ def prepare_literature_extraction_context(
     return report
 
 
-def prepare_fno_literature_adaptation_task(
-    *,
-    literature_extraction_context_path: str | Path,
-    output_path: str | Path,
-    force: bool,
-) -> dict[str, Any]:
-    context_file = _require_file(
-        Path(literature_extraction_context_path),
-        "literature extraction context",
-    )
-    context = _read_json(context_file)
-    if context.get("state_hint") != LITERATURE_EXTRACTION_CONTEXT_STATE_HINT:
-        raise LiteratureAlgorithmLabError(
-            "literature extraction context has invalid state_hint"
-        )
-    output_file = Path(output_path)
-    _guard_output(output_file, force=force)
-    context_units = _object_list(context.get("context_units"), "context_units")
-    selected_units = _fno_relevant_context_units(context_units)
-    selected_ids = [
-        _nonempty_text(unit.get("unit_id"), "unit_id")
-        for unit in selected_units
-    ]
-    report = {
-        "schema_version": 1,
+OPERATOR_LITERATURE_ADAPTATION_PROFILES: dict[str, dict[str, Any]] = {
+    "fno": {
         "state_hint": FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
-        "fno_literature_adaptation_task_path": str(output_file),
-        "literature_extraction_context_path": str(context_file),
-        "source_id": context.get("source_id"),
+        "path_key": "fno_literature_adaptation_task_path",
         "operator_family": "FNO",
-        "selected_context_unit_count": len(selected_units),
-        "selected_context_unit_ids": selected_ids,
+        "skill_name": "pde-fno-literature-adapter",
+        "next_command": "agent-extract-fno-algorithm-cards",
+        "keywords": [
+            "fourier",
+            "spectral",
+            "operator",
+            "convolution",
+            "mode",
+            "resolution",
+            "burgers",
+        ],
         "reading_focus": [
             "spectral convolution and Fourier mode truncation",
             "lifting and projection around Fourier layers",
@@ -716,22 +704,233 @@ def prepare_fno_literature_adaptation_task(
                 "first-context-step identity preservation",
             ],
         },
+        "task": (
+            "Use FNO domain knowledge to turn grounded context units into "
+            "AlgorithmCard v2 records without fabricating claims."
+        ),
+    },
+    "deeponet": {
+        "state_hint": DEEPONET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        "path_key": "deeponet_literature_adaptation_task_path",
+        "operator_family": "DeepONet",
+        "skill_name": "pde-deeponet-literature-adapter",
+        "next_command": "agent-extract-deeponet-algorithm-cards",
+        "keywords": [
+            "deeponet",
+            "deep operator",
+            "branch",
+            "trunk",
+            "sensor",
+            "coordinate",
+            "pi-deeponet",
+            "physics-informed",
+            "operator",
+            "burgers",
+        ],
+        "reading_focus": [
+            "branch network encoding of input functions or sensors",
+            "trunk network coordinate basis and branch-trunk merge rule",
+            "PI-DeepONet residual or physics-informed loss terms",
+            "rollout construction from pointwise operator evaluations",
+            "Burgers context-window conditioning and target coordinate layout",
+            "minimal sandbox experiment implied by the paper mechanism",
+        ],
+        "recommended_hooks": {
+            "existing_executor": [
+                "physics_residual_regularization",
+                "scheduled_rollout_training",
+                "operator_correction_postprocess",
+            ],
+            "requires_bounded_executor": [
+                "deeponet_branch_trunk_architecture",
+            ],
+        },
+        "algorithm_card_guidance": {
+            "preferred_operator_targets": [
+                "ic_to_trajectory",
+                "context_to_rollout",
+                "coordinate_to_solution",
+            ],
+            "preferred_mechanism_types": [
+                "architecture",
+                "loss",
+                "conditioning",
+                "rollout",
+                "hybrid",
+            ],
+            "required_observables": [
+                "local judge score or segment score",
+                "coordinate-grid reconstruction error",
+                "physics residual when a residual loss is claimed",
+                "runtime under task budget",
+                "first-context-step identity preservation",
+            ],
+        },
+        "task": (
+            "Use DeepONet and PI-DeepONet domain knowledge to turn grounded "
+            "context units into AlgorithmCard v2 records without fabricating claims."
+        ),
+    },
+    "unet": {
+        "state_hint": UNET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        "path_key": "unet_literature_adaptation_task_path",
+        "operator_family": "UNet",
+        "skill_name": "pde-unet-literature-adapter",
+        "next_command": "agent-extract-unet-algorithm-cards",
+        "keywords": [
+            "u-net",
+            "unet",
+            "encoder",
+            "decoder",
+            "skip",
+            "convolution",
+            "rollout",
+            "frame",
+            "checkpoint",
+            "burgers",
+        ],
+        "reading_focus": [
+            "encoder-decoder hierarchy and skip connection mechanism",
+            "temporal frame prediction, push-forward, or autoregressive rollout",
+            "checkpoint, finetuning, or calibration procedures",
+            "stability controls for long-horizon generated frames",
+            "Burgers context-window conditioning and output-frame semantics",
+            "minimal sandbox experiment implied by the paper mechanism",
+        ],
+        "recommended_hooks": {
+            "existing_executor": [
+                "official_checkpoint_calibration",
+                "scheduled_rollout_training",
+                "operator_correction_postprocess",
+            ],
+            "requires_bounded_executor": [
+                "unet_encoder_decoder_architecture",
+            ],
+        },
+        "algorithm_card_guidance": {
+            "preferred_operator_targets": [
+                "context_to_rollout",
+                "postprocess_to_solution",
+                "frame_to_frame",
+            ],
+            "preferred_mechanism_types": [
+                "architecture",
+                "rollout",
+                "checkpoint",
+                "postprocess",
+                "hybrid",
+            ],
+            "required_observables": [
+                "local judge score or segment score",
+                "late-horizon RMSE or drift",
+                "runtime under task budget",
+                "context preservation",
+                "failure evidence for oversmoothing or unstable rollout",
+            ],
+        },
+        "task": (
+            "Use UNet operator-family knowledge to turn grounded context units "
+            "into AlgorithmCard v2 records without fabricating claims."
+        ),
+    },
+}
+
+
+def prepare_fno_literature_adaptation_task(
+    *,
+    literature_extraction_context_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    return _prepare_operator_literature_adaptation_task(
+        profile_key="fno",
+        literature_extraction_context_path=literature_extraction_context_path,
+        output_path=output_path,
+        force=force,
+    )
+
+
+def prepare_deeponet_literature_adaptation_task(
+    *,
+    literature_extraction_context_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    return _prepare_operator_literature_adaptation_task(
+        profile_key="deeponet",
+        literature_extraction_context_path=literature_extraction_context_path,
+        output_path=output_path,
+        force=force,
+    )
+
+
+def prepare_unet_literature_adaptation_task(
+    *,
+    literature_extraction_context_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    return _prepare_operator_literature_adaptation_task(
+        profile_key="unet",
+        literature_extraction_context_path=literature_extraction_context_path,
+        output_path=output_path,
+        force=force,
+    )
+
+
+def _prepare_operator_literature_adaptation_task(
+    *,
+    profile_key: str,
+    literature_extraction_context_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    profile = OPERATOR_LITERATURE_ADAPTATION_PROFILES[profile_key]
+    context_file = _require_file(
+        Path(literature_extraction_context_path),
+        "literature extraction context",
+    )
+    context = _read_json(context_file)
+    if context.get("state_hint") != LITERATURE_EXTRACTION_CONTEXT_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "literature extraction context has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    context_units = _object_list(context.get("context_units"), "context_units")
+    selected_units = _operator_relevant_context_units(
+        context_units,
+        keywords=profile["keywords"],
+    )
+    selected_ids = [
+        _nonempty_text(unit.get("unit_id"), "unit_id")
+        for unit in selected_units
+    ]
+    report = {
+        "schema_version": 1,
+        "state_hint": profile["state_hint"],
+        profile["path_key"]: str(output_file),
+        "literature_extraction_context_path": str(context_file),
+        "source_id": context.get("source_id"),
+        "operator_family": profile["operator_family"],
+        "selected_context_unit_count": len(selected_units),
+        "selected_context_unit_ids": selected_ids,
+        "reading_focus": profile["reading_focus"],
+        "recommended_hooks": profile["recommended_hooks"],
+        "algorithm_card_guidance": profile["algorithm_card_guidance"],
         "agent_contract": {
-            "skill_name": "pde-fno-literature-adapter",
+            "skill_name": profile["skill_name"],
             "base_skill_name": "pde-algorithm-card-extractor",
             "input_state_hint": LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
             "output_state_hint": ALGORITHM_CARDS_STATE_HINT,
-            "task": (
-                "Use FNO domain knowledge to turn grounded context units into "
-                "AlgorithmCard v2 records without fabricating claims."
-            ),
+            "task": profile["task"],
             "forbidden_actions": [
                 "do not infer implementation details absent from the paper context",
                 "do not bypass AlgorithmCard v2 validation",
                 "do not turn an architecture claim into runnable code without bounded executor sandboxing",
             ],
         },
-        "next_command": "agent-extract-fno-algorithm-cards",
+        "next_command": profile["next_command"],
     }
     _write_json(output_file, report)
     return report
@@ -4361,23 +4560,23 @@ def _materialize_mineru_markdown_from_result(
 
 
 def _fno_relevant_context_units(context_units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _operator_relevant_context_units(
+        context_units,
+        keywords=OPERATOR_LITERATURE_ADAPTATION_PROFILES["fno"]["keywords"],
+    )
+
+
+def _operator_relevant_context_units(
+    context_units: list[dict[str, Any]],
+    *,
+    keywords: list[str],
+) -> list[dict[str, Any]]:
     selected = []
     for unit in context_units:
         title = str(unit.get("section_title") or "").lower()
         text = str(unit.get("text") or "").lower()
         haystack = f"{title}\n{text}"
-        if any(
-            keyword in haystack
-            for keyword in [
-                "fourier",
-                "spectral",
-                "operator",
-                "convolution",
-                "mode",
-                "resolution",
-                "burgers",
-            ]
-        ):
+        if any(keyword in haystack for keyword in keywords):
             selected.append(unit)
     return selected or context_units[: min(5, len(context_units))]
 

@@ -16,11 +16,12 @@ from pde_agent.core.literature_algorithm_lab import (
     BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
     BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT,
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
+    DEEPONET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
     EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
-    FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
+    FNO_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
     LITERATURE_EXTRACTION_CONTEXT_STATE_HINT,
     LITERATURE_REGISTRY_UPDATED_STATE_HINT,
@@ -33,6 +34,7 @@ from pde_agent.core.literature_algorithm_lab import (
     SOURCE_DOCUMENT_STATE_HINT,
     SOURCE_SEARCH_STATE_HINT,
     SOURCE_RECORDS_STATE_HINT,
+    UNET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     adapt_fno_architecture_candidate,
     build_blocked_candidate_handoff,
     build_executor_taxonomy,
@@ -51,8 +53,10 @@ from pde_agent.core.literature_algorithm_lab import (
     plan_candidate_sandbox,
     poll_mineru_parse_task,
     prepare_bounded_executor_authoring_task,
+    prepare_deeponet_literature_adaptation_task,
     prepare_fno_literature_adaptation_task,
     prepare_literature_extraction_context,
+    prepare_unet_literature_adaptation_task,
     materialize_bounded_executor_template,
     record_literature_registry_event,
     record_bounded_executor_sandbox_event,
@@ -197,6 +201,64 @@ def prepare_fno_literature_adaptation_task_command(
         artifacts={
             "fno_literature_adaptation_task_path": report[
                 "fno_literature_adaptation_task_path"
+            ]
+        },
+        metrics={
+            "source_id": report["source_id"],
+            "selected_context_unit_count": report["selected_context_unit_count"],
+            "operator_family": report["operator_family"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def prepare_deeponet_literature_adaptation_task_command(
+    *,
+    literature_extraction_context_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = prepare_deeponet_literature_adaptation_task(
+        literature_extraction_context_path=Path(literature_extraction_context_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="prepare-deeponet-literature-adaptation-task",
+        state_hint=DEEPONET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        artifacts={
+            "deeponet_literature_adaptation_task_path": report[
+                "deeponet_literature_adaptation_task_path"
+            ]
+        },
+        metrics={
+            "source_id": report["source_id"],
+            "selected_context_unit_count": report["selected_context_unit_count"],
+            "operator_family": report["operator_family"],
+        },
+        next_hint=str(report["next_command"]),
+    )
+
+
+def prepare_unet_literature_adaptation_task_command(
+    *,
+    literature_extraction_context_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = prepare_unet_literature_adaptation_task(
+        literature_extraction_context_path=Path(literature_extraction_context_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="prepare-unet-literature-adaptation-task",
+        state_hint=UNET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
+        artifacts={
+            "unet_literature_adaptation_task_path": report[
+                "unet_literature_adaptation_task_path"
             ]
         },
         metrics={
