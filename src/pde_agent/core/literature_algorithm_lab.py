@@ -2544,6 +2544,13 @@ def run_bounded_executor_sandbox(
     start = time.perf_counter()
     prediction = module.predict(context.copy(), candidate, params)
     inference_seconds = time.perf_counter() - start
+    implementation_status = getattr(
+        module,
+        "IMPLEMENTATION_STATUS",
+        manifest.get("implementation_status"),
+    )
+    if not isinstance(implementation_status, str) or not implementation_status.strip():
+        implementation_status = manifest.get("implementation_status")
     np = __import__("numpy")
     prediction = np.asarray(prediction)
     if prediction.shape != target.shape:
@@ -2570,7 +2577,7 @@ def run_bounded_executor_sandbox(
         "algorithm_candidate_id": candidate["algorithm_candidate_id"],
         "requested_executor_id": candidate["requested_executor_id"],
         "source_grounding": candidate["source_grounding"],
-        "implementation_status": manifest.get("implementation_status"),
+        "implementation_status": implementation_status,
         "rules_passed": rules_passed,
         "context_preserved": context_preserved,
         "metric_results": {

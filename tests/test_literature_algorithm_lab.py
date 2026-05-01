@@ -3485,6 +3485,14 @@ def test_run_bounded_executor_sandbox_and_record_event(tmp_path: Path) -> None:
         output_dir=tmp_path / "executor",
         force=False,
     )
+    executor_path = Path(materialized["executor_path"])
+    executor_path.write_text(
+        executor_path.read_text(encoding="utf-8").replace(
+            'IMPLEMENTATION_STATUS = "scaffold_baseline"',
+            'IMPLEMENTATION_STATUS = "agent_authored_test_executor"',
+        ),
+        encoding="utf-8",
+    )
 
     sandbox = run_bounded_executor_sandbox(
         design_spec_path=design_path,
@@ -3505,6 +3513,7 @@ def test_run_bounded_executor_sandbox_and_record_event(tmp_path: Path) -> None:
     assert sandbox["state_hint"] == "BOUNDED_EXECUTOR_SANDBOX_RAN"
     assert sandbox["rules_passed"] is True
     assert sandbox["context_preserved"] is True
+    assert sandbox["implementation_status"] == "agent_authored_test_executor"
     assert sandbox["metric_results"]["score_delta_vs_persistence"] == pytest.approx(0.0)
     assert Path(sandbox["artifacts"]["prediction_path"]).exists()
     assert sandbox["next_command"] == "record-bounded-executor-sandbox-event"
