@@ -927,6 +927,11 @@ def run_blueprint_sandbox(
         max_inference_seconds=float(blueprint["sandbox"]["max_inference_seconds"]),
         promotion_min_score_delta=float(blueprint["sandbox"]["promotion_min_score_delta"]),
     )
+    multiview_judge = _task1_multiview_local_judge(
+        prediction=best["_prediction"],
+        baseline_prediction=baseline_prediction,
+        target=target,
+    )
     verifier = {
         "decision": "promote_to_strategy_proposal"
         if _sandbox_metrics_pass(metric_results)
@@ -939,6 +944,7 @@ def run_blueprint_sandbox(
         "inference_time": float(best["elapsed_seconds"]),
         "judge_decision": judge["decision"],
         "metric_results": metric_results,
+        "multiview_judge": multiview_judge,
         "promotion_score": _sandbox_promotion_score(metric_results),
     }
     serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
@@ -2763,6 +2769,99 @@ def _sandbox_metric_results(
             "threshold": max_inference_seconds,
             "passed": inference_seconds <= max_inference_seconds,
         },
+    }
+
+
+def _task1_multiview_local_judge(
+    *,
+    prediction: np.ndarray,
+    baseline_prediction: np.ndarray,
+    target: np.ndarray,
+) -> dict[str, Any]:
+    full_score = score_prediction_arrays(prediction=prediction, target=target)
+    full_baseline = score_prediction_arrays(
+        prediction=baseline_prediction,
+        target=target,
+    )
+    full_delta = float(full_score["segment_score"]) - float(
+        full_baseline["segment_score"]
+    )
+    heldout_view = _task1_heldout_view(
+        prediction=prediction,
+        baseline_prediction=baseline_prediction,
+        target=target,
+    )
+    late_delta = _segment_metric_delta(
+        baseline_segments=full_baseline.get("segments", {}),
+        best_segments=full_score.get("segments", {}),
+        segment="late",
+        metric="rmse",
+        lower_is_better=True,
+    )
+    views = {
+        "fast_full": {
+            "sample_count": int(target.shape[0]),
+            "segment_score": full_score["segment_score"],
+            "baseline_segment_score": full_baseline["segment_score"],
+            "segment_score_delta": full_delta,
+            "passed": full_delta >= 0.0,
+        },
+        "heldout_split": heldout_view,
+        "late_stability": {
+            "sample_count": int(target.shape[0]),
+            "late_rmse": full_score["segments"]["late"]["rmse"],
+            "baseline_late_rmse": full_baseline["segments"]["late"]["rmse"],
+            "late_rmse_delta": late_delta,
+            "passed": late_delta is None or late_delta >= 0.0,
+        },
+    }
+    required = [
+        bool(views["fast_full"]["passed"]),
+        bool(views["heldout_split"].get("passed")),
+        bool(views["late_stability"]["passed"]),
+    ]
+    return {
+        "schema_version": 1,
+        "state_hint": "TASK1_MULTIVIEW_LOCAL_JUDGE_SCORED",
+        "decision": "consistent_improvement"
+        if all(required)
+        else "mixed_or_insufficient_evidence",
+        "views": views,
+    }
+
+
+def _task1_heldout_view(
+    *,
+    prediction: np.ndarray,
+    baseline_prediction: np.ndarray,
+    target: np.ndarray,
+) -> dict[str, Any]:
+    sample_count = int(target.shape[0] // 2)
+    if sample_count < 1:
+        return {
+            "sample_count": 0,
+            "status": "skipped_insufficient_samples",
+            "passed": False,
+        }
+    heldout = np.arange(target.shape[0]) % 2 == 1
+    heldout_score = score_prediction_arrays(
+        prediction=prediction[heldout],
+        target=target[heldout],
+    )
+    heldout_baseline = score_prediction_arrays(
+        prediction=baseline_prediction[heldout],
+        target=target[heldout],
+    )
+    delta = float(heldout_score["segment_score"]) - float(
+        heldout_baseline["segment_score"]
+    )
+    return {
+        "sample_count": sample_count,
+        "status": "scored",
+        "segment_score": heldout_score["segment_score"],
+        "baseline_segment_score": heldout_baseline["segment_score"],
+        "segment_score_delta": delta,
+        "passed": delta >= 0.0,
     }
 
 

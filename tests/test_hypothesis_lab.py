@@ -1290,6 +1290,55 @@ def test_hypothesis_lab_sandbox_executes_learned_residual_correction(
     assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
 
 
+def test_hypothesis_lab_sandbox_records_task1_multiview_judge(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((4, 200, 256), dtype=np.float32)
+    for sample, offset in enumerate([0.0, 0.1, 0.2, 0.3]):
+        context = np.sin(x + np.float32(offset))[None, :]
+        for step in range(200):
+            target[sample, step, :] = context + np.float32(0.001 * step)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_retrieval_prior_001",
+        "candidate_family": "task1_retrieval_prior",
+        "search_mode": "affine_knn_trajectory_prior",
+        "parameter_grid": {"k": [1], "mode": ["affine"]},
+        "sandbox": {
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    multiview = sandbox["verifier"]["multiview_judge"]
+    assert multiview["state_hint"] == "TASK1_MULTIVIEW_LOCAL_JUDGE_SCORED"
+    assert multiview["decision"] in {
+        "consistent_improvement",
+        "mixed_or_insufficient_evidence",
+    }
+    assert set(multiview["views"]) == {
+        "fast_full",
+        "heldout_split",
+        "late_stability",
+    }
+    assert multiview["views"]["heldout_split"]["sample_count"] == 2
+    assert "segment_score_delta" in multiview["views"]["fast_full"]
+    assert "late_rmse_delta" in multiview["views"]["late_stability"]
+
+
 def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
     tmp_path: Path,
 ) -> None:
