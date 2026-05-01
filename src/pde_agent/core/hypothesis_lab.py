@@ -1008,6 +1008,7 @@ def run_blueprint_sandbox(
         float(judge["total_score_proxy"])
         - baseline_total
     )
+    serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
     metric_results = _sandbox_metric_results(
         judge=judge,
         baseline_score=baseline_score,
@@ -1032,6 +1033,10 @@ def run_blueprint_sandbox(
     early_segment_diagnosis = _task1_early_segment_diagnosis(
         baseline_score=baseline_score,
         best_score=best_validation_score,
+        prediction=best["_prediction"],
+        baseline_prediction=baseline_prediction,
+        target=target,
+        candidates=serializable_rows,
     )
     verifier = {
         "decision": "promote_to_strategy_proposal"
@@ -1050,7 +1055,6 @@ def run_blueprint_sandbox(
         "selection_objective": _selection_objective(family),
         "promotion_score": _sandbox_promotion_score(metric_results),
     }
-    serializable_rows = [{k: v for k, v in row.items() if k != "_prediction"} for row in rows]
     report = {
         "schema_version": 1,
         "state_hint": SANDBOX_STATE_HINT,
@@ -3241,6 +3245,10 @@ def _task1_early_segment_diagnosis(
     *,
     baseline_score: dict[str, Any],
     best_score: dict[str, Any],
+    prediction: np.ndarray,
+    baseline_prediction: np.ndarray,
+    target: np.ndarray,
+    candidates: list[dict[str, Any]],
 ) -> dict[str, Any]:
     baseline_early = baseline_score.get("segments", {}).get("early", {})
     candidate_early = best_score.get("segments", {}).get("early", {})
@@ -3274,11 +3282,28 @@ def _task1_early_segment_diagnosis(
     ):
         reason_codes.append("early_weaker_than_late")
     decision = "early_segment_bottleneck" if reason_codes else "no_early_bottleneck"
+    early_subsegments = _early_subsegment_diagnostics(
+        prediction=prediction,
+        baseline_prediction=baseline_prediction,
+        target=target,
+    )
+    error_taxonomy = _early_error_taxonomy(
+        prediction=prediction,
+        baseline_prediction=baseline_prediction,
+        target=target,
+    )
+    bottleneck_type = _primary_bottleneck_type(error_taxonomy)
+    guardrail_diagnosis = _task1_guardrail_diagnosis(
+        baseline_score=baseline_score,
+        best_score=best_score,
+    )
+    candidate_trend_attribution = _candidate_trend_attribution(candidates)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
         "decision": decision,
         "reason_codes": reason_codes,
+        "bottleneck_type": bottleneck_type,
         "segments": {
             "baseline": {"early": baseline_early},
             "candidate": {
@@ -3287,6 +3312,10 @@ def _task1_early_segment_diagnosis(
                 "late": candidate_late,
             },
         },
+        "early_subsegments": early_subsegments,
+        "error_taxonomy": error_taxonomy,
+        "guardrail_diagnosis": guardrail_diagnosis,
+        "candidate_trend_attribution": candidate_trend_attribution,
         "deltas": {
             "early_rel_mse_delta_vs_baseline": early_rel_mse_delta,
             "early_score_delta_vs_baseline": _segment_metric_delta(
@@ -3308,6 +3337,11 @@ def _task1_early_segment_diagnosis(
                 "inference_time_under_120s",
             ],
         },
+        "action_directives": _early_action_directives(
+            decision=decision,
+            bottleneck_type=bottleneck_type,
+            candidate_trend_attribution=candidate_trend_attribution,
+        ),
     }
 
 
@@ -3315,6 +3349,317 @@ def _numeric(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     return None
+
+
+def _early_subsegment_diagnostics(
+    *,
+    prediction: np.ndarray,
+    baseline_prediction: np.ndarray,
+    target: np.ndarray,
+) -> list[dict[str, Any]]:
+    windows = [
+        ("future_0_10", 0, 10),
+        ("future_10_25", 10, 25),
+        ("future_25_47", 25, 47),
+    ]
+    rows = []
+    for name, future_start, future_stop in windows:
+        candidate_rel_mse = _window_rel_mse(
+            prediction=prediction,
+            target=target,
+            future_start=future_start,
+            future_stop=future_stop,
+        )
+        baseline_rel_mse = _window_rel_mse(
+            prediction=baseline_prediction,
+            target=target,
+            future_start=future_start,
+            future_stop=future_stop,
+        )
+        rows.append(
+            {
+                "name": name,
+                "future_start": future_start,
+                "future_stop": future_stop,
+                "time_start": 10 + future_start,
+                "time_stop": 10 + future_stop,
+                "candidate_rel_mse": candidate_rel_mse,
+                "baseline_rel_mse": baseline_rel_mse,
+                "rel_mse_delta_vs_baseline": baseline_rel_mse - candidate_rel_mse,
+                "candidate_score": float(100.0 * np.exp(-20.0 * candidate_rel_mse)),
+            }
+        )
+    return rows
+
+
+def _window_rel_mse(
+    *,
+    prediction: np.ndarray,
+    target: np.ndarray,
+    future_start: int,
+    future_stop: int,
+) -> float:
+    start = 10 + future_start
+    stop = 10 + future_stop
+    squared_error = (prediction[:, start:stop, :] - target[:, start:stop, :]) ** 2
+    target_squared = target[:, start:stop, :] ** 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel_by_sample_time = (
+            np.sum(squared_error, axis=2)
+            / (np.sum(target_squared, axis=2) + 1e-12)
+        )
+    return float(np.mean(np.minimum(np.mean(rel_by_sample_time, axis=1), 5.0)))
+
+
+def _early_error_taxonomy(
+    *,
+    prediction: np.ndarray,
+    baseline_prediction: np.ndarray,
+    target: np.ndarray,
+) -> dict[str, dict[str, Any]]:
+    pred = prediction[:, 10:57, :]
+    base = baseline_prediction[:, 10:57, :]
+    truth = target[:, 10:57, :]
+    initial_derivative_error = _relative_mse(
+        prediction[:, 10, :] - prediction[:, 9, :],
+        target[:, 10, :] - target[:, 9, :],
+    )
+    phase = _phase_shift_evidence(pred=pred, truth=truth)
+    bias = float(np.mean(pred - truth))
+    target_scale = float(np.mean(np.abs(truth)) + 1e-12)
+    amplitude_bias = abs(bias) / target_scale
+    pred_hf = _high_frequency_energy(pred)
+    target_hf = _high_frequency_energy(truth)
+    base_hf = _high_frequency_energy(base)
+    hf_ratio = pred_hf / (target_hf + 1e-12)
+    base_hf_ratio = base_hf / (target_hf + 1e-12)
+    return {
+        "initial_derivative_mismatch": {
+            "severity": _clamp_float(initial_derivative_error / 0.1, 0.0, 1.0),
+            "triggered": initial_derivative_error > 0.05,
+            "evidence": {
+                "relative_mse": initial_derivative_error,
+            },
+        },
+        "phase_shift": {
+            "severity": _clamp_float(phase["improvement_ratio"] / 0.1, 0.0, 1.0),
+            "triggered": bool(
+                phase["best_shift"] != 0 and phase["improvement_ratio"] > 0.02
+            ),
+            "evidence": phase,
+        },
+        "amplitude_bias": {
+            "severity": _clamp_float(amplitude_bias / 0.1, 0.0, 1.0),
+            "triggered": amplitude_bias > 0.03,
+            "evidence": {
+                "mean_bias": bias,
+                "relative_bias": amplitude_bias,
+            },
+        },
+        "over_smoothing": {
+            "severity": _clamp_float(max(0.0, 1.0 - hf_ratio) / 0.5, 0.0, 1.0),
+            "triggered": hf_ratio < 0.7,
+            "evidence": {
+                "candidate_high_frequency_ratio": hf_ratio,
+                "baseline_high_frequency_ratio": base_hf_ratio,
+            },
+        },
+        "high_frequency_noise": {
+            "severity": _clamp_float(max(0.0, hf_ratio - 1.0) / 0.5, 0.0, 1.0),
+            "triggered": hf_ratio > 1.3,
+            "evidence": {
+                "candidate_high_frequency_ratio": hf_ratio,
+                "baseline_high_frequency_ratio": base_hf_ratio,
+            },
+        },
+    }
+
+
+def _relative_mse(prediction: np.ndarray, target: np.ndarray) -> float:
+    return float(
+        np.sum((prediction - target) ** 2)
+        / (np.sum(target**2) + 1e-12)
+    )
+
+
+def _phase_shift_evidence(*, pred: np.ndarray, truth: np.ndarray) -> dict[str, Any]:
+    base_mse = float(np.mean((pred - truth) ** 2))
+    best_shift = 0
+    best_mse = base_mse
+    for shift in [-3, -2, -1, 1, 2, 3]:
+        shifted = np.roll(truth, shift=shift, axis=2)
+        mse = float(np.mean((pred - shifted) ** 2))
+        if mse < best_mse:
+            best_mse = mse
+            best_shift = shift
+    improvement = max(0.0, (base_mse - best_mse) / (base_mse + 1e-12))
+    return {
+        "best_shift": best_shift,
+        "unshifted_mse": base_mse,
+        "best_shifted_mse": best_mse,
+        "improvement_ratio": float(improvement),
+    }
+
+
+def _high_frequency_energy(values: np.ndarray) -> float:
+    spectrum = np.fft.rfft(values, axis=2)
+    power = np.abs(spectrum) ** 2
+    cutoff = max(1, int(power.shape[2] * 0.75))
+    return float(np.mean(power[:, :, cutoff:]))
+
+
+def _primary_bottleneck_type(taxonomy: dict[str, dict[str, Any]]) -> str:
+    triggered = [
+        (name, float(item.get("severity", 0.0)))
+        for name, item in taxonomy.items()
+        if item.get("triggered")
+    ]
+    if not triggered:
+        return "none"
+    triggered.sort(key=lambda item: item[1], reverse=True)
+    return triggered[0][0]
+
+
+def _task1_guardrail_diagnosis(
+    *,
+    baseline_score: dict[str, Any],
+    best_score: dict[str, Any],
+) -> dict[str, Any]:
+    baseline_segments = baseline_score.get("segments", {})
+    best_segments = best_score.get("segments", {})
+    middle_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="middle",
+        metric="score",
+        lower_is_better=False,
+    )
+    late_delta = _segment_metric_delta(
+        baseline_segments=baseline_segments,
+        best_segments=best_segments,
+        segment="late",
+        metric="rmse",
+        lower_is_better=True,
+    )
+    return {
+        "middle": {
+            "metric": "score",
+            "candidate": best_segments.get("middle", {}).get("score"),
+            "baseline": baseline_segments.get("middle", {}).get("score"),
+            "delta_vs_baseline": middle_delta,
+            "passed": middle_delta is None or middle_delta >= 0.0,
+        },
+        "late": {
+            "metric": "rmse",
+            "candidate": best_segments.get("late", {}).get("rmse"),
+            "baseline": baseline_segments.get("late", {}).get("rmse"),
+            "delta_vs_baseline": late_delta,
+            "passed": late_delta is None or late_delta >= 0.0,
+        },
+    }
+
+
+def _candidate_trend_attribution(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [
+        item
+        for item in candidates
+        if isinstance(item.get("params"), dict)
+        and isinstance(item.get("segments"), dict)
+        and isinstance(item["segments"].get("early"), dict)
+        and isinstance(item["segments"]["early"].get("rel_mse"), int | float)
+    ]
+    axes: dict[str, Any] = {}
+    for axis in [
+        "k",
+        "mode",
+        "early_blend_steps",
+        "persistence_weight_start",
+        "spectral_strength",
+        "early_anchor",
+    ]:
+        grouped: dict[str, list[float]] = {}
+        for row in rows:
+            params = row["params"]
+            if axis not in params:
+                continue
+            key = str(params[axis])
+            grouped.setdefault(key, []).append(float(row["segments"]["early"]["rel_mse"]))
+        if not grouped:
+            continue
+        summaries = []
+        for value, metrics in grouped.items():
+            summaries.append(
+                {
+                    "value": value,
+                    "count": len(metrics),
+                    "best_early_rel_mse": min(metrics),
+                    "mean_early_rel_mse": float(np.mean(metrics)),
+                }
+            )
+        summaries.sort(key=lambda item: item["best_early_rel_mse"])
+        spread = (
+            max(item["mean_early_rel_mse"] for item in summaries)
+            - min(item["mean_early_rel_mse"] for item in summaries)
+        )
+        axes[axis] = {
+            "best_values": [item["value"] for item in summaries[:3]],
+            "value_summaries": summaries,
+            "mean_rel_mse_spread": spread,
+        }
+    recommended_axis = None
+    if axes:
+        recommended_axis = max(
+            axes,
+            key=lambda axis: float(axes[axis]["mean_rel_mse_spread"]),
+        )
+    return {
+        "primary_metric": "early_rel_mse",
+        "candidate_count": len(rows),
+        "axes": axes,
+        "recommended_axis": recommended_axis,
+    }
+
+
+def _early_action_directives(
+    *,
+    decision: str,
+    bottleneck_type: str,
+    candidate_trend_attribution: dict[str, Any],
+) -> list[dict[str, Any]]:
+    target_family = "task1_early_refinement"
+    if decision != "early_segment_bottleneck":
+        return [
+            {
+                "directive": "maintain_total_score_search",
+                "target_family": target_family,
+                "rationale": "early segment is not currently the dominant bottleneck",
+            }
+        ]
+    by_bottleneck = {
+        "initial_derivative_mismatch": "expand_linear_velocity_anchor_search",
+        "phase_shift": "add_phase_alignment_or_derivative_distance_candidates",
+        "amplitude_bias": "add_short_horizon_affine_bias_calibration",
+        "over_smoothing": "reduce_early_smoothing_and_anchor_weight",
+        "high_frequency_noise": "increase_early_spectral_damping",
+    }
+    directive = by_bottleneck.get(bottleneck_type, "expand_early_anchor_search")
+    recommended_axis = candidate_trend_attribution.get("recommended_axis")
+    directives = [
+        {
+            "directive": directive,
+            "target_family": target_family,
+            "rationale": f"primary early bottleneck is {bottleneck_type}",
+        }
+    ]
+    if isinstance(recommended_axis, str) and recommended_axis:
+        directives.append(
+            {
+                "directive": f"prioritize_axis:{recommended_axis}",
+                "target_family": target_family,
+                "rationale": "top candidates show the largest early-rel-mse spread on this axis",
+            }
+        )
+    return directives
 
 
 def _task1_heldout_view(

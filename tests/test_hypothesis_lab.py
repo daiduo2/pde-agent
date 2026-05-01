@@ -1440,6 +1440,7 @@ def test_hypothesis_lab_sandbox_records_early_segment_diagnosis(
     )
 
     diagnosis = sandbox["verifier"]["early_segment_diagnosis"]
+    assert diagnosis["schema_version"] == 2
     assert diagnosis["state_hint"] == "TASK1_EARLY_SEGMENT_DIAGNOSED"
     assert diagnosis["objective_recommendation"]["primary"] == "early_rel_mse"
     assert diagnosis["objective_recommendation"]["next_candidate_family"] == (
@@ -1449,6 +1450,35 @@ def test_hypothesis_lab_sandbox_records_early_segment_diagnosis(
     assert isinstance(diagnosis["segments"]["candidate"]["early"]["rel_mse"], float)
     assert isinstance(diagnosis["segments"]["candidate"]["middle"]["score"], float)
     assert isinstance(diagnosis["segments"]["candidate"]["late"]["rmse"], float)
+    assert [item["name"] for item in diagnosis["early_subsegments"]] == [
+        "future_0_10",
+        "future_10_25",
+        "future_25_47",
+    ]
+    for item in diagnosis["early_subsegments"]:
+        assert isinstance(item["candidate_rel_mse"], float)
+        assert isinstance(item["baseline_rel_mse"], float)
+        assert "rel_mse_delta_vs_baseline" in item
+    taxonomy = diagnosis["error_taxonomy"]
+    assert diagnosis["bottleneck_type"] in {
+        "none",
+        *taxonomy.keys(),
+    }
+    assert set(taxonomy) >= {
+        "initial_derivative_mismatch",
+        "phase_shift",
+        "amplitude_bias",
+        "over_smoothing",
+        "high_frequency_noise",
+    }
+    assert diagnosis["guardrail_diagnosis"]["middle"]["metric"] == "score"
+    assert diagnosis["guardrail_diagnosis"]["late"]["metric"] == "rmse"
+    assert diagnosis["action_directives"]
+    assert set(diagnosis["action_directives"][0]) >= {
+        "directive",
+        "rationale",
+        "target_family",
+    }
     metrics = sandbox["verifier"]["metric_results"]
     assert "early_score_delta_vs_baseline" in metrics
     assert "early_rel_mse_delta_vs_baseline" in metrics
@@ -1528,6 +1558,12 @@ def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
         row["segments"]["early"]["rel_mse"] for row in sandbox["top_candidates"]
     ]
     assert best_rel_mse == min(top_rel_mses)
+    diagnosis = sandbox["verifier"]["early_segment_diagnosis"]
+    attribution = diagnosis["candidate_trend_attribution"]
+    assert attribution["primary_metric"] == "early_rel_mse"
+    assert "early_anchor" in attribution["axes"]
+    assert attribution["axes"]["early_anchor"]["best_values"]
+    assert attribution["recommended_axis"] in attribution["axes"]
     assert sandbox["verifier"]["early_segment_diagnosis"]["objective_recommendation"][
         "next_candidate_family"
     ] == "task1_early_refinement"
