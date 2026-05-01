@@ -898,6 +898,202 @@ def test_record_literature_registry_event_cli_returns_payload(tmp_path: Path) ->
     assert output_path.exists()
 
 
+def test_validate_executable_blueprints_approves_native_dsl(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_executable_blueprints
+
+    blueprints = tmp_path / "blueprints.json"
+    blueprints.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "EXECUTABLE_BLUEPRINTS_DESIGNED",
+                "blueprints": [
+                    {
+                        "blueprint_id": "bp_residual_001",
+                        "source_candidate_id": "candidate_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "executor_id": "controlled_numpy_residual_operator",
+                        "baseline": "persistence",
+                        "transforms": [
+                            {
+                                "name": "residual_fit",
+                                "params": {"shrinkage": [0.25, 0.5]},
+                            }
+                        ],
+                        "training_plan": {"mode": "none"},
+                        "parameter_grid": {"residual_shrinkage": [0.25, 0.5]},
+                        "metrics": ["score", "runtime", "burgers_residual"],
+                        "safety_policy": {
+                            "preserve_context_steps": 10,
+                            "forbid_target_leakage": True,
+                            "forbid_external_code": True,
+                        },
+                        "expected_artifacts": [
+                            "sandbox_evidence",
+                            "prediction_hdf5",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_executable_blueprints(
+        blueprints_path=blueprints,
+        output_path=tmp_path / "blueprint_audit.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "EXECUTABLE_BLUEPRINTS_VALIDATED"
+    assert report["decision"] == "approved"
+    assert report["issue_count"] == 0
+    normalized = report["normalized_blueprints"][0]
+    assert normalized["executor_id"] == "controlled_numpy_residual_operator"
+    assert normalized["safety_policy"]["forbid_external_code"] is True
+    assert report["next_command"] == "run-blueprint-sandbox"
+
+
+def test_validate_executable_blueprints_normalizes_hypothesis_lab_blueprint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_executable_blueprints
+
+    blueprints = tmp_path / "hypothesis_blueprints.json"
+    blueprints.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED",
+                "blueprints": [
+                    {
+                        "blueprint_id": "bp_task1_retrieval_prior_001",
+                        "hypothesis_id": "hyp_retrieval_001",
+                        "candidate_family": "task1_retrieval_prior",
+                        "parameter_grid": {"k": [8, 12], "mode": ["affine"]},
+                        "sandbox": {
+                            "allowed_executor": "controlled_numpy_retrieval_prior",
+                            "primary_metric": "task1_total_score_proxy",
+                            "promotion_min_score_delta": 0.01,
+                            "max_inference_seconds": 120.0,
+                        },
+                        "risks": ["nearest-neighbor leakage must be controlled"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_executable_blueprints(
+        blueprints_path=blueprints,
+        output_path=tmp_path / "blueprint_audit.json",
+        force=False,
+    )
+
+    assert report["decision"] == "approved"
+    normalized = report["normalized_blueprints"][0]
+    assert normalized["source_candidate_id"] == "hyp_retrieval_001"
+    assert normalized["baseline"] == "retrieval_prior"
+    assert normalized["transforms"][0]["name"] == "retrieval_prior"
+    assert normalized["safety_policy"] == {
+        "preserve_context_steps": 10,
+        "forbid_target_leakage": True,
+        "forbid_external_code": True,
+    }
+
+
+def test_validate_executable_blueprints_rejects_unsafe_blueprint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_executable_blueprints
+
+    blueprints = tmp_path / "unsafe_blueprints.json"
+    blueprints.write_text(
+        json.dumps(
+            {
+                "state_hint": "EXECUTABLE_BLUEPRINTS_DESIGNED",
+                "blueprints": [
+                    {
+                        "blueprint_id": "bp_unsafe_001",
+                        "source_candidate_id": "candidate_unsafe",
+                        "candidate_family": "custom_external_solver",
+                        "executor_id": "arbitrary_python",
+                        "baseline": "target_oracle",
+                        "transforms": [{"name": "shell_exec", "params": {}}],
+                        "training_plan": {"mode": "unbounded"},
+                        "parameter_grid": {},
+                        "metrics": [],
+                        "safety_policy": {
+                            "preserve_context_steps": 5,
+                            "forbid_target_leakage": False,
+                            "forbid_external_code": False,
+                        },
+                        "expected_artifacts": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_executable_blueprints(
+        blueprints_path=blueprints,
+        output_path=tmp_path / "blueprint_audit.json",
+        force=False,
+    )
+
+    assert report["decision"] == "rejected"
+    issues = {issue["code"]: issue for issue in report["issues"]}
+    assert issues["invalid_baseline"]["failure_code"] == "blueprint_schema_invalid"
+    assert issues["unsafe_target_leakage"]["failure_code"] == "target_leakage_risk"
+    assert issues["unsafe_external_code"]["failure_code"] == "requires_external_code"
+    assert report["next_command"] == "fix-executable-blueprint-dsl"
+
+
+def test_validate_executable_blueprints_cli_returns_payload(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    blueprints = tmp_path / "blueprints.json"
+    output_path = tmp_path / "blueprint_audit.json"
+    blueprints.write_text(
+        json.dumps(
+            {
+                "state_hint": "EXECUTABLE_BLUEPRINTS_DESIGNED",
+                "blueprints": [
+                    {
+                        "blueprint_id": "bp_minimal_bad",
+                        "source_candidate_id": "",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "validate-executable-blueprints",
+            "--blueprints-path",
+            str(blueprints),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "EXECUTABLE_BLUEPRINTS_VALIDATED"
+    assert payload["metrics"]["issue_count"] > 0
+    assert payload["next_hint"] == "fix-executable-blueprint-dsl"
+    assert output_path.exists()
+
+
 def test_compile_algorithm_candidates_expands_all_literature_strategy_families(
     tmp_path: Path,
 ) -> None:

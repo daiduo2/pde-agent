@@ -133,6 +133,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     submit_mineru_parse_command,
     update_literature_registry_command,
     validate_algorithm_cards_v2_command,
+    validate_executable_blueprints_command,
 )
 from pde_agent.commands.materialize_skill_draft import materialize_skill_draft_command
 from pde_agent.commands.materialize_competition_candidate import (
@@ -1157,6 +1158,25 @@ def validate_algorithm_cards_v2_cmd(
         json.dumps(
             validate_algorithm_cards_v2_command(
                 algorithm_cards_path=algorithm_cards_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("validate-executable-blueprints")
+def validate_executable_blueprints_cmd(
+    blueprints_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            validate_executable_blueprints_command(
+                blueprints_path=blueprints_path,
                 output_path=output_path,
                 force=force,
             )

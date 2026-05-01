@@ -12,6 +12,7 @@ from pde_agent.core.literature_algorithm_lab import (
     BLOCKED_CANDIDATE_HANDOFF_STATE_HINT,
     EXECUTOR_DESIGN_REQUEST_STATE_HINT,
     EXECUTOR_TAXONOMY_STATE_HINT,
+    EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
     LITERATURE_REGISTRY_UPDATED_STATE_HINT,
     LITERATURE_REGISTRY_EVENT_STATE_HINT,
@@ -43,6 +44,7 @@ from pde_agent.core.literature_algorithm_lab import (
     submit_mineru_parse_task,
     update_literature_registry,
     validate_algorithm_cards_v2,
+    validate_executable_blueprints,
 )
 
 
@@ -390,6 +392,37 @@ def validate_algorithm_cards_v2_command(
         metrics={
             "decision": report["decision"],
             "card_count": report["card_count"],
+            "issue_count": report["issue_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def validate_executable_blueprints_command(
+    *,
+    blueprints_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = validate_executable_blueprints(
+        blueprints_path=Path(blueprints_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="validate-executable-blueprints",
+        state_hint=EXECUTABLE_BLUEPRINTS_VALIDATED_STATE_HINT,
+        artifacts={
+            "executable_blueprint_audit_path": report[
+                "executable_blueprint_audit_path"
+            ],
+            "blueprints_path": report["blueprints_path"],
+        },
+        metrics={
+            "decision": report["decision"],
+            "blueprint_count": report["blueprint_count"],
+            "normalized_blueprint_count": report["normalized_blueprint_count"],
             "issue_count": report["issue_count"],
         },
         next_hint=report["next_command"],

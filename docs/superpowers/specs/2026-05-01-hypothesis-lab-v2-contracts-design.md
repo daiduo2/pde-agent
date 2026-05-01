@@ -271,6 +271,63 @@ DSL shape:
 V2 does not need a full interpreter for all DSL features. It needs a schema and
 enough validation that later executors can be added safely.
 
+Validation entrypoint:
+
+- CLI command: `validate-executable-blueprints`
+- Input artifact: either native `EXECUTABLE_BLUEPRINTS_DESIGNED` or existing
+  `HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED`
+- Output artifact state: `EXECUTABLE_BLUEPRINTS_VALIDATED`
+- Approved blueprints route to `run-blueprint-sandbox`.
+- Rejected blueprints route to `fix-executable-blueprint-dsl`.
+
+The validator supports two shapes:
+
+- Native DSL blueprints with all `ExecutableBlueprint` required fields.
+- Legacy Hypothesis Lab blueprints, normalized into the native DSL by deriving
+  `executor_id`, `baseline`, `transforms`, `training_plan`, `metrics`,
+  `safety_policy`, and `expected_artifacts`.
+
+Allowed baselines:
+
+- `persistence`
+- `fno_checkpoint`
+- `retrieval_prior`
+
+Allowed transforms:
+
+- `linear_trend`
+- `spectral_smooth`
+- `residual_fit`
+- `retrieval_prior`
+- `retrieval_refinement`
+- `checkpoint_calibration`
+
+Allowed training modes:
+
+- `none`
+- `finetune`
+- `supervised`
+- `physics_loss`
+
+Allowed executors:
+
+- `controlled_numpy_operator`
+- `controlled_numpy_residual_operator`
+- `controlled_numpy_retrieval_prior`
+- `controlled_numpy_retrieval_refinement`
+- `official_checkpoint_candidate_pipeline`
+
+Safety rules:
+
+- `preserve_context_steps >= 10`
+- `forbid_target_leakage == true`
+- `forbid_external_code == true`
+
+The validator must produce machine-readable `issues` with `code`, `path`,
+`failure_code`, and `message`. Unsafe target access maps to
+`target_leakage_risk`; external code maps to `requires_external_code`; schema
+violations map to `blueprint_schema_invalid`.
+
 ### SandboxEvidence
 
 Question answered: what happened when the candidate was tested?
