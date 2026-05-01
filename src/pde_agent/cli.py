@@ -843,6 +843,7 @@ def run_hypothesis_lab_cmd(
         [],
         "--algorithm-candidates-path",
     ),
+    failure_memory_paths: list[str] = typer.Option([], "--failure-memory-path"),
     failure_memory_output_path: str | None = typer.Option(
         None,
         "--failure-memory-output-path",
@@ -864,6 +865,7 @@ def run_hypothesis_lab_cmd(
                 checkpoint_paths=checkpoint_paths,
                 literature_paths=literature_paths,
                 algorithm_candidate_paths=algorithm_candidate_paths,
+                failure_memory_paths=failure_memory_paths,
                 failure_memory_output_path=failure_memory_output_path,
                 context_path=context_path,
                 target_path=target_path,

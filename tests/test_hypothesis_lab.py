@@ -2227,6 +2227,254 @@ def test_hypothesis_lab_records_pareto_failure_memory_tradeoff(
     assert summary["last_pareto_status"] == "tradeoff_evidence"
 
 
+def test_hypothesis_lab_reads_pareto_memory_into_knowledge_cards(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "schema_version": 1,
+                        "source": "hypothesis_lab_sandbox",
+                        "blueprint_id": "bp_task1_early_refinement_001",
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_phase_probe",
+                        "candidate_params": {
+                            "k": 92,
+                            "mode": "affine",
+                            "early_blend_steps": 24,
+                            "persistence_weight_start": 0.55,
+                            "spectral_strength": 0.5,
+                            "early_anchor": "phase_aligned_retrieval",
+                        },
+                        "decision": "keep_as_evidence",
+                        "pareto_status": "tradeoff_evidence",
+                        "outcome": "evidence_only",
+                        "reason_codes": [
+                            "primary_axis_improved_without_total_score"
+                        ],
+                        "bottleneck_type": "phase_shift",
+                        "diagnosis_reason_codes": ["early_rel_mse_high"],
+                        "action_directives": [
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                        "guardrail_regressions": [],
+                        "retry_directives": ["continue_guarded_local_search"],
+                        "avoid_directives": [
+                            "do_not_promote_primary_axis_without_total_score"
+                        ],
+                        "objective_axes": {
+                            "early_rel_mse": {"improved": True, "passed": True},
+                            "task1_total_score_proxy": {
+                                "improved": False,
+                                "passed": False,
+                            },
+                        },
+                    }
+                ],
+                "pareto_learning_summary": {
+                    "task1_early_refinement": {
+                        "evidence_only_count": 1,
+                        "promoted_count": 0,
+                        "needs_local_search_count": 0,
+                        "rejected_count": 0,
+                        "effective_axes": ["early_rel_mse"],
+                        "guardrail_regressions": [],
+                        "last_pareto_status": "tradeoff_evidence",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["card_count"] == 1
+    card = cards["cards"][0]
+    assert card["source_type"] == "pareto_learning_memory"
+    assert card["implementation_hooks"] == ["task1_early_refinement"]
+    assert card["evidence_status"] == "evidence_only"
+    assert card["evidence"]["params"]["early_anchor"] == "phase_aligned_retrieval"
+    assert card["evidence"]["early_segment_diagnosis"]["bottleneck_type"] == (
+        "phase_shift"
+    )
+    assert card["evidence"]["early_segment_diagnosis"]["action_directives"][0][
+        "directive"
+    ] == "add_phase_alignment_or_derivative_distance_candidates"
+    assert "do_not_promote_primary_axis_without_total_score" in card["known_risks"]
+
+
+def test_hypothesis_lab_memory_readback_changes_early_candidate_blueprint(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_phase_probe",
+                        "candidate_params": {
+                            "k": 92,
+                            "mode": "affine",
+                            "early_blend_steps": 24,
+                            "persistence_weight_start": 0.55,
+                            "spectral_strength": 0.5,
+                            "early_anchor": "phase_aligned_retrieval",
+                        },
+                        "decision": "keep_as_evidence",
+                        "pareto_status": "tradeoff_evidence",
+                        "outcome": "evidence_only",
+                        "bottleneck_type": "phase_shift",
+                        "action_directives": [
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                        "guardrail_regressions": [],
+                        "retry_directives": ["continue_guarded_local_search"],
+                        "avoid_directives": [
+                            "do_not_promote_primary_axis_without_total_score"
+                        ],
+                    }
+                ],
+                "pareto_learning_summary": {
+                    "task1_early_refinement": {
+                        "evidence_only_count": 1,
+                        "effective_axes": ["early_rel_mse"],
+                        "last_pareto_status": "tradeoff_evidence",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    early = blueprints["blueprints"][0]
+    params = early["parameter_grid"]["candidate_params"]
+    anchors = {row["early_anchor"] for row in params}
+    assert "phase_aligned_retrieval" in anchors
+    assert any(row.get("phase_shift_scale") == 0.5 for row in params)
+    assert early["seed_params"][0]["source_kind"] == "pareto_memory"
+    assert early["experiment_plan"]["axis_plan_by_bottleneck"][
+        "phase_alignment"
+    ]["reason"] == "phase_shift diagnosis requires transport-aware early anchors"
+
+
+def test_hypothesis_lab_run_accepts_failure_memory_input(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_phase_probe",
+                        "candidate_params": {
+                            "k": 1,
+                            "mode": "affine",
+                            "early_blend_steps": 18,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.0,
+                            "early_anchor": "phase_aligned_retrieval",
+                        },
+                        "decision": "keep_as_evidence",
+                        "pareto_status": "tradeoff_evidence",
+                        "outcome": "evidence_only",
+                        "bottleneck_type": "phase_shift",
+                        "action_directives": [
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((32, 200, 256), dtype=np.float32)
+    for sample in range(target.shape[0]):
+        offset = np.float32(0.05 * sample)
+        for step in range(200):
+            target[sample, step, :] = (
+                offset
+                + np.float32(0.002 * step)
+                + np.float32(0.1) * np.sin(x + np.float32(0.02 * step))
+            )
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        failure_memory_paths=[memory_path],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    cards = json.loads(Path(report["cards"]["path"]).read_text(encoding="utf-8"))
+    assert cards["cards"][0]["source_type"] == "pareto_learning_memory"
+    assert report["sandbox"]["candidate_family"] == "task1_early_refinement"
+    anchors = {
+        row["params"]["early_anchor"] for row in report["sandbox"]["top_candidates"]
+    }
+    assert "phase_aligned_retrieval" in anchors
+
+
 def test_hypothesis_lab_promoted_candidate_records_strategy_growth_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -2366,6 +2614,81 @@ def test_hypothesis_lab_cli_accepts_algorithm_candidates_and_memory_output(
     assert payload["metrics"]["decision"] == "promote_to_strategy_proposal"
     memory = json.loads(memory_path.read_text(encoding="utf-8"))
     assert memory["outcomes"][0]["outcome"] == "passed"
+
+
+def test_hypothesis_lab_cli_accepts_failure_memory_input(
+    tmp_path: Path,
+) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    memory_path = tmp_path / "failure_memory.json"
+    memory_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "failed_algorithm_candidate_ids": [],
+                "failed_candidate_keys": [],
+                "failed_candidate_families": [],
+                "outcomes": [],
+                "pareto_learning_events": [
+                    {
+                        "candidate_family": "task1_early_refinement",
+                        "candidate_id": "task1_early_refinement_phase_probe",
+                        "candidate_params": {
+                            "k": 1,
+                            "mode": "affine",
+                            "early_blend_steps": 18,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.0,
+                            "early_anchor": "phase_aligned_retrieval",
+                        },
+                        "decision": "keep_as_evidence",
+                        "pareto_status": "tradeoff_evidence",
+                        "outcome": "evidence_only",
+                        "bottleneck_type": "phase_shift",
+                        "action_directives": [
+                            "add_phase_alignment_or_derivative_distance_candidates"
+                        ],
+                        "effective_axes": ["early_rel_mse"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    target = np.ones((32, 200, 256), dtype=np.float32)
+    for step in range(200):
+        target[:, step, :] += np.float32(0.001 * step)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-hypothesis-lab",
+            "--failure-memory-path",
+            str(memory_path),
+            "--context-path",
+            str(context_path),
+            "--target-path",
+            str(target_path),
+            "--output-dir",
+            str(tmp_path / "lab"),
+            "--submission-id",
+            "team_hermes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["metrics"]["card_count"] == 1
+    cards = json.loads(
+        Path(tmp_path / "lab" / "knowledge_cards.json").read_text(encoding="utf-8")
+    )
+    assert cards["cards"][0]["source_type"] == "pareto_learning_memory"
 
 
 def test_hermes_batch_loop_can_run_linear_trend_spectral_generator(

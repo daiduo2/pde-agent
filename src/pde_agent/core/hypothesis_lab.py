@@ -53,6 +53,7 @@ def build_knowledge_cards(
     *,
     manual_report_paths: list[str | Path],
     adaptive_report_paths: list[str | Path] | None = None,
+    failure_memory_paths: list[str | Path] | None = None,
     log_paths: list[str | Path] | None = None,
     checkpoint_paths: list[str | Path] | None = None,
     literature_paths: list[str | Path] | None = None,
@@ -85,6 +86,8 @@ def build_knowledge_cards(
             card = _adaptive_plateau_card(report_file, report)
         if card is not None:
             cards.append(card)
+    for memory_path in failure_memory_paths or []:
+        cards.extend(_pareto_memory_cards(Path(memory_path)))
     for log_path in log_paths or []:
         log_file = Path(log_path)
         card = _scientific_log_card(log_file)
@@ -447,6 +450,7 @@ def _ranked_evidence_params(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "task1_total_fast_proxy": evidence.get("task1_total_fast_proxy"),
                 "task1_total_score_proxy": evidence.get("task1_total_score_proxy"),
                 "segment_score": evidence.get("segment_score"),
+                "source_kind": evidence.get("source_kind"),
                 "search_directives": evidence.get("search_directives", []),
                 "early_segment_diagnosis": evidence.get("early_segment_diagnosis"),
             }
@@ -1114,6 +1118,7 @@ def run_hypothesis_lab(
     checkpoint_paths: list[str | Path] | None = None,
     literature_paths: list[str | Path] | None = None,
     algorithm_candidate_paths: list[str | Path] | None = None,
+    failure_memory_paths: list[str | Path] | None = None,
     failure_memory_output_path: str | Path | None = None,
     context_path: str | Path,
     target_path: str | Path,
@@ -1132,6 +1137,7 @@ def run_hypothesis_lab(
         checkpoint_paths=checkpoint_paths,
         literature_paths=literature_paths,
         algorithm_candidate_paths=algorithm_candidate_paths,
+        failure_memory_paths=failure_memory_paths,
         output_path=root / "knowledge_cards.json",
         force=force,
     )
@@ -1542,6 +1548,124 @@ def _algorithm_candidate_cards(candidate_file: Path) -> list[dict[str, Any]]:
         if card is not None:
             cards.append(card)
     return cards
+
+
+def _pareto_memory_cards(memory_file: Path) -> list[dict[str, Any]]:
+    memory = _read_json(memory_file)
+    if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
+        raise HypothesisLabError("failure memory has invalid state_hint")
+    cards = []
+    for index, event in enumerate(memory.get("pareto_learning_events", [])):
+        if not isinstance(event, dict):
+            continue
+        card = _pareto_memory_card(memory_file=memory_file, event=event, index=index)
+        if card is not None:
+            cards.append(card)
+    return cards
+
+
+def _pareto_memory_card(
+    *,
+    memory_file: Path,
+    event: dict[str, Any],
+    index: int,
+) -> dict[str, Any] | None:
+    family = str(event.get("candidate_family", "")).strip()
+    if family not in {
+        "task1_early_refinement",
+        "task1_retrieval_refinement",
+        "task1_retrieval_refinement_local_search",
+    }:
+        return None
+    params = event.get("candidate_params")
+    if not isinstance(params, dict) or _normalize_evidence_params(params) is None:
+        return None
+    outcome = str(event.get("outcome", "unknown"))
+    pareto_status = str(event.get("pareto_status", "unknown"))
+    candidate_id = str(event.get("candidate_id") or f"pareto_event_{index}")
+    diagnosis = _pareto_memory_early_diagnosis(event)
+    avoid_directives = _string_list_from_any(event.get("avoid_directives"))
+    retry_directives = _string_list_from_any(event.get("retry_directives"))
+    effective_axes = _string_list_from_any(event.get("effective_axes"))
+    return {
+        "card_id": f"pareto_memory_{memory_file.stem}_{index:03d}",
+        "source_type": "pareto_learning_memory",
+        "source_path": str(memory_file),
+        "claim": (
+            f"Pareto memory for {family} recorded outcome={outcome} "
+            f"and status={pareto_status} for {candidate_id}."
+        ),
+        "procedural_heuristic": (
+            "Use promoted axes directly, keep evidence-only axes under guarded "
+            "local search, and avoid repeating parameters that only improve a "
+            "single objective without passing the Pareto gate."
+        ),
+        "preconditions": [
+            "pareto learning memory exists",
+            f"candidate_family={family}",
+            f"pareto_status={pareto_status}",
+        ],
+        "implementation_hooks": [family],
+        "expected_observables": [
+            "candidate generation changes after reading Pareto memory",
+            "effective axes are reused only under guardrails",
+        ],
+        "known_risks": avoid_directives
+        or ["memory replay can overfit a single sandbox window"],
+        "evidence_status": outcome,
+        "evidence": {
+            "source_kind": "pareto_memory",
+            "params": params,
+            "candidate_id": candidate_id,
+            "pareto_status": pareto_status,
+            "outcome": outcome,
+            "decision": event.get("decision"),
+            "effective_axes": effective_axes,
+            "retry_directives": retry_directives,
+            "avoid_directives": avoid_directives,
+            "early_segment_diagnosis": diagnosis,
+            "task1_total_score_proxy": event.get("best_segment_score"),
+            "segment_score": event.get("best_segment_score"),
+        },
+    }
+
+
+def _pareto_memory_early_diagnosis(event: dict[str, Any]) -> dict[str, Any]:
+    directives = [
+        {
+            "directive": directive,
+            "target_family": str(event.get("candidate_family", "")),
+            "rationale": "replayed from Pareto learning memory",
+        }
+        for directive in _string_list_from_any(event.get("action_directives"))
+    ]
+    effective_axes = _string_list_from_any(event.get("effective_axes"))
+    recommended_axis = effective_axes[0] if effective_axes else None
+    return {
+        "schema_version": 2,
+        "state_hint": "TASK1_EARLY_SEGMENT_DIAGNOSED",
+        "decision": "early_segment_bottleneck",
+        "reason_codes": _string_list_from_any(event.get("diagnosis_reason_codes")),
+        "bottleneck_type": event.get("bottleneck_type"),
+        "candidate_trend_attribution": {
+            "primary_metric": "early_rel_mse",
+            "recommended_axis": recommended_axis,
+        },
+        "error_taxonomy": _pareto_memory_error_taxonomy(event),
+        "action_directives": directives,
+        "objective_recommendation": {
+            "primary": "early_rel_mse",
+            "next_candidate_family": "task1_early_refinement",
+        },
+    }
+
+
+def _pareto_memory_error_taxonomy(event: dict[str, Any]) -> dict[str, Any]:
+    bottleneck = event.get("bottleneck_type")
+    taxonomy = {}
+    if isinstance(bottleneck, str) and bottleneck:
+        taxonomy[bottleneck] = {"triggered": True, "source": "pareto_memory"}
+    return taxonomy
 
 
 def _algorithm_candidate_card(
