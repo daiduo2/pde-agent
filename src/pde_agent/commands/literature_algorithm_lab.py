@@ -14,6 +14,7 @@ from pde_agent.core.literature_algorithm_lab import (
     EXECUTOR_TAXONOMY_STATE_HINT,
     FNO_CANDIDATE_ADAPTED_STATE_HINT,
     LITERATURE_REGISTRY_UPDATED_STATE_HINT,
+    LITERATURE_REGISTRY_EVENT_STATE_HINT,
     MINERU_RESULT_DOWNLOADED_STATE_HINT,
     MINERU_TASK_POLLED_STATE_HINT,
     MINERU_TASK_SUBMITTED_STATE_HINT,
@@ -38,6 +39,7 @@ from pde_agent.core.literature_algorithm_lab import (
     normalize_openalex_search_results,
     plan_candidate_sandbox,
     poll_mineru_parse_task,
+    record_literature_registry_event,
     submit_mineru_parse_task,
     update_literature_registry,
     validate_algorithm_cards_v2,
@@ -190,6 +192,37 @@ def update_literature_registry_command(
             "algorithm_node_count": report["algorithm_node_count"],
             "candidate_node_count": report["candidate_node_count"],
             "event_count": report["event_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def record_literature_registry_event_command(
+    *,
+    event_source_path: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = record_literature_registry_event(
+        event_source_path=Path(event_source_path),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="record-literature-registry-event",
+        state_hint=LITERATURE_REGISTRY_EVENT_STATE_HINT,
+        artifacts={
+            "literature_registry_event_path": report[
+                "literature_registry_event_path"
+            ],
+            "event_source_path": report["event_source_path"],
+        },
+        metrics={
+            "event_type": report["event_type"],
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "failure_code_count": len(report["failure_codes"]),
+            "retry_allowed": report["retry_allowed"],
         },
         next_hint=report["next_command"],
     )

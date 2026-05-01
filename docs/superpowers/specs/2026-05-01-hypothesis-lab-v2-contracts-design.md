@@ -392,6 +392,41 @@ Routing:
 - `blocked` -> `create-executor-design-request`
 - `deprioritize` or `reject` -> `record-literature-registry-event`
 
+Registry event entrypoint:
+
+- CLI command: `record-literature-registry-event`
+- Input artifact: currently `ALGORITHM_CANDIDATE_PROMOTION_EVALUATED`
+- Output artifact state: `LITERATURE_REGISTRY_EVENT_RECORDED`
+- Follow-up command: `update-literature-registry`
+
+The registry event normalizes candidate decisions into stable event types:
+
+- `promote` -> `candidate_promoted`
+- `refine` -> `candidate_refined`
+- `deprioritize` -> `candidate_deprioritized`
+- `reject` -> `candidate_rejected`
+- `blocked` -> `candidate_blocked`
+
+The event artifact must preserve:
+
+- `event_source_path`
+- `algorithm_candidate_id`
+- `candidate_family`
+- `evidence_id`
+- `decision`
+- validated and de-duplicated `failure_codes`
+- `recommended_next`
+- `retry_allowed`
+- `metric_results`
+
+`update-literature-registry` must consume `LITERATURE_REGISTRY_EVENT_RECORDED`
+artifacts and write the result back to the candidate node:
+
+- candidate `status`
+- `failure_history`
+- linked registry event with `reason_codes`
+- parent algorithm `strategy_status` when the algorithm node is known
+
 ## Failure Taxonomy
 
 Failure codes should be shared across registry, Hermes summaries, and logs:

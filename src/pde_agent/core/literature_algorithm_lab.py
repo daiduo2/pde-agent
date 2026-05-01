@@ -23,6 +23,7 @@ ALGORITHM_CARDS_STATE_HINT = "ALGORITHM_CARDS_EXTRACTED"
 ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT = "ALGORITHM_CARDS_V2_VALIDATED"
 ALGORITHM_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
 ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT = "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED"
+LITERATURE_REGISTRY_EVENT_STATE_HINT = "LITERATURE_REGISTRY_EVENT_RECORDED"
 SANDBOX_PLAN_STATE_HINT = "ALGORITHM_CANDIDATE_SANDBOX_PLANNED"
 EXECUTOR_TAXONOMY_STATE_HINT = "EXECUTOR_TAXONOMY_BUILT"
 FNO_CANDIDATE_ADAPTED_STATE_HINT = "FNO_ARCHITECTURE_CANDIDATE_ADAPTED"
@@ -127,6 +128,29 @@ ALGORITHM_CARD_V2_IMPLEMENTATION_REQUIREMENTS = {
     "requires_new_executor",
     "requires_external_code",
     "can_run_as_postprocess",
+}
+
+FAILURE_TAXONOMY = {
+    "source_download_failed",
+    "parse_failed",
+    "parse_quality_insufficient",
+    "no_algorithmic_claim",
+    "unsupported_executor",
+    "requires_external_code",
+    "candidate_schema_invalid",
+    "blueprint_schema_invalid",
+    "sandbox_rule_failed",
+    "context_mismatch",
+    "target_leakage_risk",
+    "score_regressed",
+    "runtime_budget_exceeded",
+    "physics_regressed",
+    "ablation_missing_or_weak",
+    "insufficient_reproducibility",
+    "runtime_exceeded",
+    "duplicate_family",
+    "insufficient_evidence",
+    "reproducibility_failed",
 }
 
 EXECUTOR_DESIGN_HOOKS = {
@@ -506,6 +530,66 @@ def update_literature_registry(
         "event_count": registry["event_count"],
         "next_command": "extract-algorithm-cards",
     }
+
+
+def record_literature_registry_event(
+    *,
+    event_source_path: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    source_file = _require_file(Path(event_source_path), "registry event source")
+    payload = _read_json(source_file)
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    if payload.get("state_hint") != ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "event source has unsupported state_hint for registry event"
+        )
+    ledger_event = (
+        payload.get("ledger_event")
+        if isinstance(payload.get("ledger_event"), dict)
+        else {}
+    )
+    candidate_id = _nonempty_text(
+        payload.get("algorithm_candidate_id")
+        or ledger_event.get("algorithm_candidate_id"),
+        "algorithm_candidate_id",
+    )
+    decision = _nonempty_text(payload.get("decision"), "decision")
+    failure_codes = _normalize_failure_codes(payload.get("reason_codes", []))
+    event_type = _registry_event_type_for_candidate_decision(decision)
+    source_grounding = (
+        payload.get("source_grounding")
+        if isinstance(payload.get("source_grounding"), dict)
+        else {}
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": LITERATURE_REGISTRY_EVENT_STATE_HINT,
+        "literature_registry_event_path": str(output_file),
+        "event_source_path": str(source_file),
+        "event_type": event_type,
+        "algorithm_candidate_id": candidate_id,
+        "candidate_family": payload.get("candidate_family")
+        or ledger_event.get("candidate_family"),
+        "evidence_id": payload.get("best_evidence_id")
+        or ledger_event.get("evidence_id"),
+        "decision": decision,
+        "failure_codes": failure_codes,
+        "source_ids": [
+            item for item in source_grounding.get("source_ids", []) if isinstance(item, str)
+        ],
+        "algorithm_card_id": source_grounding.get("algorithm_card_id"),
+        "recommended_next": _recommended_next_for_candidate_decision(decision),
+        "retry_allowed": _retry_allowed_for_candidate_decision(decision),
+        "metric_results": payload.get("metric_results")
+        if isinstance(payload.get("metric_results"), dict)
+        else {},
+        "next_command": "update-literature-registry",
+    }
+    _write_json(output_file, report)
+    return report
 
 
 def download_source_document(
@@ -1776,6 +1860,64 @@ def _apply_literature_registry_event_artifact(
             ],
         )
         return
+    if state == LITERATURE_REGISTRY_EVENT_STATE_HINT:
+        candidate_id = _nonempty_text(
+            payload.get("algorithm_candidate_id"),
+            "algorithm_candidate_id",
+        )
+        event_type = _nonempty_text(payload.get("event_type"), "event_type")
+        status = _candidate_status_for_registry_event(event_type)
+        source_ids = [
+            item for item in payload.get("source_ids", []) if isinstance(item, str)
+        ]
+        _set_candidate_status(registry, candidate_id, status)
+        candidate = _find_registry_candidate(registry, candidate_id)
+        failure_codes = _normalize_failure_codes(payload.get("failure_codes", []))
+        if failure_codes:
+            _append_unique_object(
+                candidate,
+                "failure_history",
+                {
+                    "artifact_path": str(artifact_file),
+                    "failure_codes": failure_codes,
+                    "recommended_next": payload.get("recommended_next"),
+                    "retry_allowed": bool(payload.get("retry_allowed")),
+                },
+            )
+        algorithm_node_id = None
+        algorithm_card_id = payload.get("algorithm_card_id")
+        if not isinstance(algorithm_card_id, str) or not algorithm_card_id.strip():
+            parent_card_id = candidate.get("parent_algorithm_card_id")
+            algorithm_card_id = parent_card_id if isinstance(parent_card_id, str) else None
+        if isinstance(algorithm_card_id, str) and algorithm_card_id.strip():
+            algorithm = _upsert_algorithm_node(
+                registry,
+                {
+                    "algorithm_card_id": algorithm_card_id,
+                    "source_ids": source_ids
+                    or [
+                        item
+                        for item in candidate.get("source_ids", [])
+                        if isinstance(item, str)
+                    ],
+                    "claim": algorithm_card_id,
+                    "core_mechanism": "",
+                    "implementation_hooks": [],
+                },
+            )
+            algorithm["strategy_status"] = status
+            _append_unique_value(algorithm, "candidate_ids", candidate_id)
+            algorithm_node_id = algorithm["node_id"]
+        _registry_event(
+            registry,
+            artifact_file=artifact_file,
+            event_type=event_type,
+            source_ids=source_ids,
+            algorithm_candidate_id=candidate_id,
+            algorithm_node_id=algorithm_node_id,
+            reason_codes=failure_codes,
+        )
+        return
     _registry_event(
         registry,
         artifact_file=artifact_file,
@@ -1819,6 +1961,60 @@ def _candidate_uses_checkpoint(
         return False
     paths = bindings.get("checkpoint_paths")
     return isinstance(paths, list) and checkpoint_path in paths
+
+
+def _normalize_failure_codes(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise LiteratureAlgorithmLabError("failure codes must be a list")
+    codes = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise LiteratureAlgorithmLabError("failure_code must be a non-empty string")
+        code = item.strip()
+        if code == "all_rubric_checks_passed":
+            continue
+        if code not in FAILURE_TAXONOMY:
+            raise LiteratureAlgorithmLabError(f"unknown failure_code: {code}")
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _registry_event_type_for_candidate_decision(decision: str) -> str:
+    mapping = {
+        "promote": "candidate_promoted",
+        "refine": "candidate_refined",
+        "deprioritize": "candidate_deprioritized",
+        "reject": "candidate_rejected",
+        "blocked": "candidate_blocked",
+    }
+    return mapping.get(decision, f"candidate_{decision}")
+
+
+def _candidate_status_for_registry_event(event_type: str) -> str:
+    mapping = {
+        "candidate_promoted": "promoted",
+        "candidate_refined": "needs_refinement",
+        "candidate_deprioritized": "deprioritized",
+        "candidate_rejected": "rejected",
+        "candidate_blocked": "blocked",
+    }
+    return mapping.get(event_type, event_type.removeprefix("candidate_"))
+
+
+def _recommended_next_for_candidate_decision(decision: str) -> str:
+    mapping = {
+        "promote": "enter_strategy_growth",
+        "refine": "refine_with_new_ablation_or_variant",
+        "deprioritize": "avoid_repeating_without_new_evidence",
+        "reject": "avoid_repeating_without_new_evidence",
+        "blocked": "design_executor_before_retry",
+    }
+    return mapping.get(decision, "review-literature-registry")
+
+
+def _retry_allowed_for_candidate_decision(decision: str) -> bool:
+    return decision in {"refine", "blocked"}
 
 
 def _registry_event(

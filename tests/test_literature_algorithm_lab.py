@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _write_hdf5(path: Path, data: object, key: str = "tensor") -> Path:
     h5py = __import__("h5py")
@@ -690,6 +692,210 @@ def test_update_literature_registry_links_checkpoint_sandbox_evidence(
         }
     ]
     assert registry["events"][-1]["event_type"] == "candidate_sandbox_verified"
+
+
+def test_record_literature_registry_event_normalizes_candidate_promotion_failure(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import record_literature_registry_event
+
+    promotion = tmp_path / "candidate_promotion.json"
+    promotion.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED",
+                "algorithm_candidate_id": "candidate_residual",
+                "candidate_family": "lightweight_residual_corrector",
+                "decision": "reject",
+                "reason_codes": [
+                    "sandbox_rule_failed",
+                    "score_regressed",
+                    "score_regressed",
+                ],
+                "ledger_event": {
+                    "event_type": "candidate_reject",
+                    "algorithm_candidate_id": "candidate_residual",
+                    "candidate_family": "lightweight_residual_corrector",
+                    "evidence_id": "evidence_residual_001",
+                },
+                "next_command": "record-literature-registry-event",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = record_literature_registry_event(
+        event_source_path=promotion,
+        output_path=tmp_path / "registry_event.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "LITERATURE_REGISTRY_EVENT_RECORDED"
+    assert report["event_type"] == "candidate_rejected"
+    assert report["algorithm_candidate_id"] == "candidate_residual"
+    assert report["failure_codes"] == ["sandbox_rule_failed", "score_regressed"]
+    assert report["recommended_next"] == "avoid_repeating_without_new_evidence"
+    assert report["retry_allowed"] is False
+    assert report["next_command"] == "update-literature-registry"
+
+
+def test_record_literature_registry_event_rejects_unknown_failure_code(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        LiteratureAlgorithmLabError,
+        record_literature_registry_event,
+    )
+
+    promotion = tmp_path / "candidate_promotion.json"
+    promotion.write_text(
+        json.dumps(
+            {
+                "state_hint": "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED",
+                "algorithm_candidate_id": "candidate_bad",
+                "decision": "reject",
+                "reason_codes": ["made_up_failure_code"],
+                "ledger_event": {"event_type": "candidate_reject"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LiteratureAlgorithmLabError, match="unknown failure_code"):
+        record_literature_registry_event(
+            event_source_path=promotion,
+            output_path=tmp_path / "registry_event.json",
+            force=False,
+        )
+
+
+def test_update_literature_registry_writes_failure_event_back_to_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        record_literature_registry_event,
+        update_literature_registry,
+    )
+
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": "candidate_residual",
+                        "parent_algorithm_card_id": "card_residual",
+                        "candidate_family": "lightweight_residual_corrector",
+                        "hypothesis": "Residual correction improves rollout.",
+                        "executor_spec": {"cli_command": "run-blueprint-sandbox"},
+                        "source_grounding": {
+                            "source_ids": ["source_residual_paper"],
+                            "algorithm_card_id": "card_residual",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    promotion = tmp_path / "candidate_promotion.json"
+    promotion.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED",
+                "algorithm_candidate_id": "candidate_residual",
+                "candidate_family": "lightweight_residual_corrector",
+                "decision": "reject",
+                "reason_codes": ["sandbox_rule_failed", "score_regressed"],
+                "ledger_event": {
+                    "event_type": "candidate_reject",
+                    "algorithm_candidate_id": "candidate_residual",
+                    "candidate_family": "lightweight_residual_corrector",
+                    "evidence_id": "evidence_residual_001",
+                },
+                "metric_results": {"score_delta_vs_current_best": -1.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    event = record_literature_registry_event(
+        event_source_path=promotion,
+        output_path=tmp_path / "registry_event.json",
+        force=False,
+    )
+
+    report = update_literature_registry(
+        registry_path=tmp_path / "literature_registry.json",
+        algorithm_candidates_paths=[candidates],
+        event_paths=[event["literature_registry_event_path"]],
+        force=False,
+    )
+
+    registry = json.loads(Path(report["registry_path"]).read_text(encoding="utf-8"))
+    candidate = registry["candidate_nodes"][0]
+    algorithm = registry["algorithm_nodes"][0]
+    assert candidate["status"] == "rejected"
+    assert candidate["failure_history"] == [
+        {
+            "artifact_path": str(tmp_path / "registry_event.json"),
+            "failure_codes": ["sandbox_rule_failed", "score_regressed"],
+            "recommended_next": "avoid_repeating_without_new_evidence",
+            "retry_allowed": False,
+        }
+    ]
+    assert algorithm["strategy_status"] == "rejected"
+    assert registry["events"][-1]["event_type"] == "candidate_rejected"
+    assert registry["events"][-1]["reason_codes"] == [
+        "sandbox_rule_failed",
+        "score_regressed",
+    ]
+
+
+def test_record_literature_registry_event_cli_returns_payload(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from pde_agent.cli import app
+
+    promotion = tmp_path / "candidate_promotion.json"
+    output_path = tmp_path / "registry_event.json"
+    promotion.write_text(
+        json.dumps(
+            {
+                "state_hint": "ALGORITHM_CANDIDATE_PROMOTION_EVALUATED",
+                "algorithm_candidate_id": "candidate_refine",
+                "decision": "refine",
+                "reason_codes": ["ablation_missing_or_weak"],
+                "ledger_event": {
+                    "event_type": "candidate_refine",
+                    "algorithm_candidate_id": "candidate_refine",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "record-literature-registry-event",
+            "--event-source-path",
+            str(promotion),
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state_hint"] == "LITERATURE_REGISTRY_EVENT_RECORDED"
+    assert payload["metrics"]["event_type"] == "candidate_refined"
+    assert payload["metrics"]["failure_code_count"] == 1
+    assert payload["next_hint"] == "update-literature-registry"
+    assert output_path.exists()
 
 
 def test_compile_algorithm_candidates_expands_all_literature_strategy_families(

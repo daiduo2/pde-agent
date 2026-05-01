@@ -129,6 +129,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     normalize_openalex_sources_command,
     plan_candidate_sandbox_command,
     poll_mineru_parse_command,
+    record_literature_registry_event_command,
     submit_mineru_parse_command,
     update_literature_registry_command,
     validate_algorithm_cards_v2_command,
@@ -993,6 +994,25 @@ def update_literature_registry_cmd(
                 algorithm_cards_paths=algorithm_cards_paths,
                 algorithm_candidates_paths=algorithm_candidates_paths,
                 event_paths=event_paths,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("record-literature-registry-event")
+def record_literature_registry_event_cmd(
+    event_source_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_literature_registry_event_command(
+                event_source_path=event_source_path,
+                output_path=output_path,
                 force=force,
             )
         )
