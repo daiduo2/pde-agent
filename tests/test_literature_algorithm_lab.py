@@ -2265,6 +2265,76 @@ def test_extract_algorithm_cards_records_audit_and_evidence_spans(
     assert spans["minimal_experiment"]["line_start"] == 12
 
 
+def test_extract_algorithm_cards_infers_nonstructured_method_section(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        extract_algorithm_cards,
+        validate_algorithm_cards_v2,
+    )
+
+    markdown = tmp_path / "unstructured_method.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Spectral Viscosity for Burgers Rollouts",
+                "## Abstract",
+                "We study stable long-horizon neural operator rollouts.",
+                "## Method",
+                "### Spectral Viscosity Rollout",
+                "We stabilize Burgers autoregressive rollouts by damping high Fourier modes after the context window.",
+                "At each predicted step, a cutoff spectral filter is applied to the Fourier coefficients.",
+                "This reduces late-horizon high-frequency drift but can oversmooth shocks near discontinuities.",
+                "## Experiments",
+                "$$ u_t + u u_x = \\nu u_{xx} $$",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_spectral_unstructured",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {
+                    "abstract": 2,
+                    "method": 4,
+                    "spectral viscosity rollout": 5,
+                    "experiments": 9,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=tmp_path / "algorithm_cards.json",
+        output_path=tmp_path / "algorithm_cards_v2_audit.json",
+        force=False,
+    )
+
+    assert report["algorithm_card_count"] == 1
+    assert report["extraction_audit"]["inferred_block_count"] == 1
+    card = report["algorithm_cards"][0]
+    assert card["implementation_hooks"] == ["spectral_rollout_stabilization"]
+    assert card["claim"].startswith("Spectral damping can stabilize")
+    assert card["provenance"]["source_shape"] == "inferred_section"
+    assert card["provenance"]["section_title"] == "Spectral Viscosity Rollout"
+    assert card["evidence_spans"]["claim"]["line_start"] == 6
+    assert card["evidence_spans"]["mechanism"]["line_start"] == 7
+    assert card["evidence_spans"]["risk"]["line_start"] == 8
+    assert audit["decision"] == "approved"
+
+
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
     from pde_agent.core.literature_algorithm_lab import compile_algorithm_candidates
 

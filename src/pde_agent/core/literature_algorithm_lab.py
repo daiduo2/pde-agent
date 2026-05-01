@@ -1212,6 +1212,7 @@ def extract_algorithm_cards(
         "low_quality_parse_count": 0,
         "scanned_block_count": 0,
         "extracted_block_count": 0,
+        "inferred_block_count": 0,
         "skipped_parses": [],
         "skipped_blocks": [],
     }
@@ -1246,6 +1247,11 @@ def extract_algorithm_cards(
             skipped_blocks
         )
         extraction_audit["extracted_block_count"] += len(field_blocks)
+        extraction_audit["inferred_block_count"] += sum(
+            1
+            for field_block in field_blocks
+            if field_block.get("source_shape") == "inferred_section"
+        )
         for skipped_block in skipped_blocks:
             extraction_audit["skipped_blocks"].append(
                 {"source_id": source_id, **skipped_block}
@@ -2688,6 +2694,10 @@ def _scan_algorithm_card_field_blocks(
                 }
             )
             continue
+        inferred_block = _infer_nonstructured_algorithm_field_block(block)
+        if inferred_block is not None:
+            algorithm_blocks.append(inferred_block)
+            continue
         skipped_blocks.append(
             {
                 "section_title": block["section_title"],
@@ -2699,6 +2709,295 @@ def _scan_algorithm_card_field_blocks(
             }
         )
     return algorithm_blocks, skipped_blocks
+
+
+def _infer_nonstructured_algorithm_field_block(
+    block: dict[str, Any],
+) -> dict[str, Any] | None:
+    section_title = (
+        block["section_title"] if isinstance(block.get("section_title"), str) else ""
+    )
+    markdown = str(block["markdown"])
+    text_lines = _non_heading_lines(markdown)
+    joined = " ".join(text for _, text in text_lines)
+    if not joined.strip():
+        return None
+    lowered = f"{section_title} {joined}".lower()
+    inferred = _infer_nonstructured_algorithm_fields(
+        lowered=lowered,
+        joined=joined,
+        text_lines=text_lines,
+    )
+    if inferred is None:
+        return None
+    fields, field_spans = inferred
+    return {
+        "fields": fields,
+        "field_spans": _attach_section_to_spans(
+            field_spans,
+            section_title=section_title or None,
+            line_offset=int(block["line_start"]) - 1,
+        ),
+        "markdown": markdown,
+        "section_title": section_title or None,
+        "block_index": block["block_index"],
+        "source_shape": "inferred_section",
+        "line_start": block["line_start"],
+        "line_end": block["line_end"],
+    }
+
+
+def _infer_nonstructured_algorithm_fields(
+    *,
+    lowered: str,
+    joined: str,
+    text_lines: list[tuple[int, str]],
+) -> tuple[dict[str, str], dict[str, dict[str, Any]]] | None:
+    if _looks_like_spectral_rollout_section(lowered):
+        claim_line = _first_line_matching(
+            text_lines,
+            ["stabilize", "damping", "damp", "spectral", "fourier"],
+        )
+        mechanism_line = _first_line_matching(
+            text_lines,
+            ["filter", "coefficients"],
+        )
+        risk_line = _first_line_matching(
+            text_lines,
+            ["oversmooth", "shock", "discontinu"],
+        )
+        fields = {
+            "claim": (
+                "Spectral damping can stabilize Burgers autoregressive rollouts "
+                "by suppressing high-frequency drift after the context window."
+            ),
+            "mechanism": (
+                "Apply a cutoff spectral filter to Fourier coefficients during "
+                "rollout so high modes are damped before the next predicted step."
+            ),
+            "operation": (
+                "Apply a cutoff spectral filter after the context window during "
+                "autoregressive Burgers rollout prediction."
+            ),
+            "hook": "spectral_rollout_stabilization",
+            "observable": "lower late-horizon RMSE and reduced high-frequency drift",
+            "risk": "spectral damping can oversmooth shocks or discontinuities",
+            "minimal experiment": (
+                "Sweep spectral cutoff and damping strength on held-out Burgers "
+                "windows and compare late-horizon RMSE against the current best."
+            ),
+        }
+        spans = {
+            "claim": _line_span_from_match(claim_line, fallback_text=joined),
+            "mechanism": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "operation": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "risk": _line_span_from_match(risk_line, fallback_text=joined),
+        }
+        return fields, spans
+    if _looks_like_residual_correction_section(lowered):
+        claim_line = _first_line_matching(text_lines, ["residual", "bias", "correct"])
+        mechanism_line = _first_line_matching(text_lines, ["learn", "fit", "map"])
+        risk_line = _first_line_matching(text_lines, ["overfit", "validation"])
+        fields = {
+            "claim": (
+                "A learned residual correction can reduce systematic rollout bias "
+                "in Burgers neural-operator forecasts."
+            ),
+            "mechanism": (
+                "Fit a lightweight residual operator on local validation windows "
+                "and apply the correction as a postprocess."
+            ),
+            "operation": (
+                "Fit and apply a horizon-aware residual correction to checkpoint "
+                "or baseline rollout predictions."
+            ),
+            "hook": "learned_residual_correction",
+            "observable": "lower early and middle Rel-MSE without material runtime cost",
+            "risk": "residual correction can overfit local validation windows",
+            "minimal experiment": (
+                "Compare baseline rollout against residual-corrected rollout on "
+                "held-out Burgers validation windows."
+            ),
+        }
+        spans = {
+            "claim": _line_span_from_match(claim_line, fallback_text=joined),
+            "mechanism": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "operation": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "risk": _line_span_from_match(risk_line, fallback_text=joined),
+        }
+        return fields, spans
+    if _looks_like_physics_residual_section(lowered):
+        claim_line = _first_line_matching(text_lines, ["physics", "residual", "pde"])
+        mechanism_line = _first_line_matching(text_lines, ["loss", "regular"])
+        fields = {
+            "claim": (
+                "Physics residual regularization can improve Burgers rollout "
+                "consistency by penalizing PDE violations."
+            ),
+            "mechanism": (
+                "Evaluate a Burgers residual term and add it as a training or "
+                "fine-tuning loss."
+            ),
+            "operation": (
+                "Add a Burgers PDE residual penalty to the candidate training or "
+                "fine-tuning objective."
+            ),
+            "hook": "physics_residual_regularization",
+            "observable": "lower Burgers residual without score regression",
+            "risk": "physics loss can hurt data-fit accuracy or increase runtime",
+            "minimal experiment": (
+                "Run a small residual-loss sweep and compare score, runtime, and "
+                "Burgers residual against the data-only baseline."
+            ),
+        }
+        spans = {
+            "claim": _line_span_from_match(claim_line, fallback_text=joined),
+            "mechanism": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+            "operation": _line_span_from_match(
+                mechanism_line or claim_line,
+                fallback_text=joined,
+            ),
+        }
+        return fields, spans
+    if _looks_like_scheduled_rollout_section(lowered):
+        claim_line = _first_line_matching(
+            text_lines,
+            ["rollout", "autoregressive", "teacher", "scheduled"],
+        )
+        fields = {
+            "claim": (
+                "Scheduled rollout training can reduce train-inference mismatch "
+                "for autoregressive Burgers prediction."
+            ),
+            "mechanism": (
+                "Gradually expose the model to its own predicted states during "
+                "multi-step rollout training."
+            ),
+            "operation": (
+                "Fine-tune with scheduled multi-step autoregressive rollout windows."
+            ),
+            "hook": "scheduled_rollout_training",
+            "observable": "lower middle and late-horizon error",
+            "risk": "rollout fine-tuning can be slower and destabilize short-horizon fit",
+            "minimal experiment": (
+                "Run a bounded scheduled-rollout fine-tune and compare segment "
+                "scores against one-step training."
+            ),
+        }
+        spans = {
+            "claim": _line_span_from_match(claim_line, fallback_text=joined),
+            "mechanism": _line_span_from_match(claim_line, fallback_text=joined),
+            "operation": _line_span_from_match(claim_line, fallback_text=joined),
+        }
+        return fields, spans
+    return None
+
+
+def _non_heading_lines(markdown: str) -> list[tuple[int, str]]:
+    lines = []
+    for local_line_number, line in enumerate(markdown.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append((local_line_number, stripped))
+    return lines
+
+
+def _looks_like_spectral_rollout_section(lowered: str) -> bool:
+    return (
+        ("spectral" in lowered or "fourier" in lowered)
+        and any(keyword in lowered for keyword in ["damp", "filter", "viscosity"])
+        and any(keyword in lowered for keyword in ["rollout", "predict", "horizon"])
+    )
+
+
+def _looks_like_residual_correction_section(lowered: str) -> bool:
+    return "residual" in lowered and any(
+        keyword in lowered for keyword in ["correct", "bias", "postprocess", "fit"]
+    )
+
+
+def _looks_like_physics_residual_section(lowered: str) -> bool:
+    return (
+        ("physics" in lowered or "pde" in lowered or "burgers" in lowered)
+        and "residual" in lowered
+        and any(keyword in lowered for keyword in ["loss", "regular", "penalty"])
+    )
+
+
+def _looks_like_scheduled_rollout_section(lowered: str) -> bool:
+    return "rollout" in lowered and any(
+        keyword in lowered
+        for keyword in ["scheduled", "teacher", "autoregressive", "multi-step"]
+    )
+
+
+def _first_line_matching(
+    text_lines: list[tuple[int, str]],
+    keywords: list[str],
+) -> tuple[int, str] | None:
+    for local_line_number, text in text_lines:
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in keywords):
+            return local_line_number, text
+    return text_lines[0] if text_lines else None
+
+
+def _line_span_from_match(
+    match: tuple[int, str] | None,
+    *,
+    fallback_text: str,
+) -> dict[str, Any]:
+    if match is None:
+        return {
+            "text": fallback_text.strip(),
+            "value": fallback_text.strip(),
+            "line_start": 1,
+            "line_end": 1,
+        }
+    local_line_number, text = match
+    return {
+        "text": text,
+        "value": text,
+        "line_start": local_line_number,
+        "line_end": local_line_number,
+    }
+
+
+def _attach_section_to_spans(
+    spans: dict[str, dict[str, Any]],
+    *,
+    section_title: str | None,
+    line_offset: int,
+) -> dict[str, dict[str, Any]]:
+    grounded = {}
+    for key, span in spans.items():
+        line_start = int(span["line_start"]) + line_offset
+        line_end = int(span["line_end"]) + line_offset
+        grounded_span = {
+            **span,
+            "line_start": line_start,
+            "line_end": line_end,
+        }
+        if section_title:
+            grounded_span["section_title"] = section_title
+        grounded[key] = grounded_span
+    return grounded
 
 
 def _markdown_heading_blocks(markdown: str) -> list[dict[str, Any]]:
