@@ -1539,6 +1539,118 @@ def test_hypothesis_lab_sandbox_records_early_segment_diagnosis(
     assert "early_rel_mse_delta" in multiview["views"]["early_accuracy"]
 
 
+def test_hypothesis_lab_pareto_gate_promotes_dominating_candidate() -> None:
+    from pde_agent.core.hypothesis_lab import _sandbox_pareto_promotion_gate
+
+    metric_results = {
+        "rules_passed": {"value": True, "passed": True},
+        "context_preserved": {"value": True, "passed": True},
+        "score_delta_vs_baseline": {
+            "value": 0.25,
+            "threshold": 0.01,
+            "passed": True,
+        },
+        "segment_score_delta_vs_baseline": {"value": 0.2, "passed": True},
+        "early_rel_mse_delta_vs_baseline": {"value": 0.03, "passed": True},
+        "middle_score_guardrail": {"value": 0.01, "passed": True},
+        "late_rmse_guardrail": {"value": 0.02, "passed": True},
+        "inference_time_budget": {
+            "value": 0.4,
+            "threshold": 120.0,
+            "passed": True,
+        },
+    }
+
+    gate = _sandbox_pareto_promotion_gate(
+        family="task1_early_refinement",
+        metric_results=metric_results,
+        selection_objective={"primary": "early_rel_mse", "direction": "minimize"},
+        candidate_budget=80,
+        promotion_score=0.26,
+    )
+
+    assert gate["decision"] == "promote_to_strategy_proposal"
+    assert gate["promote_to_strategy_proposal"] is True
+    assert gate["pareto_status"] == "dominates_baseline"
+    assert gate["objective_axes"]["early_rel_mse"]["improved"] is True
+    assert gate["objective_axes"]["task1_total_score_proxy"]["passed"] is True
+    assert gate["objective_axes"]["runtime_seconds"]["improved"] is False
+    assert gate["objective_axes"]["candidate_budget"]["value"] == 80
+
+
+def test_hypothesis_lab_pareto_gate_keeps_primary_axis_tradeoff() -> None:
+    from pde_agent.core.hypothesis_lab import _sandbox_pareto_promotion_gate
+
+    metric_results = {
+        "rules_passed": {"value": True, "passed": True},
+        "context_preserved": {"value": True, "passed": True},
+        "score_delta_vs_baseline": {
+            "value": -0.03,
+            "threshold": 0.01,
+            "passed": False,
+        },
+        "segment_score_delta_vs_baseline": {"value": -0.02, "passed": False},
+        "early_rel_mse_delta_vs_baseline": {"value": 0.04, "passed": True},
+        "middle_score_guardrail": {"value": 0.0, "passed": True},
+        "late_rmse_guardrail": {"value": 0.0, "passed": True},
+        "inference_time_budget": {
+            "value": 0.2,
+            "threshold": 120.0,
+            "passed": True,
+        },
+    }
+
+    gate = _sandbox_pareto_promotion_gate(
+        family="task1_early_refinement",
+        metric_results=metric_results,
+        selection_objective={"primary": "early_rel_mse", "direction": "minimize"},
+        candidate_budget=80,
+        promotion_score=-0.03,
+    )
+
+    assert gate["decision"] == "keep_as_evidence"
+    assert gate["promote_to_strategy_proposal"] is False
+    assert gate["pareto_status"] == "tradeoff_evidence"
+    assert "primary_axis_improved_without_total_score" in gate["reason_codes"]
+    assert gate["next_command"] == "revise-hypothesis"
+
+
+def test_hypothesis_lab_pareto_gate_continues_on_guardrail_regression() -> None:
+    from pde_agent.core.hypothesis_lab import _sandbox_pareto_promotion_gate
+
+    metric_results = {
+        "rules_passed": {"value": True, "passed": True},
+        "context_preserved": {"value": True, "passed": True},
+        "score_delta_vs_baseline": {
+            "value": -0.01,
+            "threshold": 0.01,
+            "passed": False,
+        },
+        "segment_score_delta_vs_baseline": {"value": -0.01, "passed": False},
+        "early_rel_mse_delta_vs_baseline": {"value": 0.05, "passed": True},
+        "middle_score_guardrail": {"value": -0.1, "passed": False},
+        "late_rmse_guardrail": {"value": 0.0, "passed": True},
+        "inference_time_budget": {
+            "value": 0.2,
+            "threshold": 120.0,
+            "passed": True,
+        },
+    }
+
+    gate = _sandbox_pareto_promotion_gate(
+        family="task1_early_refinement",
+        metric_results=metric_results,
+        selection_objective={"primary": "early_rel_mse", "direction": "minimize"},
+        candidate_budget=80,
+        promotion_score=-0.01,
+    )
+
+    assert gate["decision"] == "continue_local_search"
+    assert gate["promote_to_strategy_proposal"] is False
+    assert gate["pareto_status"] == "tradeoff_needs_local_search"
+    assert "guardrail_regression" in gate["reason_codes"]
+
+
 def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
     tmp_path: Path,
 ) -> None:
@@ -1603,6 +1715,13 @@ def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
     assert sandbox["best_candidate"]["metadata"]["early_objective"] == "early_rel_mse"
     selection = sandbox["verifier"]["selection_objective"]
     assert selection["primary"] == "early_rel_mse"
+    gate = sandbox["verifier"]["pareto_promotion_gate"]
+    assert gate["state_hint"] == "PARETO_PROMOTION_GATE_EVALUATED"
+    assert gate["objective_axes"]["early_rel_mse"]["metric"] == (
+        "early_rel_mse_delta_vs_baseline"
+    )
+    assert gate["objective_axes"]["runtime_seconds"]["passed"] is True
+    assert gate["objective_axes"]["runtime_seconds"]["improved"] is False
     best_rel_mse = sandbox["best_candidate"]["segments"]["early"]["rel_mse"]
     top_rel_mses = [
         row["segments"]["early"]["rel_mse"] for row in sandbox["top_candidates"]

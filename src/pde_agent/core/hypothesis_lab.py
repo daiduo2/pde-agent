@@ -1039,10 +1039,17 @@ def run_blueprint_sandbox(
         target=target,
         candidates=serializable_rows,
     )
+    selection_objective = _selection_objective(family)
+    promotion_score = _sandbox_promotion_score(metric_results)
+    pareto_gate = _sandbox_pareto_promotion_gate(
+        family=family,
+        metric_results=metric_results,
+        selection_objective=selection_objective,
+        candidate_budget=len(rows),
+        promotion_score=promotion_score,
+    )
     verifier = {
-        "decision": "promote_to_strategy_proposal"
-        if _sandbox_metrics_pass(metric_results)
-        else "reject_or_revise",
+        "decision": pareto_gate["decision"],
         "rules_passed": bool(judge["rules_passed"]),
         "context_preserved": context_preserved,
         "score_delta_vs_baseline": delta,
@@ -1053,8 +1060,9 @@ def run_blueprint_sandbox(
         "metric_results": metric_results,
         "multiview_judge": multiview_judge,
         "early_segment_diagnosis": early_segment_diagnosis,
-        "selection_objective": _selection_objective(family),
-        "promotion_score": _sandbox_promotion_score(metric_results),
+        "selection_objective": selection_objective,
+        "promotion_score": promotion_score,
+        "pareto_promotion_gate": pareto_gate,
     }
     report = {
         "schema_version": 1,
@@ -3995,14 +4003,170 @@ def _segment_metric_delta(
     return float(best_value) - float(baseline_value)
 
 
-def _sandbox_metrics_pass(metric_results: dict[str, Any]) -> bool:
-    required = [
-        "rules_passed",
-        "context_preserved",
-        "score_delta_vs_baseline",
-        "inference_time_budget",
-    ]
-    return all(bool(metric_results[name]["passed"]) for name in required)
+def _sandbox_pareto_promotion_gate(
+    *,
+    family: str,
+    metric_results: dict[str, Any],
+    selection_objective: dict[str, Any],
+    candidate_budget: int,
+    promotion_score: float,
+) -> dict[str, Any]:
+    total_axis = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="score_delta_vs_baseline",
+        axis_name="task1_total_score_proxy",
+        direction="maximize",
+    )
+    segment_axis = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="segment_score_delta_vs_baseline",
+        axis_name="segment_score",
+        direction="maximize",
+    )
+    early_axis = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="early_rel_mse_delta_vs_baseline",
+        axis_name="early_rel_mse",
+        direction="minimize",
+    )
+    middle_guardrail = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="middle_score_guardrail",
+        axis_name="middle_score",
+        direction="maximize",
+    )
+    late_guardrail = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="late_rmse_guardrail",
+        axis_name="late_rmse",
+        direction="minimize",
+    )
+    runtime_axis = _pareto_metric_axis(
+        metric_results=metric_results,
+        metric_name="inference_time_budget",
+        axis_name="runtime_seconds",
+        direction="minimize",
+        positive_value_means_improved=False,
+    )
+    hard_constraints = {
+        name: bool(metric_results.get(name, {}).get("passed"))
+        for name in ["rules_passed", "context_preserved", "inference_time_budget"]
+    }
+    guardrail_axes = [middle_guardrail, late_guardrail]
+    guardrails_passed = all(bool(axis.get("passed", True)) for axis in guardrail_axes)
+    primary_axis = str(selection_objective.get("primary", "task1_total_score_proxy"))
+    primary_improved = bool(
+        early_axis["improved"]
+        if primary_axis == "early_rel_mse"
+        else total_axis["improved"]
+    )
+    total_passed = bool(total_axis["passed"])
+    any_positive_evidence = any(
+        bool(axis["improved"]) for axis in [total_axis, segment_axis, early_axis]
+    )
+    reason_codes: list[str] = []
+    if not all(hard_constraints.values()):
+        decision = "reject_or_revise"
+        pareto_status = "dominated_or_invalid"
+        reason_codes.extend(
+            f"{name}_failed"
+            for name, passed in hard_constraints.items()
+            if not passed
+        )
+    elif total_passed and guardrails_passed:
+        decision = "promote_to_strategy_proposal"
+        pareto_status = "dominates_baseline"
+        reason_codes.append("total_score_passed")
+        if primary_improved:
+            reason_codes.append("primary_axis_improved")
+    elif primary_improved and guardrails_passed:
+        decision = "keep_as_evidence"
+        pareto_status = "tradeoff_evidence"
+        reason_codes.append("primary_axis_improved_without_total_score")
+    elif primary_improved or any_positive_evidence:
+        decision = "continue_local_search"
+        pareto_status = "tradeoff_needs_local_search"
+        if not guardrails_passed:
+            reason_codes.append("guardrail_regression")
+        if primary_improved:
+            reason_codes.append("primary_axis_improved")
+        else:
+            reason_codes.append("partial_axis_improvement")
+    else:
+        decision = "reject_or_revise"
+        pareto_status = "dominated_or_invalid"
+        reason_codes.append("no_pareto_axis_improved")
+    next_command = (
+        "record-strategy-proposal"
+        if decision == "promote_to_strategy_proposal"
+        else "revise-hypothesis"
+    )
+    return {
+        "schema_version": 1,
+        "state_hint": "PARETO_PROMOTION_GATE_EVALUATED",
+        "family": family,
+        "decision": decision,
+        "promote_to_strategy_proposal": decision == "promote_to_strategy_proposal",
+        "pareto_status": pareto_status,
+        "reason_codes": reason_codes,
+        "selection_objective": selection_objective,
+        "promotion_score": promotion_score,
+        "objective_axes": {
+            "task1_total_score_proxy": total_axis,
+            "segment_score": segment_axis,
+            "early_rel_mse": early_axis,
+            "middle_score": middle_guardrail,
+            "late_rmse": late_guardrail,
+            "runtime_seconds": runtime_axis,
+            "candidate_budget": {
+                "metric": "candidate_budget",
+                "value": int(candidate_budget),
+                "direction": "minimize",
+                "passed": True,
+                "improved": False,
+            },
+        },
+        "hard_constraints": hard_constraints,
+        "guardrails_passed": guardrails_passed,
+        "next_command": next_command,
+    }
+
+
+def _pareto_metric_axis(
+    *,
+    metric_results: dict[str, Any],
+    metric_name: str,
+    axis_name: str,
+    direction: str,
+    positive_value_means_improved: bool = True,
+) -> dict[str, Any]:
+    metric = metric_results.get(metric_name)
+    if not isinstance(metric, dict):
+        return {
+            "metric": metric_name,
+            "axis": axis_name,
+            "direction": direction,
+            "value": None,
+            "threshold": None,
+            "passed": False,
+            "improved": False,
+        }
+    value = metric.get("value")
+    threshold = metric.get("threshold")
+    improved = (
+        positive_value_means_improved
+        and isinstance(value, int | float)
+        and float(value) > 0.0
+    )
+    return {
+        "metric": metric_name,
+        "axis": axis_name,
+        "direction": direction,
+        "value": value,
+        "threshold": threshold,
+        "passed": bool(metric.get("passed")),
+        "improved": improved,
+    }
 
 
 def _sandbox_promotion_score(metric_results: dict[str, Any]) -> float:
