@@ -141,6 +141,27 @@ def generate_hypotheses(
         *grouped_cards.get("task1_retrieval_refinement", []),
         *grouped_cards.get("task1_retrieval_prior", []),
     ]
+    if "task1_retrieval_refinement" in grouped_cards:
+        source_cards = grouped_cards["task1_retrieval_refinement"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_retrieval_refinement_local_search_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_retrieval_refinement_local_search",
+                "mechanism": (
+                    "Use the promoted retrieval-refinement evidence as the center "
+                    "of a narrow local search over neighbor count, early blend "
+                    "length, persistence anchor weight, and smoothing strength."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -5,
+            }
+        )
     if retrieval_refinement_cards:
         hypotheses.append(
             {
@@ -398,6 +419,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         priority = int(item.get("priority", 10))
         novelty_bonus = {
             "official_checkpoint_calibration": 45.0,
+            "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
             "learned_residual_correction": 40.0,
@@ -556,6 +578,39 @@ def design_algorithm_blueprints(
                     },
                     "parameter_grid": {
                         "candidate_params": _default_retrieval_refinement_params(),
+                    },
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_retrieval_refinement",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_retrieval_refinement_local_search":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_retrieval_refinement_local_search_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_retrieval_refinement_local_search",
+                    "search_mode": "evidence_centered_local_search",
+                    "algorithm": {
+                        "summary": (
+                            "Search tightly around the promoted Task 1 retrieval "
+                            "refinement, preserving the same bounded NumPy executor "
+                            "while perturbing the strongest observed parameters."
+                        ),
+                        "pseudocode": [
+                            "center = k48 affine eb20 pw0.5 spectral in {0.5, 1.0}",
+                            "sweep nearby k, early blend, persistence weight, smoothing",
+                            "retain raw/delta sentinels at the center",
+                            "prediction[:10] = context",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": _local_retrieval_refinement_params(),
                     },
                     "seed_params": hypothesis.get("evidence_params", []),
                     "sandbox": {
@@ -736,6 +791,7 @@ def run_blueprint_sandbox(
         "learned_residual_correction",
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
+        "task1_retrieval_refinement_local_search",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -996,6 +1052,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "learned_residual_correction",
             "task1_retrieval_prior",
             "task1_retrieval_refinement",
+            "task1_retrieval_refinement_local_search",
         }:
             return blueprint
     return None
@@ -1762,6 +1819,12 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_retrieval_refinement_local_search":
+        return _prediction_from_task1_retrieval_refinement(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
 
 
@@ -1828,7 +1891,11 @@ def _candidate_metadata(
     target: np.ndarray,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    if family not in {"task1_retrieval_prior", "task1_retrieval_refinement"}:
+    if family not in {
+        "task1_retrieval_prior",
+        "task1_retrieval_refinement",
+        "task1_retrieval_refinement_local_search",
+    }:
         return {}
     metadata = {
         "leave_one_out": bool(
@@ -1839,7 +1906,10 @@ def _candidate_metadata(
         "k": int(params["k"]),
         "mode": str(params.get("mode", "affine")),
     }
-    if family == "task1_retrieval_refinement":
+    if family in {
+        "task1_retrieval_refinement",
+        "task1_retrieval_refinement_local_search",
+    }:
         metadata.update(
             {
                 "early_blend_steps": int(params["early_blend_steps"]),
@@ -1916,6 +1986,8 @@ def _iter_parameter_grid(
     if family == "task1_retrieval_prior":
         return _retrieval_parameter_grid(grid)
     if family == "task1_retrieval_refinement":
+        return _retrieval_refinement_parameter_grid(grid)
+    if family == "task1_retrieval_refinement_local_search":
         return _retrieval_refinement_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
@@ -2070,6 +2142,82 @@ def _default_retrieval_refinement_params() -> list[dict[str, Any]]:
         ]
     )
     return params
+
+
+def _local_retrieval_refinement_params() -> list[dict[str, Any]]:
+    params: list[dict[str, Any]] = [
+        {
+            "k": 48,
+            "mode": "affine",
+            "early_blend_steps": 20,
+            "persistence_weight_start": 0.5,
+            "spectral_strength": 0.5,
+        },
+        {
+            "k": 48,
+            "mode": "affine",
+            "early_blend_steps": 20,
+            "persistence_weight_start": 0.5,
+            "spectral_strength": 1.0,
+        },
+    ]
+    for k in [44, 48, 52, 56]:
+        for strength in [0.5, 0.75, 1.0]:
+            params.append(
+                {
+                    "k": k,
+                    "mode": "affine",
+                    "early_blend_steps": 20,
+                    "persistence_weight_start": 0.5,
+                    "spectral_strength": strength,
+                }
+            )
+    for early_steps in [15, 20, 25]:
+        for weight in [0.4, 0.5, 0.6]:
+            for strength in [0.5, 1.0]:
+                params.append(
+                    {
+                        "k": 48,
+                        "mode": "affine",
+                        "early_blend_steps": early_steps,
+                        "persistence_weight_start": weight,
+                        "spectral_strength": strength,
+                    }
+                )
+    params.extend(
+        [
+            {
+                "k": 48,
+                "mode": "delta",
+                "early_blend_steps": 20,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+            },
+            {
+                "k": 48,
+                "mode": "raw",
+                "early_blend_steps": 20,
+                "persistence_weight_start": 0.5,
+                "spectral_strength": 0.5,
+            },
+        ]
+    )
+    deduped = []
+    seen: set[tuple[int, str, int, float, float]] = set()
+    for row in params:
+        normalized = _normalize_retrieval_refinement_params(row)
+        key = (
+            int(normalized["k"]),
+            str(normalized["mode"]),
+            int(normalized["early_blend_steps"]),
+            float(normalized["persistence_weight_start"]),
+            float(normalized["spectral_strength"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
 
 
 def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any]:

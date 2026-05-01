@@ -499,7 +499,15 @@ def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidat
         "task1_retrieval_refinement"
     ]
     hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    families = [item["candidate_family"] for item in hypotheses["hypotheses"]]
+    assert families == [
+        "task1_retrieval_refinement_local_search",
+        "task1_retrieval_refinement",
+    ]
     assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "task1_retrieval_refinement_local_search"
+    )
+    assert hypotheses["hypotheses"][1]["candidate_family"] == (
         "task1_retrieval_refinement"
     )
     blueprints = design_algorithm_blueprints(
@@ -508,6 +516,23 @@ def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidat
         force=False,
     )
     assert blueprints["blueprints"][0]["blueprint_id"] == (
+        "bp_task1_retrieval_refinement_local_search_001"
+    )
+    local_search = blueprints["blueprints"][0]
+    assert local_search["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_retrieval_refinement"
+    )
+    candidate_params = local_search["parameter_grid"]["candidate_params"]
+    assert 12 <= len(candidate_params) <= 36
+    assert any(row["k"] == 52 for row in candidate_params)
+    assert any(row["early_blend_steps"] == 15 for row in candidate_params)
+    assert any(row["early_blend_steps"] == 25 for row in candidate_params)
+    assert any(row["persistence_weight_start"] == 0.4 for row in candidate_params)
+    assert any(row["persistence_weight_start"] == 0.6 for row in candidate_params)
+    assert any(row["spectral_strength"] == 0.75 for row in candidate_params)
+    assert any(row["mode"] == "delta" for row in candidate_params)
+    assert any(row["mode"] == "raw" for row in candidate_params)
+    assert blueprints["blueprints"][1]["blueprint_id"] == (
         "bp_task1_retrieval_refinement_001"
     )
 
