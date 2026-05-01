@@ -95,6 +95,100 @@ HOOK_ALIASES = {
     "residual_blend_postprocess": "operator_correction_postprocess",
 }
 
+HOOK_TO_ALGORITHM_CARD_V2 = {
+    "official_checkpoint_calibration": {
+        "operator_target": "context_to_rollout",
+        "mechanism_type": "checkpoint",
+        "mathematical_object": "checkpoint_weights",
+        "implementation_requirements": {
+            "requires_training": False,
+            "requires_checkpoint": True,
+            "requires_target_data": False,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": False,
+        },
+    },
+    "learned_residual_correction": {
+        "operator_target": "residual_to_correction",
+        "mechanism_type": "postprocess",
+        "mathematical_object": "residual_operator",
+        "implementation_requirements": {
+            "requires_training": True,
+            "requires_checkpoint": True,
+            "requires_target_data": True,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": True,
+        },
+    },
+    "spectral_rollout_stabilization": {
+        "operator_target": "postprocess_to_solution",
+        "mechanism_type": "postprocess",
+        "mathematical_object": "spectral_filter",
+        "implementation_requirements": {
+            "requires_training": False,
+            "requires_checkpoint": False,
+            "requires_target_data": False,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": True,
+        },
+    },
+    "physics_residual_regularization": {
+        "operator_target": "ic_to_trajectory",
+        "mechanism_type": "loss",
+        "mathematical_object": "burgers_residual",
+        "implementation_requirements": {
+            "requires_training": True,
+            "requires_checkpoint": False,
+            "requires_target_data": True,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": False,
+        },
+    },
+    "scheduled_rollout_training": {
+        "operator_target": "context_to_rollout",
+        "mechanism_type": "rollout",
+        "mathematical_object": "time_integrator",
+        "implementation_requirements": {
+            "requires_training": True,
+            "requires_checkpoint": False,
+            "requires_target_data": True,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": False,
+        },
+    },
+    "operator_correction_postprocess": {
+        "operator_target": "postprocess_to_solution",
+        "mechanism_type": "postprocess",
+        "mathematical_object": "correction_operator",
+        "implementation_requirements": {
+            "requires_training": False,
+            "requires_checkpoint": False,
+            "requires_target_data": True,
+            "requires_new_executor": False,
+            "requires_external_code": False,
+            "can_run_as_postprocess": True,
+        },
+    },
+    "fourier_neural_operator_architecture": {
+        "operator_target": "ic_to_trajectory",
+        "mechanism_type": "architecture",
+        "mathematical_object": "fourier_modes",
+        "implementation_requirements": {
+            "requires_training": True,
+            "requires_checkpoint": False,
+            "requires_target_data": True,
+            "requires_new_executor": True,
+            "requires_external_code": False,
+            "can_run_as_postprocess": False,
+        },
+    },
+}
+
 ALGORITHM_CARD_V2_OPERATOR_TARGETS = {
     "ic_to_trajectory",
     "coefficient_to_solution",
@@ -1149,6 +1243,16 @@ def extract_algorithm_cards(
             ),
             "evidence_status": "extracted",
         }
+        card.update(
+            _algorithm_card_v2_fields(
+                fields=fields,
+                hook=hook,
+                markdown=markdown,
+                parse=parse,
+                parse_path=Path(parse_path),
+                markdown_path=markdown_file,
+            )
+        )
         cards.append(card)
     if not cards:
         raise LiteratureAlgorithmLabError("no usable algorithm cards extracted")
@@ -2478,6 +2582,133 @@ def _infer_algorithm_fields(markdown: str) -> dict[str, str]:
     raise LiteratureAlgorithmLabError(
         "parsed markdown does not contain structured algorithm fields or a supported inference pattern"
     )
+
+
+def _algorithm_card_v2_fields(
+    *,
+    fields: dict[str, str],
+    hook: str,
+    markdown: str,
+    parse: dict[str, Any],
+    parse_path: Path,
+    markdown_path: Path,
+) -> dict[str, Any]:
+    normalized_hook = _normalize_algorithm_hook(hook)
+    defaults = HOOK_TO_ALGORITHM_CARD_V2.get(
+        normalized_hook,
+        _infer_algorithm_card_v2_defaults(markdown),
+    )
+    return {
+        "operator_target": _algorithm_card_v2_enum_or_default(
+            fields.get("operator target") or fields.get("operator_target"),
+            allowed=ALGORITHM_CARD_V2_OPERATOR_TARGETS,
+            default=str(defaults["operator_target"]),
+        ),
+        "mechanism_type": _algorithm_card_v2_enum_or_default(
+            fields.get("mechanism type") or fields.get("mechanism_type"),
+            allowed=ALGORITHM_CARD_V2_MECHANISM_TYPES,
+            default=str(defaults["mechanism_type"]),
+        ),
+        "mathematical_object": _nonempty_or_default(
+            fields.get("mathematical object") or fields.get("mathematical_object"),
+            str(defaults["mathematical_object"]),
+        ),
+        "implementation_requirements": _implementation_requirements_from_fields(
+            fields=fields,
+            defaults=defaults["implementation_requirements"],
+        ),
+        "provenance": {
+            "source_id": _nonempty_text(parse.get("source_id"), "source_id"),
+            "paper_parse_path": str(parse_path),
+            "markdown_path": str(markdown_path),
+            "extractor": "heuristic_algorithm_card_v2",
+            "normalized_hook": normalized_hook,
+            "section_index": parse.get("section_index", []),
+        },
+    }
+
+
+def _infer_algorithm_card_v2_defaults(markdown: str) -> dict[str, Any]:
+    lowered = markdown.lower()
+    if "fourier" in lowered:
+        return HOOK_TO_ALGORITHM_CARD_V2["fourier_neural_operator_architecture"]
+    if "residual" in lowered:
+        return HOOK_TO_ALGORITHM_CARD_V2["learned_residual_correction"]
+    if "spectral" in lowered or "viscosity" in lowered:
+        return HOOK_TO_ALGORITHM_CARD_V2["spectral_rollout_stabilization"]
+    if "physics" in lowered or "pinn" in lowered:
+        return HOOK_TO_ALGORITHM_CARD_V2["physics_residual_regularization"]
+    return {
+        "operator_target": "ic_to_trajectory",
+        "mechanism_type": "hybrid",
+        "mathematical_object": "operator_mapping",
+        "implementation_requirements": {
+            "requires_training": True,
+            "requires_checkpoint": False,
+            "requires_target_data": True,
+            "requires_new_executor": True,
+            "requires_external_code": False,
+            "can_run_as_postprocess": False,
+        },
+    }
+
+
+def _algorithm_card_v2_enum_or_default(
+    value: str | None,
+    *,
+    allowed: set[str],
+    default: str,
+) -> str:
+    if isinstance(value, str) and value.strip() in allowed:
+        return value.strip()
+    return default
+
+
+def _nonempty_or_default(value: str | None, default: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
+def _implementation_requirements_from_fields(
+    *,
+    fields: dict[str, str],
+    defaults: Any,
+) -> dict[str, bool]:
+    if not isinstance(defaults, dict):
+        raise LiteratureAlgorithmLabError(
+            "algorithm card v2 defaults missing implementation requirements"
+        )
+    requirements = {
+        key: bool(defaults.get(key))
+        for key in sorted(ALGORITHM_CARD_V2_IMPLEMENTATION_REQUIREMENTS)
+    }
+    field_aliases = {
+        "requires_training": ["requires training", "requires_training"],
+        "requires_checkpoint": ["requires checkpoint", "requires_checkpoint"],
+        "requires_target_data": ["requires target data", "requires_target_data"],
+        "requires_new_executor": ["requires new executor", "requires_new_executor"],
+        "requires_external_code": ["requires external code", "requires_external_code"],
+        "can_run_as_postprocess": [
+            "can run as postprocess",
+            "can_run_as_postprocess",
+        ],
+    }
+    for key, aliases in field_aliases.items():
+        for alias in aliases:
+            if alias in fields:
+                requirements[key] = _parse_bool_field(fields[alias], alias)
+                break
+    return requirements
+
+
+def _parse_bool_field(value: str, label: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "yes", "y", "1"}:
+        return True
+    if normalized in {"false", "no", "n", "0"}:
+        return False
+    raise LiteratureAlgorithmLabError(f"{label} must be a boolean-like value")
 
 
 def _source_type(value: Any) -> str:

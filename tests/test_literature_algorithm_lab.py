@@ -1980,7 +1980,10 @@ def test_extract_algorithm_cards_reads_operational_markdown(
 def test_extract_algorithm_cards_infers_fno_from_paper_markdown(
     tmp_path: Path,
 ) -> None:
-    from pde_agent.core.literature_algorithm_lab import extract_algorithm_cards
+    from pde_agent.core.literature_algorithm_lab import (
+        extract_algorithm_cards,
+        validate_algorithm_cards_v2,
+    )
 
     markdown = tmp_path / "fno.md"
     markdown.write_text(
@@ -2018,14 +2021,92 @@ def test_extract_algorithm_cards_infers_fno_from_paper_markdown(
         output_path=tmp_path / "cards.json",
         force=False,
     )
+    audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=tmp_path / "cards.json",
+        output_path=tmp_path / "cards_v2_audit.json",
+        force=False,
+    )
 
     card = report["algorithm_cards"][0]
     assert card["implementation_hooks"] == ["fourier_neural_operator_architecture"]
     assert "Fourier" in card["claim"]
     assert "Fourier space" in card["core_mechanism"]
+    assert card["operator_target"] == "ic_to_trajectory"
+    assert card["mechanism_type"] == "architecture"
+    assert card["mathematical_object"] == "fourier_modes"
+    assert card["implementation_requirements"]["requires_new_executor"] is True
     assert card["minimal_experiment"] == (
         "Design a bounded FNO architecture executor or map the source to an existing checkpoint-family adapter before sandbox execution."
     )
+    assert audit["decision"] == "approved"
+
+
+def test_extract_algorithm_cards_emits_algorithm_card_v2_fields(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        extract_algorithm_cards,
+        validate_algorithm_cards_v2,
+    )
+
+    markdown = tmp_path / "residual.md"
+    markdown.write_text(
+        "\n".join(
+            [
+                "# Residual Neural Operator Correction",
+                "Claim: A learned residual correction can reduce rollout bias in Burgers forecasts.",
+                "Mechanism: Estimate the checkpoint residual as a small postprocess operator.",
+                "Operation: Fit a residual map on local validation windows and apply a horizon-decayed correction.",
+                "Hook: learned_residual_correction",
+                "Observable: lower early and middle Rel-MSE without increasing inference time materially.",
+                "Risk: residual correction can overfit the local validation windows.",
+                "Minimal Experiment: compare checkpoint rollout against residual-corrected checkpoint rollout on a held-out window.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parse.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_residual_operator",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": ["abstract", "method", "experiment"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = extract_algorithm_cards(
+        paper_parse_paths=[parse_path],
+        output_path=tmp_path / "algorithm_cards.json",
+        force=False,
+    )
+    audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=tmp_path / "algorithm_cards.json",
+        output_path=tmp_path / "algorithm_cards_v2_audit.json",
+        force=False,
+    )
+
+    card = report["algorithm_cards"][0]
+    assert card["operator_target"] == "residual_to_correction"
+    assert card["mechanism_type"] == "postprocess"
+    assert card["mathematical_object"] == "residual_operator"
+    assert card["implementation_requirements"] == {
+        "requires_training": True,
+        "requires_checkpoint": True,
+        "requires_target_data": True,
+        "requires_new_executor": False,
+        "requires_external_code": False,
+        "can_run_as_postprocess": True,
+    }
+    assert card["provenance"]["source_id"] == "source_residual_operator"
+    assert card["provenance"]["extractor"] == "heuristic_algorithm_card_v2"
+    assert audit["decision"] == "approved"
+    assert audit["issue_count"] == 0
 
 
 def test_compile_algorithm_candidates_maps_supported_hooks(tmp_path: Path) -> None:
