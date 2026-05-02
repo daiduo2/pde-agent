@@ -13,6 +13,11 @@ from pde_agent.core.burgers_spectral_element import (
     sem_burgers_rollout,
     sem_params_from_any,
 )
+from pde_agent.core.burgers_residual_refinement import (
+    burgers_residual_summary,
+    physics_residual_refinement_params_from_any,
+    residual_guided_refinement,
+)
 from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
@@ -168,9 +173,34 @@ def generate_hypotheses(
             grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
         if "task1_early_refinement" in hooks:
             grouped_cards.setdefault("task1_early_refinement", []).append(card)
+        if "task1_physics_residual_refinement" in hooks:
+            grouped_cards.setdefault("task1_physics_residual_refinement", []).append(
+                card
+            )
         if "task1_sem_burgers_rollout" in hooks:
             grouped_cards.setdefault("task1_sem_burgers_rollout", []).append(card)
     hypotheses = []
+    if "task1_physics_residual_refinement" in grouped_cards:
+        source_cards = grouped_cards["task1_physics_residual_refinement"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_physics_residual_refinement_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_physics_residual_refinement",
+                "mechanism": (
+                    "Use Burgers residual as a target-free diagnostic and nudge "
+                    "a strong data-prior trajectory toward one-step PDE consistency "
+                    "without replacing the retrieval prior."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -8,
+            }
+        )
     if "task1_sem_burgers_rollout" in grouped_cards:
         source_cards = grouped_cards["task1_sem_burgers_rollout"]
         hypotheses.append(
@@ -579,6 +609,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
+            "task1_physics_residual_refinement": 49.0,
             "task1_sem_burgers_rollout": 48.0,
             "learned_residual_correction": 40.0,
             "linear_trend_late_spectral_ramp": 25.0,
@@ -727,6 +758,84 @@ def design_algorithm_blueprints(
                     },
                     "sandbox": {
                         "allowed_executor": "controlled_numpy_sem_burgers_rollout",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_physics_residual_refinement":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_physics_residual_refinement_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_physics_residual_refinement",
+                    "search_mode": "physics_residual_refinement",
+                    "algorithm": {
+                        "summary": (
+                            "Score a strong Task 1 data-prior trajectory with the "
+                            "Burgers residual and apply a bounded one-step physics "
+                            "nudge over early and middle horizons."
+                        ),
+                        "pseudocode": [
+                            "base = retrieval_refinement(context, reference_library)",
+                            "for t in selected future window:",
+                            "  physics_next = u[t-1] + dt*(-u*u_x + nu*u_xx)",
+                            "  u[t] = blend(base[t], physics_next, correction_weight)",
+                            "record base and candidate Burgers residual summaries",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": [
+                            {
+                                "base_family": "task1_retrieval_refinement",
+                                "k": 48,
+                                "mode": "affine",
+                                "early_blend_steps": 20,
+                                "persistence_weight_start": 0.5,
+                                "spectral_strength": 0.5,
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "dx": 1.0 / 256.0,
+                                "correction_weight": 0.0,
+                                "stop_step": 57,
+                                "residual_spectral_strength": 0.0,
+                            },
+                            {
+                                "base_family": "task1_retrieval_refinement",
+                                "k": 48,
+                                "mode": "affine",
+                                "early_blend_steps": 20,
+                                "persistence_weight_start": 0.5,
+                                "spectral_strength": 0.5,
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "dx": 1.0 / 256.0,
+                                "correction_weight": 0.02,
+                                "stop_step": 57,
+                                "residual_spectral_strength": 0.0,
+                            },
+                            {
+                                "base_family": "task1_retrieval_refinement",
+                                "k": 48,
+                                "mode": "affine",
+                                "early_blend_steps": 20,
+                                "persistence_weight_start": 0.5,
+                                "spectral_strength": 0.5,
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "dx": 1.0 / 256.0,
+                                "correction_weight": 0.05,
+                                "stop_step": 105,
+                                "residual_spectral_strength": 0.0,
+                            },
+                        ]
+                    },
+                    "sandbox": {
+                        "allowed_executor": (
+                            "controlled_numpy_burgers_residual_refinement"
+                        ),
                         "primary_metric": "task1_total_score_proxy",
                         "promotion_min_score_delta": 0.01,
                         "max_inference_seconds": 120.0,
@@ -1075,6 +1184,7 @@ def run_blueprint_sandbox(
         "task1_retrieval_refinement_local_search",
         "task1_early_refinement",
         "task1_sem_burgers_rollout",
+        "task1_physics_residual_refinement",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -1175,6 +1285,15 @@ def run_blueprint_sandbox(
         max_inference_seconds=float(blueprint["sandbox"]["max_inference_seconds"]),
         promotion_min_score_delta=float(blueprint["sandbox"]["promotion_min_score_delta"]),
     )
+    if family == "task1_physics_residual_refinement":
+        metadata = best.get("metadata") if isinstance(best.get("metadata"), dict) else {}
+        residual_delta = metadata.get("residual_rmse_delta")
+        if isinstance(residual_delta, int | float):
+            metric_results["physics_residual_rmse_delta"] = {
+                "value": float(residual_delta),
+                "threshold": 0.0,
+                "passed": float(residual_delta) < 0.0,
+            }
     multiview_judge = _task1_multiview_local_judge(
         prediction=best["_prediction"],
         baseline_prediction=baseline_prediction,
@@ -1390,6 +1509,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "task1_retrieval_refinement_local_search",
             "task1_early_refinement",
             "task1_sem_burgers_rollout",
+            "task1_physics_residual_refinement",
         }:
             return blueprint
     return None
@@ -1917,6 +2037,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
         "learned_residual_correction",
         "external_residual_blend",
         "task1_sem_burgers_rollout",
+        "task1_physics_residual_refinement",
     }
     hooks = []
     seen: set[str] = set()
@@ -2982,7 +3103,63 @@ def _prediction_from_blueprint_params(
     if family == "task1_sem_burgers_rollout":
         sem_params = sem_params_from_any(params)
         return sem_burgers_rollout(context=context, **sem_params)
+    if family == "task1_physics_residual_refinement":
+        return _prediction_from_task1_physics_residual_refinement(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
+
+
+def _prediction_from_task1_physics_residual_refinement(
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    residual_params = physics_residual_refinement_params_from_any(params)
+    base_prediction = _base_prediction_for_physics_residual_refinement(
+        context=context,
+        target=target,
+        params=residual_params,
+    )
+    return residual_guided_refinement(
+        context=context,
+        base_prediction=base_prediction,
+        viscosity=float(residual_params["viscosity"]),
+        dt=float(residual_params["dt"]),
+        dx=float(residual_params["dx"]),
+        correction_weight=float(residual_params["correction_weight"]),
+        stop_step=int(residual_params["stop_step"]),
+        spectral_strength=float(residual_params["residual_spectral_strength"]),
+    )
+
+
+def _base_prediction_for_physics_residual_refinement(
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    base_family = str(params.get("base_family", "task1_retrieval_refinement"))
+    if base_family == "linear_trend_spectral":
+        return _prediction_from_linear_trend_spectral(context=context, params=params)
+    if base_family == "task1_retrieval_prior":
+        return _prediction_from_task1_retrieval_prior(
+            context=context,
+            target=target,
+            params=params,
+        )
+    if base_family == "task1_retrieval_refinement":
+        return _prediction_from_task1_retrieval_refinement(
+            context=context,
+            target=target,
+            params=params,
+        )
+    raise HypothesisLabError(
+        f"unsupported physics residual refinement base_family: {base_family}"
+    )
 
 
 def _prediction_from_task1_retrieval_prior(
@@ -3354,6 +3531,57 @@ def _candidate_metadata(
             "substeps": sem_params["substeps"],
             "filter_strength": sem_params["filter_strength"],
         }
+    if family == "task1_physics_residual_refinement":
+        residual_params = physics_residual_refinement_params_from_any(params)
+        base_prediction = _base_prediction_for_physics_residual_refinement(
+            context=context,
+            target=target,
+            params=residual_params,
+        )
+        candidate_prediction = residual_guided_refinement(
+            context=context,
+            base_prediction=base_prediction,
+            viscosity=float(residual_params["viscosity"]),
+            dt=float(residual_params["dt"]),
+            dx=float(residual_params["dx"]),
+            correction_weight=float(residual_params["correction_weight"]),
+            stop_step=int(residual_params["stop_step"]),
+            spectral_strength=float(residual_params["residual_spectral_strength"]),
+        )
+        base_summary = burgers_residual_summary(
+            base_prediction,
+            viscosity=float(residual_params["viscosity"]),
+            dt=float(residual_params["dt"]),
+            dx=float(residual_params["dx"]),
+        )
+        candidate_summary = burgers_residual_summary(
+            candidate_prediction,
+            viscosity=float(residual_params["viscosity"]),
+            dt=float(residual_params["dt"]),
+            dx=float(residual_params["dx"]),
+        )
+        return {
+            "executor": "residual_guided_refinement",
+            "base_family": residual_params["base_family"],
+            "viscosity": residual_params["viscosity"],
+            "dt": residual_params["dt"],
+            "dx": residual_params["dx"],
+            "correction_weight": residual_params["correction_weight"],
+            "stop_step": residual_params["stop_step"],
+            "residual_spectral_strength": residual_params[
+                "residual_spectral_strength"
+            ],
+            "base_residual_rmse": base_summary["residual_rmse"],
+            "candidate_residual_rmse": candidate_summary["residual_rmse"],
+            "residual_rmse_delta": (
+                float(candidate_summary["residual_rmse"])
+                - float(base_summary["residual_rmse"])
+            ),
+            "base_early_residual_rmse": base_summary["early_residual_rmse"],
+            "candidate_early_residual_rmse": candidate_summary[
+                "early_residual_rmse"
+            ],
+        }
     if family not in {
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
@@ -3661,6 +3889,8 @@ def _iter_parameter_grid(
         return _retrieval_refinement_parameter_grid(grid)
     if family == "task1_sem_burgers_rollout":
         return _sem_burgers_parameter_grid(grid)
+    if family == "task1_physics_residual_refinement":
+        return _physics_residual_refinement_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
     late_starts = grid.get("late_start", [None])
@@ -3807,6 +4037,98 @@ def _sem_burgers_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, An
         for substeps in required["substeps"]
         for filter_strength in required["filter_strength"]
     ]
+
+
+def _physics_residual_refinement_parameter_grid(
+    grid: dict[str, list[Any]],
+) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "physics residual candidate_params entries must be objects"
+                )
+            rows.append(physics_residual_refinement_params_from_any(row))
+        if not rows:
+            raise HypothesisLabError(
+                "physics residual candidate_params must not be empty"
+            )
+        return rows
+    required = {
+        "base_family": grid.get("base_family", ["task1_retrieval_refinement"]),
+        "viscosity": grid.get("viscosity", [0.001]),
+        "dt": grid.get("dt", [0.05]),
+        "dx": grid.get("dx", [1.0 / 256.0]),
+        "correction_weight": grid.get("correction_weight"),
+        "stop_step": grid.get("stop_step"),
+        "residual_spectral_strength": grid.get("residual_spectral_strength", [0.0]),
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(
+                f"physics residual blueprint missing {key} list"
+            )
+    rows = []
+    for base_family in required["base_family"]:
+        for viscosity in required["viscosity"]:
+            for dt in required["dt"]:
+                for dx in required["dx"]:
+                    for correction_weight in required["correction_weight"]:
+                        for stop_step in required["stop_step"]:
+                            for residual_strength in required[
+                                "residual_spectral_strength"
+                            ]:
+                                row = {
+                                    "base_family": str(base_family),
+                                    "viscosity": float(viscosity),
+                                    "dt": float(dt),
+                                    "dx": float(dx),
+                                    "correction_weight": float(correction_weight),
+                                    "stop_step": int(stop_step),
+                                    "residual_spectral_strength": float(
+                                        residual_strength
+                                    ),
+                                }
+                                if row["base_family"] == "linear_trend_spectral":
+                                    row.update(
+                                        {
+                                            "slope_window": int(
+                                                grid.get("slope_window", [5])[0]
+                                            ),
+                                            "gain": float(grid.get("gain", [-0.075])[0]),
+                                            "decay": float(grid.get("decay", [70.0])[0]),
+                                            "spectral_strength": float(
+                                                grid.get("spectral_strength", [0.0])[0]
+                                            ),
+                                        }
+                                    )
+                                else:
+                                    row.update(
+                                        _normalize_retrieval_refinement_params(
+                                            {
+                                                "k": grid.get("k", [48])[0],
+                                                "mode": grid.get("mode", ["affine"])[0],
+                                                "early_blend_steps": grid.get(
+                                                    "early_blend_steps",
+                                                    [20],
+                                                )[0],
+                                                "persistence_weight_start": grid.get(
+                                                    "persistence_weight_start",
+                                                    [0.5],
+                                                )[0],
+                                                "spectral_strength": grid.get(
+                                                    "spectral_strength",
+                                                    [0.5],
+                                                )[0],
+                                            }
+                                        )
+                                    )
+                                rows.append(
+                                    physics_residual_refinement_params_from_any(row)
+                                )
+    return rows
 
 
 def _default_retrieval_refinement_params() -> list[dict[str, Any]]:
@@ -4913,6 +5235,15 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
 
 
 def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
+    if family == "task1_physics_residual_refinement":
+        residual_params = physics_residual_refinement_params_from_any(params)
+        return (
+            "task1_physics_residual_refinement"
+            f"_{residual_params['base_family']}"
+            f"_cw{float(residual_params['correction_weight']):g}"
+            f"_stop{int(residual_params['stop_step'])}"
+            f"_rs{float(residual_params['residual_spectral_strength']):g}"
+        )
     if family == "task1_sem_burgers_rollout":
         sem_params = sem_params_from_any(params)
         return (
@@ -5730,6 +6061,28 @@ def _sandbox_pareto_promotion_gate(
     any_positive_evidence = any(
         bool(axis["improved"]) for axis in [total_axis, segment_axis, early_axis]
     )
+    physics_residual_metric = metric_results.get("physics_residual_rmse_delta")
+    physics_residual_required = family == "task1_physics_residual_refinement"
+    physics_residual_passed = True
+    physics_residual_axis = {
+        "metric": "physics_residual_rmse_delta",
+        "value": None,
+        "direction": "minimize",
+        "passed": True,
+        "improved": False,
+    }
+    if isinstance(physics_residual_metric, dict):
+        value = physics_residual_metric.get("value")
+        physics_residual_passed = bool(physics_residual_metric.get("passed"))
+        physics_residual_axis = {
+            "metric": "physics_residual_rmse_delta",
+            "value": value if isinstance(value, int | float) else None,
+            "direction": "minimize",
+            "passed": physics_residual_passed,
+            "improved": bool(
+                isinstance(value, int | float) and float(value) < 0.0
+            ),
+        }
     reason_codes: list[str] = []
     if not all(hard_constraints.values()):
         decision = "reject_or_revise"
@@ -5739,6 +6092,20 @@ def _sandbox_pareto_promotion_gate(
             for name, passed in hard_constraints.items()
             if not passed
         )
+    elif physics_residual_required and not physics_residual_passed:
+        decision = (
+            "keep_as_evidence"
+            if total_passed or any_positive_evidence
+            else "reject_or_revise"
+        )
+        pareto_status = (
+            "score_evidence_without_physics_residual_gain"
+            if total_passed or any_positive_evidence
+            else "dominated_or_invalid"
+        )
+        reason_codes.append("physics_residual_not_improved")
+        if total_passed:
+            reason_codes.append("total_score_passed")
     elif total_passed and guardrails_passed:
         decision = "promote_to_strategy_proposal"
         pareto_status = "dominates_baseline"
@@ -5784,6 +6151,7 @@ def _sandbox_pareto_promotion_gate(
             "middle_score": middle_guardrail,
             "late_rmse": late_guardrail,
             "runtime_seconds": runtime_axis,
+            "physics_residual_rmse_delta": physics_residual_axis,
             "candidate_budget": {
                 "metric": "candidate_budget",
                 "value": int(candidate_budget),

@@ -522,6 +522,49 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=-1,
         ),
         _entry(
+            strategy_id="task1_physics_residual_refinement_v0",
+            title="Task 1 Burgers residual-guided trajectory refinement",
+            model_families=["DataInference", "PhysicsSolver", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "physics_residual_mismatch",
+                "early_window_rel_mse",
+                "middle_window_rel_mse",
+                "physics_dynamics_missing",
+            ],
+            hypothesis=(
+                "A strong retrieval trajectory should not be replaced by a pure "
+                "physics rollout, but its Burgers residual can identify bounded "
+                "early and middle corrections that improve physical consistency."
+            ),
+            mechanism=(
+                "Use finite-difference Burgers residual as a target-free scorer, "
+                "then nudge selected forecast frames toward a one-step PDE update "
+                "with small weights and strict context preservation."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "task1_physics_residual_refinement",
+                "controlled_numpy_burgers_residual_refinement",
+            ],
+            expected_observables=[
+                "candidate residual RMSE decreases versus the base trajectory",
+                "early or middle score improves without late-window collapse",
+                "context frames remain exactly preserved",
+            ],
+            known_risks=[
+                "lower residual does not guarantee better hidden-test accuracy",
+                "over-weighted physics nudging can erase useful retrieval priors",
+                "fixed viscosity and reduced-grid time scale may be mismatched",
+            ],
+            acceptance_criteria=[
+                "sandbox metadata records base and candidate residual RMSE",
+                "candidate residual RMSE improves over the base trajectory",
+                "competition audit confirms exact context preservation",
+            ],
+            priority=-2,
+        ),
+        _entry(
             strategy_id="task1_retrieval_refinement_v0",
             title="Task 1 retrieval refinement with early-horizon anchoring",
             model_families=["DataInference", "RetrievalPrior", "all"],

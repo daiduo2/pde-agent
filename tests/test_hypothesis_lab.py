@@ -469,6 +469,51 @@ def _sem_burgers_asset_algorithm_candidates(path: Path) -> Path:
     return path
 
 
+def _physics_residual_refinement_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": (
+                    "candidate_local_strategy_task1_physics_residual_refinement_v0"
+                ),
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "PhysicsSolver",
+                "hypothesis": (
+                    "Burgers residual can guide a bounded correction of the "
+                    "current retrieval trajectory without replacing the data prior."
+                ),
+                "mechanism": (
+                    "Compute finite-difference Burgers residual on a base "
+                    "retrieval prediction and nudge future frames toward one-step "
+                    "PDE consistency."
+                ),
+                "executor_spec": {
+                    "cli_command": "run-hypothesis-lab",
+                    "implementation_hooks": ["task1_physics_residual_refinement"],
+                },
+                "expected_observables": [
+                    "candidate residual RMSE decreases versus base prediction",
+                    "context prefix remains exact",
+                ],
+                "risk_controls": ["physics nudging can hurt data-prior accuracy"],
+                "source_grounding": {
+                    "algorithm_card_id": (
+                        "local_strategy_task1_physics_residual_refinement_v0"
+                    ),
+                    "source_ids": ["task1_physics_residual_refinement_v0"],
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -741,6 +786,49 @@ def test_hypothesis_lab_run_executes_sem_burgers_rollout_candidate(
     assert report["sandbox"]["candidate_family"] == "task1_sem_burgers_rollout"
     assert report["sandbox"]["best_candidate"]["candidate_id"].startswith(
         "task1_sem_burgers_rollout"
+    )
+
+
+def test_hypothesis_lab_designs_physics_residual_refinement_from_local_strategy_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _physics_residual_refinement_asset_algorithm_candidates(
+                tmp_path / "physics_residual_candidates.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "task1_physics_residual_refinement"
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "task1_physics_residual_refinement"
+    )
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["candidate_family"] == "task1_physics_residual_refinement"
+    assert blueprint["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_burgers_residual_refinement"
+    )
+    assert blueprint["parameter_grid"]["candidate_params"][0]["base_family"] == (
+        "task1_retrieval_refinement"
     )
 
 
@@ -2708,6 +2796,9 @@ def test_hypothesis_lab_sandbox_executes_sem_burgers_rollout_family(
     from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
 
     target = np.full((2, 200, 256), 0.25, dtype=np.float32)
+    for step in range(10):
+        target[:, step, :] = np.float32(0.25 + 0.002 * step)
+    target[:, 10:, :] = target[:, 9:10, :]
     context = target[:, :10, :]
     context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
     target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
@@ -2756,6 +2847,136 @@ def test_hypothesis_lab_sandbox_executes_sem_burgers_rollout_family(
         "substeps": 2,
         "filter_strength": 0.0,
     }
+
+
+def test_hypothesis_lab_sandbox_executes_physics_residual_refinement_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    target = np.full((2, 200, 256), 0.25, dtype=np.float32)
+    for step in range(10):
+        target[:, step, :] = np.float32(0.25 + 0.002 * step)
+    target[:, 10:, :] = target[:, 9:10, :]
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_physics_residual_refinement_001",
+        "candidate_family": "task1_physics_residual_refinement",
+        "search_mode": "physics_residual_refinement",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": -0.2,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                    "correction_weight": 0.5,
+                    "stop_step": 80,
+                    "residual_spectral_strength": 0.0,
+                }
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["candidate_family"] == "task1_physics_residual_refinement"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_physics_residual_refinement"
+    )
+    metadata = sandbox["best_candidate"]["metadata"]
+    assert metadata["executor"] == "residual_guided_refinement"
+    assert metadata["candidate_residual_rmse"] < metadata["base_residual_rmse"]
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+
+
+def test_hypothesis_lab_physics_residual_noop_sentinel_blocks_false_promotion(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    context = np.full((1, 10, 256), 0.25, dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] = np.float32(0.25 + 0.002 * step)
+    target = np.empty((1, 200, 256), dtype=np.float32)
+    target[:, :10, :] = context
+    slope = (context[:, -1:, :] - context[:, -3:-2, :]) / np.float32(2.0)
+    horizon = np.arange(1, 191, dtype=np.float32).reshape(1, -1, 1)
+    horizon = horizon * np.exp(-horizon / np.float32(100.0))
+    target[:, 10:, :] = context[:, -1:, :] - np.float32(0.2) * horizon * slope
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_physics_residual_refinement_001",
+        "candidate_family": "task1_physics_residual_refinement",
+        "search_mode": "physics_residual_refinement",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": -0.2,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                    "correction_weight": 0.0,
+                    "stop_step": 80,
+                    "residual_spectral_strength": 0.0,
+                },
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": -0.2,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                    "correction_weight": 0.5,
+                    "stop_step": 80,
+                    "residual_spectral_strength": 0.0,
+                },
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert "_cw0_" in sandbox["best_candidate"]["candidate_id"]
+    assert sandbox["verifier"]["decision"] == "keep_as_evidence"
+    assert "physics_residual_not_improved" in sandbox["verifier"][
+        "pareto_promotion_gate"
+    ]["reason_codes"]
 
 
 def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
