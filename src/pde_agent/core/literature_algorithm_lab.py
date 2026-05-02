@@ -296,6 +296,7 @@ EXECUTABLE_BLUEPRINT_EXECUTORS = {
     "controlled_numpy_task1_early_refinement",
     "controlled_numpy_sem_burgers_rollout",
     "controlled_numpy_burgers_residual_refinement",
+    "controlled_numpy_pi_deeponet_correction_head",
     "official_checkpoint_candidate_pipeline",
 }
 

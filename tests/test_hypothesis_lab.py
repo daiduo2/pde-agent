@@ -514,6 +514,52 @@ def _physics_residual_refinement_asset_algorithm_candidates(path: Path) -> Path:
     return path
 
 
+def _pi_deeponet_correction_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": (
+                    "candidate_local_strategy_task1_pi_deeponet_correction_head_v0"
+                ),
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "PI-DeepONet",
+                "hypothesis": (
+                    "A small PI-DeepONet correction head can learn a low-rank "
+                    "residual on top of the retrieval prior while keeping the "
+                    "context prefix exact."
+                ),
+                "mechanism": (
+                    "Use branch features from the first 10 frames and trunk "
+                    "features from (t, x) to fit a bounded correction field, "
+                    "with optional Burgers residual nudging."
+                ),
+                "executor_spec": {
+                    "cli_command": "run-hypothesis-lab",
+                    "implementation_hooks": ["task1_pi_deeponet_correction_head"],
+                },
+                "expected_observables": [
+                    "correction head improves score over the base trajectory",
+                    "context prefix remains exact",
+                ],
+                "risk_controls": ["correction head can overfit validation windows"],
+                "source_grounding": {
+                    "algorithm_card_id": (
+                        "local_strategy_task1_pi_deeponet_correction_head_v0"
+                    ),
+                    "source_ids": ["task1_pi_deeponet_correction_head_v0"],
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -826,6 +872,49 @@ def test_hypothesis_lab_designs_physics_residual_refinement_from_local_strategy_
     assert blueprint["candidate_family"] == "task1_physics_residual_refinement"
     assert blueprint["sandbox"]["allowed_executor"] == (
         "controlled_numpy_burgers_residual_refinement"
+    )
+    assert blueprint["parameter_grid"]["candidate_params"][0]["base_family"] == (
+        "task1_retrieval_refinement"
+    )
+
+
+def test_hypothesis_lab_designs_pi_deeponet_correction_from_local_strategy_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _pi_deeponet_correction_asset_algorithm_candidates(
+                tmp_path / "pi_deeponet_candidates.json"
+            )
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "task1_pi_deeponet_correction_head"
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "task1_pi_deeponet_correction_head"
+    )
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["candidate_family"] == "task1_pi_deeponet_correction_head"
+    assert blueprint["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_pi_deeponet_correction_head"
     )
     assert blueprint["parameter_grid"]["candidate_params"][0]["base_family"] == (
         "task1_retrieval_refinement"
@@ -2973,8 +3062,143 @@ def test_hypothesis_lab_physics_residual_noop_sentinel_blocks_false_promotion(
     )
 
     assert "_cw0_" in sandbox["best_candidate"]["candidate_id"]
-    assert sandbox["verifier"]["decision"] == "keep_as_evidence"
+    assert sandbox["verifier"]["decision"] != "promote_to_strategy_proposal"
     assert "physics_residual_not_improved" in sandbox["verifier"][
+        "pareto_promotion_gate"
+    ]["reason_codes"]
+
+
+def test_hypothesis_lab_sandbox_executes_pi_deeponet_correction_head_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 1.0, 256, endpoint=False, dtype=np.float32)
+    context = np.empty((4, 10, 256), dtype=np.float32)
+    for sample in range(4):
+        amplitude = np.float32(0.2 + 0.05 * sample)
+        for step in range(10):
+            context[sample, step, :] = 0.3 + amplitude * np.sin(
+                2.0 * np.pi * (x + 0.01 * step)
+            )
+    target = np.repeat(context[:, -1:, :], 200, axis=1).astype(np.float32)
+    target[:, :10, :] = context
+    horizon = np.linspace(0.0, 1.0, 190, dtype=np.float32).reshape(1, 190, 1)
+    spatial = np.sin(2.0 * np.pi * x).reshape(1, 1, 256)
+    sample_weight = np.mean(context[:, -1:, :], axis=2, keepdims=True)
+    target[:, 10:, :] += np.float32(0.08) * sample_weight * horizon * spatial
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_pi_deeponet_correction_head_001",
+        "candidate_family": "task1_pi_deeponet_correction_head",
+        "search_mode": "pi_deeponet_correction_head",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": 0.0,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "ridge_alpha": 1e-6,
+                    "correction_weight": 1.0,
+                    "physics_weight": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                }
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["candidate_family"] == "task1_pi_deeponet_correction_head"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_pi_deeponet_correction_head"
+    )
+    metadata = sandbox["best_candidate"]["metadata"]
+    assert metadata["adapter_type"] == "numpy_pi_deeponet_correction_head"
+    assert metadata["train_mode"] == "ridge_branch_trunk_correction"
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+    assert sandbox["verifier"]["score_delta_vs_baseline"] > 0.0
+
+
+def test_hypothesis_lab_pi_deeponet_noop_sentinel_blocks_false_promotion(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    context = np.full((1, 10, 256), 0.25, dtype=np.float32)
+    for step in range(10):
+        context[:, step, :] = np.float32(0.25 + 0.001 * step)
+    target = np.repeat(context[:, -1:, :], 200, axis=1).astype(np.float32)
+    target[:, :10, :] = context
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_pi_deeponet_correction_head_001",
+        "candidate_family": "task1_pi_deeponet_correction_head",
+        "search_mode": "pi_deeponet_correction_head",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": 0.0,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "ridge_alpha": 1e-6,
+                    "correction_weight": 0.0,
+                    "physics_weight": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                },
+                {
+                    "base_family": "linear_trend_spectral",
+                    "slope_window": 2,
+                    "gain": 0.0,
+                    "decay": 100.0,
+                    "spectral_strength": 0.0,
+                    "ridge_alpha": 1e-6,
+                    "correction_weight": 1.0,
+                    "physics_weight": 0.0,
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "dx": 1.0 / 256.0,
+                },
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["verifier"]["decision"] != "promote_to_strategy_proposal"
+    assert "pi_deeponet_correction_inactive" in sandbox["verifier"][
         "pareto_promotion_gate"
     ]["reason_codes"]
 

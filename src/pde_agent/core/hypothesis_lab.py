@@ -18,6 +18,10 @@ from pde_agent.core.burgers_residual_refinement import (
     physics_residual_refinement_params_from_any,
     residual_guided_refinement,
 )
+from pde_agent.core.pi_deeponet_correction_head import (
+    fit_pi_deeponet_correction_head,
+    pi_deeponet_params_from_any,
+)
 from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
@@ -177,9 +181,35 @@ def generate_hypotheses(
             grouped_cards.setdefault("task1_physics_residual_refinement", []).append(
                 card
             )
+        if "task1_pi_deeponet_correction_head" in hooks:
+            grouped_cards.setdefault("task1_pi_deeponet_correction_head", []).append(
+                card
+            )
         if "task1_sem_burgers_rollout" in hooks:
             grouped_cards.setdefault("task1_sem_burgers_rollout", []).append(card)
     hypotheses = []
+    if "task1_pi_deeponet_correction_head" in grouped_cards:
+        source_cards = grouped_cards["task1_pi_deeponet_correction_head"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_pi_deeponet_correction_head_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_pi_deeponet_correction_head",
+                "mechanism": (
+                    "Fit a small branch-trunk correction head over a strong Task 1 "
+                    "prior and optionally blend a Burgers residual nudge, so the "
+                    "agent can test PI-DeepONet-style residual correction without "
+                    "committing to a heavy model-training path."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -9,
+            }
+        )
     if "task1_physics_residual_refinement" in grouped_cards:
         source_cards = grouped_cards["task1_physics_residual_refinement"]
         hypotheses.append(
@@ -609,6 +639,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
+            "task1_pi_deeponet_correction_head": 50.0,
             "task1_physics_residual_refinement": 49.0,
             "task1_sem_burgers_rollout": 48.0,
             "learned_residual_correction": 40.0,
@@ -835,6 +866,70 @@ def design_algorithm_blueprints(
                     "sandbox": {
                         "allowed_executor": (
                             "controlled_numpy_burgers_residual_refinement"
+                        ),
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_pi_deeponet_correction_head":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_pi_deeponet_correction_head_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_pi_deeponet_correction_head",
+                    "search_mode": "pi_deeponet_correction_head",
+                    "algorithm": {
+                        "summary": (
+                            "Fit a low-rank branch-trunk correction field over a "
+                            "strong Task 1 base trajectory and keep the context "
+                            "prefix exact."
+                        ),
+                        "pseudocode": [
+                            "base = retrieval_refinement(context, reference_library)",
+                            "branch = statistics(context)",
+                            "trunk = polynomial/sinusoidal features(t, x)",
+                            "solve ridge regression for correction target - base",
+                            "prediction = base + correction_weight * correction",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": [
+                            {
+                                "base_family": "task1_retrieval_refinement",
+                                "k": 48,
+                                "mode": "affine",
+                                "early_blend_steps": 20,
+                                "persistence_weight_start": 0.5,
+                                "spectral_strength": 0.5,
+                                "ridge_alpha": 1e-4,
+                                "correction_weight": 0.1,
+                                "physics_weight": 0.0,
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "dx": 1.0 / 256.0,
+                            },
+                            {
+                                "base_family": "task1_retrieval_refinement",
+                                "k": 48,
+                                "mode": "affine",
+                                "early_blend_steps": 20,
+                                "persistence_weight_start": 0.5,
+                                "spectral_strength": 0.5,
+                                "ridge_alpha": 1e-3,
+                                "correction_weight": 0.25,
+                                "physics_weight": 0.02,
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "dx": 1.0 / 256.0,
+                            },
+                        ]
+                    },
+                    "sandbox": {
+                        "allowed_executor": (
+                            "controlled_numpy_pi_deeponet_correction_head"
                         ),
                         "primary_metric": "task1_total_score_proxy",
                         "promotion_min_score_delta": 0.01,
@@ -1185,6 +1280,7 @@ def run_blueprint_sandbox(
         "task1_early_refinement",
         "task1_sem_burgers_rollout",
         "task1_physics_residual_refinement",
+        "task1_pi_deeponet_correction_head",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -1293,6 +1389,15 @@ def run_blueprint_sandbox(
                 "value": float(residual_delta),
                 "threshold": 0.0,
                 "passed": float(residual_delta) < 0.0,
+            }
+    if family == "task1_pi_deeponet_correction_head":
+        metadata = best.get("metadata") if isinstance(best.get("metadata"), dict) else {}
+        correction_rmse = metadata.get("learned_correction_rmse")
+        if isinstance(correction_rmse, int | float):
+            metric_results["pi_deeponet_active_correction"] = {
+                "value": float(correction_rmse),
+                "threshold": 1e-8,
+                "passed": float(correction_rmse) > 1e-8,
             }
     multiview_judge = _task1_multiview_local_judge(
         prediction=best["_prediction"],
@@ -1510,6 +1615,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "task1_early_refinement",
             "task1_sem_burgers_rollout",
             "task1_physics_residual_refinement",
+            "task1_pi_deeponet_correction_head",
         }:
             return blueprint
     return None
@@ -2038,6 +2144,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
         "external_residual_blend",
         "task1_sem_burgers_rollout",
         "task1_physics_residual_refinement",
+        "task1_pi_deeponet_correction_head",
     }
     hooks = []
     seen: set[str] = set()
@@ -3109,7 +3216,39 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_pi_deeponet_correction_head":
+        return _prediction_from_task1_pi_deeponet_correction_head(
+            context=context,
+            target=target,
+            params=params,
+        )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
+
+
+def _prediction_from_task1_pi_deeponet_correction_head(
+    *,
+    context: np.ndarray,
+    target: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    pi_params = pi_deeponet_params_from_any(params)
+    base_prediction = _base_prediction_for_physics_residual_refinement(
+        context=context,
+        target=target,
+        params=pi_params,
+    )
+    result = fit_pi_deeponet_correction_head(
+        context=context,
+        base_prediction=base_prediction,
+        target=target,
+        ridge_alpha=float(pi_params["ridge_alpha"]),
+        correction_weight=float(pi_params["correction_weight"]),
+        physics_weight=float(pi_params["physics_weight"]),
+        viscosity=float(pi_params["viscosity"]),
+        dt=float(pi_params["dt"]),
+        dx=float(pi_params["dx"]),
+    )
+    return result["prediction"]
 
 
 def _prediction_from_task1_physics_residual_refinement(
@@ -3582,6 +3721,27 @@ def _candidate_metadata(
                 "early_residual_rmse"
             ],
         }
+    if family == "task1_pi_deeponet_correction_head":
+        pi_params = pi_deeponet_params_from_any(params)
+        base_prediction = _base_prediction_for_physics_residual_refinement(
+            context=context,
+            target=target,
+            params=pi_params,
+        )
+        result = fit_pi_deeponet_correction_head(
+            context=context,
+            base_prediction=base_prediction,
+            target=target,
+            ridge_alpha=float(pi_params["ridge_alpha"]),
+            correction_weight=float(pi_params["correction_weight"]),
+            physics_weight=float(pi_params["physics_weight"]),
+            viscosity=float(pi_params["viscosity"]),
+            dt=float(pi_params["dt"]),
+            dx=float(pi_params["dx"]),
+        )
+        metadata = dict(result["metadata"])
+        metadata["base_family"] = pi_params["base_family"]
+        return metadata
     if family not in {
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
@@ -3891,6 +4051,8 @@ def _iter_parameter_grid(
         return _sem_burgers_parameter_grid(grid)
     if family == "task1_physics_residual_refinement":
         return _physics_residual_refinement_parameter_grid(grid)
+    if family == "task1_pi_deeponet_correction_head":
+        return _pi_deeponet_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
     late_starts = grid.get("late_start", [None])
@@ -4128,6 +4290,86 @@ def _physics_residual_refinement_parameter_grid(
                                 rows.append(
                                     physics_residual_refinement_params_from_any(row)
                                 )
+    return rows
+
+
+def _pi_deeponet_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "PI-DeepONet candidate_params entries must be objects"
+                )
+            rows.append(pi_deeponet_params_from_any(row))
+        if not rows:
+            raise HypothesisLabError("PI-DeepONet candidate_params must not be empty")
+        return rows
+    required = {
+        "base_family": grid.get("base_family", ["task1_retrieval_refinement"]),
+        "ridge_alpha": grid.get("ridge_alpha"),
+        "correction_weight": grid.get("correction_weight"),
+        "physics_weight": grid.get("physics_weight", [0.0]),
+        "viscosity": grid.get("viscosity", [0.001]),
+        "dt": grid.get("dt", [0.05]),
+        "dx": grid.get("dx", [1.0 / 256.0]),
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(f"PI-DeepONet blueprint missing {key} list")
+    rows = []
+    for base_family in required["base_family"]:
+        for ridge_alpha in required["ridge_alpha"]:
+            for correction_weight in required["correction_weight"]:
+                for physics_weight in required["physics_weight"]:
+                    for viscosity in required["viscosity"]:
+                        for dt in required["dt"]:
+                            for dx in required["dx"]:
+                                row = {
+                                    "base_family": str(base_family),
+                                    "ridge_alpha": float(ridge_alpha),
+                                    "correction_weight": float(correction_weight),
+                                    "physics_weight": float(physics_weight),
+                                    "viscosity": float(viscosity),
+                                    "dt": float(dt),
+                                    "dx": float(dx),
+                                }
+                                if row["base_family"] == "linear_trend_spectral":
+                                    row.update(
+                                        {
+                                            "slope_window": int(
+                                                grid.get("slope_window", [5])[0]
+                                            ),
+                                            "gain": float(grid.get("gain", [0.0])[0]),
+                                            "decay": float(grid.get("decay", [70.0])[0]),
+                                            "spectral_strength": float(
+                                                grid.get("spectral_strength", [0.0])[0]
+                                            ),
+                                        }
+                                    )
+                                else:
+                                    row.update(
+                                        _normalize_retrieval_refinement_params(
+                                            {
+                                                "k": grid.get("k", [48])[0],
+                                                "mode": grid.get("mode", ["affine"])[0],
+                                                "early_blend_steps": grid.get(
+                                                    "early_blend_steps",
+                                                    [20],
+                                                )[0],
+                                                "persistence_weight_start": grid.get(
+                                                    "persistence_weight_start",
+                                                    [0.5],
+                                                )[0],
+                                                "spectral_strength": grid.get(
+                                                    "spectral_strength",
+                                                    [0.5],
+                                                )[0],
+                                            }
+                                        )
+                                    )
+                                rows.append(pi_deeponet_params_from_any(row))
     return rows
 
 
@@ -5235,6 +5477,15 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
 
 
 def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
+    if family == "task1_pi_deeponet_correction_head":
+        pi_params = pi_deeponet_params_from_any(params)
+        return (
+            "task1_pi_deeponet_correction_head"
+            f"_{pi_params['base_family']}"
+            f"_cw{float(pi_params['correction_weight']):g}"
+            f"_pa{float(pi_params['ridge_alpha']):g}"
+            f"_pw{float(pi_params['physics_weight']):g}"
+        )
     if family == "task1_physics_residual_refinement":
         residual_params = physics_residual_refinement_params_from_any(params)
         return (
@@ -6083,6 +6334,28 @@ def _sandbox_pareto_promotion_gate(
                 isinstance(value, int | float) and float(value) < 0.0
             ),
         }
+    pi_correction_metric = metric_results.get("pi_deeponet_active_correction")
+    pi_correction_required = family == "task1_pi_deeponet_correction_head"
+    pi_correction_passed = True
+    pi_correction_axis = {
+        "metric": "pi_deeponet_active_correction",
+        "value": None,
+        "direction": "maximize",
+        "passed": True,
+        "improved": False,
+    }
+    if isinstance(pi_correction_metric, dict):
+        value = pi_correction_metric.get("value")
+        pi_correction_passed = bool(pi_correction_metric.get("passed"))
+        pi_correction_axis = {
+            "metric": "pi_deeponet_active_correction",
+            "value": value if isinstance(value, int | float) else None,
+            "direction": "maximize",
+            "passed": pi_correction_passed,
+            "improved": bool(
+                isinstance(value, int | float) and float(value) > 1e-8
+            ),
+        }
     reason_codes: list[str] = []
     if not all(hard_constraints.values()):
         decision = "reject_or_revise"
@@ -6104,6 +6377,20 @@ def _sandbox_pareto_promotion_gate(
             else "dominated_or_invalid"
         )
         reason_codes.append("physics_residual_not_improved")
+        if total_passed:
+            reason_codes.append("total_score_passed")
+    elif pi_correction_required and not pi_correction_passed:
+        decision = (
+            "keep_as_evidence"
+            if total_passed or any_positive_evidence
+            else "reject_or_revise"
+        )
+        pareto_status = (
+            "score_evidence_without_active_pi_deeponet_correction"
+            if total_passed or any_positive_evidence
+            else "dominated_or_invalid"
+        )
+        reason_codes.append("pi_deeponet_correction_inactive")
         if total_passed:
             reason_codes.append("total_score_passed")
     elif total_passed and guardrails_passed:
@@ -6152,6 +6439,7 @@ def _sandbox_pareto_promotion_gate(
             "late_rmse": late_guardrail,
             "runtime_seconds": runtime_axis,
             "physics_residual_rmse_delta": physics_residual_axis,
+            "pi_deeponet_active_correction": pi_correction_axis,
             "candidate_budget": {
                 "metric": "candidate_budget",
                 "value": int(candidate_budget),

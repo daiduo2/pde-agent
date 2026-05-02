@@ -565,6 +565,50 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=-2,
         ),
         _entry(
+            strategy_id="task1_pi_deeponet_correction_head_v0",
+            title="Task 1 PI-DeepONet correction head over retrieval prior",
+            model_families=["PI-DeepONet", "DeepONet", "DataInference", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "physics_residual_mismatch",
+                "early_window_rel_mse",
+                "middle_window_rel_mse",
+                "operator_residual_bias",
+            ],
+            hypothesis=(
+                "A small PI-DeepONet-style branch/trunk correction head can learn "
+                "structured residuals left by the retrieval prior while preserving "
+                "the exact context prefix and keeping inference cheap."
+            ),
+            mechanism=(
+                "Build branch features from the first 10 frames, trunk features "
+                "from reduced-grid time and space coordinates, solve a ridge "
+                "branch-trunk correction, and optionally blend a Burgers residual "
+                "nudge."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "task1_pi_deeponet_correction_head",
+                "controlled_numpy_pi_deeponet_correction_head",
+            ],
+            expected_observables=[
+                "correction candidate improves score over its base prior",
+                "metadata records branch/trunk dimensions and residual delta",
+                "context frames remain exactly preserved",
+            ],
+            known_risks=[
+                "ridge correction can overfit local validation windows",
+                "low-rank branch/trunk features may miss shock-local residuals",
+                "physics blending can regress score when the time scale is mismatched",
+            ],
+            acceptance_criteria=[
+                "sandbox metadata records numpy_pi_deeponet_correction_head",
+                "candidate beats the configured base/no-op sentinel",
+                "competition audit confirms exact context preservation",
+            ],
+            priority=-3,
+        ),
+        _entry(
             strategy_id="task1_retrieval_refinement_v0",
             title="Task 1 retrieval refinement with early-horizon anchoring",
             model_families=["DataInference", "RetrievalPrior", "all"],
