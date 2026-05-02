@@ -426,6 +426,49 @@ def _retrieval_refinement_asset_algorithm_candidates(path: Path) -> Path:
     return path
 
 
+def _sem_burgers_asset_algorithm_candidates(path: Path) -> Path:
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+        "source_state_hint": "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT",
+        "algorithm_candidates": [
+            {
+                "algorithm_candidate_id": (
+                    "candidate_local_strategy_task1_sem_burgers_rollout_v0"
+                ),
+                "candidate_family": "local_strategy_skill",
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": "PhysicsSolver",
+                "hypothesis": (
+                    "A fixed-nu spectral-element style Burgers rollout can "
+                    "improve Task 1 early and middle windows over retrieval-only "
+                    "postprocessing."
+                ),
+                "mechanism": (
+                    "Use the last context frame as the initial condition and "
+                    "advance Burgers with element-local spectral derivatives."
+                ),
+                "executor_spec": {
+                    "cli_command": "run-hypothesis-lab",
+                    "implementation_hooks": ["task1_sem_burgers_rollout"],
+                },
+                "expected_observables": [
+                    "early and middle Rel-MSE improve versus persistence",
+                    "context prefix remains exact",
+                ],
+                "risk_controls": ["explicit SEM rollout can be unstable"],
+                "source_grounding": {
+                    "algorithm_card_id": "local_strategy_task1_sem_burgers_rollout_v0",
+                    "source_ids": ["task1_sem_burgers_rollout_v0"],
+                },
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_hypothesis_lab_builds_cards_from_manual_operator_report(tmp_path: Path) -> None:
     from pde_agent.core.hypothesis_lab import build_knowledge_cards
 
@@ -626,6 +669,78 @@ def test_hypothesis_lab_builds_retrieval_refinement_from_local_strategy_candidat
     assert any(row["mode"] == "raw" for row in candidate_params)
     assert blueprints["blueprints"][1]["blueprint_id"] == (
         "bp_task1_retrieval_refinement_001"
+    )
+
+
+def test_hypothesis_lab_designs_sem_burgers_rollout_from_local_strategy_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _sem_burgers_asset_algorithm_candidates(tmp_path / "sem_candidates.json")
+        ],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == ["task1_sem_burgers_rollout"]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == (
+        "task1_sem_burgers_rollout"
+    )
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    blueprint = blueprints["blueprints"][0]
+    assert blueprint["candidate_family"] == "task1_sem_burgers_rollout"
+    assert blueprint["sandbox"]["allowed_executor"] == (
+        "controlled_numpy_sem_burgers_rollout"
+    )
+    assert blueprint["parameter_grid"]["candidate_params"][0] == {
+        "viscosity": 0.001,
+        "dt": 0.05,
+        "element_count": 16,
+        "polynomial_order": 8,
+        "substeps": 8,
+        "filter_strength": 0.02,
+        "interface_penalty": 0.02,
+    }
+
+
+def test_hypothesis_lab_run_executes_sem_burgers_rollout_candidate(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_hypothesis_lab
+
+    target = np.full((1, 200, 256), 0.25, dtype=np.float32)
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+
+    report = run_hypothesis_lab(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[
+            _sem_burgers_asset_algorithm_candidates(tmp_path / "sem_candidates.json")
+        ],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "lab",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert report["sandbox"]["candidate_family"] == "task1_sem_burgers_rollout"
+    assert report["sandbox"]["best_candidate"]["candidate_id"].startswith(
+        "task1_sem_burgers_rollout"
     )
 
 
@@ -2584,6 +2699,62 @@ def test_hypothesis_lab_sandbox_executes_retrieval_refinement_leave_one_out(
         "early_blend_steps",
         "persistence_weight_start",
         "spectral_strength",
+    }
+
+
+def test_hypothesis_lab_sandbox_executes_sem_burgers_rollout_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    target = np.full((2, 200, 256), 0.25, dtype=np.float32)
+    context = target[:, :10, :]
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    blueprint = {
+        "blueprint_id": "bp_task1_sem_burgers_rollout_001",
+        "candidate_family": "task1_sem_burgers_rollout",
+        "search_mode": "physics_numeric_rollout",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "viscosity": 0.001,
+                    "dt": 0.05,
+                    "element_count": 16,
+                    "polynomial_order": 8,
+                    "substeps": 2,
+                    "filter_strength": 0.0,
+                }
+            ]
+        },
+        "sandbox": {
+            "promotion_min_score_delta": 0.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["candidate_family"] == "task1_sem_burgers_rollout"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_sem_burgers_rollout"
+    )
+    assert sandbox["verifier"]["metric_results"]["context_preserved"]["passed"]
+    assert sandbox["best_candidate"]["metadata"] == {
+        "executor": "sem_burgers_rollout",
+        "viscosity": 0.001,
+        "dt": 0.05,
+        "element_count": 16,
+        "polynomial_order": 8,
+        "substeps": 2,
+        "filter_strength": 0.0,
     }
 
 

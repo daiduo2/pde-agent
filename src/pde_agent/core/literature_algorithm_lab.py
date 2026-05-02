@@ -294,6 +294,7 @@ EXECUTABLE_BLUEPRINT_EXECUTORS = {
     "controlled_numpy_retrieval_prior",
     "controlled_numpy_retrieval_refinement",
     "controlled_numpy_task1_early_refinement",
+    "controlled_numpy_sem_burgers_rollout",
     "official_checkpoint_candidate_pipeline",
 }
 

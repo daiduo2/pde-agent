@@ -9,6 +9,10 @@ from typing import Any
 
 import numpy as np
 
+from pde_agent.core.burgers_spectral_element import (
+    sem_burgers_rollout,
+    sem_params_from_any,
+)
 from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
@@ -164,7 +168,30 @@ def generate_hypotheses(
             grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
         if "task1_early_refinement" in hooks:
             grouped_cards.setdefault("task1_early_refinement", []).append(card)
+        if "task1_sem_burgers_rollout" in hooks:
+            grouped_cards.setdefault("task1_sem_burgers_rollout", []).append(card)
     hypotheses = []
+    if "task1_sem_burgers_rollout" in grouped_cards:
+        source_cards = grouped_cards["task1_sem_burgers_rollout"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_sem_burgers_rollout_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_sem_burgers_rollout",
+                "mechanism": (
+                    "Use a fixed-nu physics rollout for Task 1 Burgers, advancing "
+                    "the last context frame with element-local spectral derivatives "
+                    "instead of relying only on retrieval or persistence."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "priority": -7,
+            }
+        )
     if "task1_early_refinement" in grouped_cards:
         source_cards = grouped_cards["task1_early_refinement"]
         hypotheses.append(
@@ -552,6 +579,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
             "task1_retrieval_prior": 43.0,
+            "task1_sem_burgers_rollout": 48.0,
             "learned_residual_correction": 40.0,
             "linear_trend_late_spectral_ramp": 25.0,
             "linear_trend_spectral_escape": 20.0,
@@ -650,6 +678,59 @@ def design_algorithm_blueprints(
                         ),
                     },
                     "next_command": "run-checkpoint-family-sandbox",
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
+        if hypothesis.get("candidate_family") == "task1_sem_burgers_rollout":
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_sem_burgers_rollout_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_sem_burgers_rollout",
+                    "search_mode": "physics_numeric_rollout",
+                    "algorithm": {
+                        "summary": (
+                            "Advance fixed-nu 1D Burgers from the last context "
+                            "frame with a lightweight spectral-element style "
+                            "collocation executor."
+                        ),
+                        "pseudocode": [
+                            "state = context[:, -1, :]",
+                            "for each requested future step:",
+                            "  substep RK4 on u_t = -u u_x + nu u_xx",
+                            "  compute derivatives with element-local spectral grids",
+                            "  blend element interfaces and optionally filter modes",
+                            "prediction[:10] = context",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": [
+                            {
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "element_count": 16,
+                                "polynomial_order": 8,
+                                "substeps": 8,
+                                "filter_strength": 0.02,
+                                "interface_penalty": 0.02,
+                            },
+                            {
+                                "viscosity": 0.001,
+                                "dt": 0.05,
+                                "element_count": 32,
+                                "polynomial_order": 8,
+                                "substeps": 8,
+                                "filter_strength": 0.05,
+                                "interface_penalty": 0.04,
+                            },
+                        ]
+                    },
+                    "sandbox": {
+                        "allowed_executor": "controlled_numpy_sem_burgers_rollout",
+                        "primary_metric": "task1_total_score_proxy",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
                     "risks": hypothesis.get("known_risks", []),
                 }
             )
@@ -993,6 +1074,7 @@ def run_blueprint_sandbox(
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
         "task1_early_refinement",
+        "task1_sem_burgers_rollout",
     }:
         raise HypothesisLabError(
             f"unsupported blueprint candidate_family: {blueprint.get('candidate_family')}"
@@ -1307,6 +1389,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "task1_retrieval_refinement",
             "task1_retrieval_refinement_local_search",
             "task1_early_refinement",
+            "task1_sem_burgers_rollout",
         }:
             return blueprint
     return None
@@ -1833,6 +1916,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
         "linear_trend_late_spectral_ramp",
         "learned_residual_correction",
         "external_residual_blend",
+        "task1_sem_burgers_rollout",
     }
     hooks = []
     seen: set[str] = set()
@@ -2895,6 +2979,9 @@ def _prediction_from_blueprint_params(
             target=target,
             params=params,
         )
+    if family == "task1_sem_burgers_rollout":
+        sem_params = sem_params_from_any(params)
+        return sem_burgers_rollout(context=context, **sem_params)
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
 
 
@@ -3256,6 +3343,17 @@ def _candidate_metadata(
     target: np.ndarray,
     params: dict[str, Any],
 ) -> dict[str, Any]:
+    if family == "task1_sem_burgers_rollout":
+        sem_params = sem_params_from_any(params)
+        return {
+            "executor": "sem_burgers_rollout",
+            "viscosity": sem_params["viscosity"],
+            "dt": sem_params["dt"],
+            "element_count": sem_params["element_count"],
+            "polynomial_order": sem_params["polynomial_order"],
+            "substeps": sem_params["substeps"],
+            "filter_strength": sem_params["filter_strength"],
+        }
     if family not in {
         "task1_retrieval_prior",
         "task1_retrieval_refinement",
@@ -3561,6 +3659,8 @@ def _iter_parameter_grid(
         return _retrieval_refinement_parameter_grid(grid)
     if family == "task1_early_refinement":
         return _retrieval_refinement_parameter_grid(grid)
+    if family == "task1_sem_burgers_rollout":
+        return _sem_burgers_parameter_grid(grid)
     rows = []
     late_strengths = grid.get("late_spectral_strength", [None])
     late_starts = grid.get("late_start", [None])
@@ -3663,6 +3763,50 @@ def _retrieval_refinement_parameter_grid(
                             )
                         )
     return rows
+
+
+def _sem_burgers_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "SEM Burgers candidate_params entries must be objects"
+                )
+            rows.append(sem_params_from_any(row))
+        if not rows:
+            raise HypothesisLabError("SEM Burgers candidate_params must not be empty")
+        return rows
+    required = {
+        "viscosity": grid.get("viscosity"),
+        "dt": grid.get("dt"),
+        "element_count": grid.get("element_count"),
+        "polynomial_order": grid.get("polynomial_order"),
+        "substeps": grid.get("substeps"),
+        "filter_strength": grid.get("filter_strength", [0.0]),
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(f"SEM Burgers blueprint missing {key} list")
+    return [
+        sem_params_from_any(
+            {
+                "viscosity": viscosity,
+                "dt": dt,
+                "element_count": element_count,
+                "polynomial_order": polynomial_order,
+                "substeps": substeps,
+                "filter_strength": filter_strength,
+            }
+        )
+        for viscosity in required["viscosity"]
+        for dt in required["dt"]
+        for element_count in required["element_count"]
+        for polynomial_order in required["polynomial_order"]
+        for substeps in required["substeps"]
+        for filter_strength in required["filter_strength"]
+    ]
 
 
 def _default_retrieval_refinement_params() -> list[dict[str, Any]]:
@@ -4769,6 +4913,17 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
 
 
 def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
+    if family == "task1_sem_burgers_rollout":
+        sem_params = sem_params_from_any(params)
+        return (
+            "task1_sem_burgers_rollout"
+            f"_e{sem_params['element_count']}"
+            f"_p{sem_params['polynomial_order']}"
+            f"_sub{sem_params['substeps']}"
+            f"_nu{sem_params['viscosity']:g}"
+            f"_dt{sem_params['dt']:g}"
+            f"_f{sem_params['filter_strength']:g}"
+        )
     if "early_blend_steps" in params and "persistence_weight_start" in params:
         prefix = (
             "task1_early_refinement"

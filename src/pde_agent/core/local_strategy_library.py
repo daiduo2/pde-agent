@@ -479,6 +479,49 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=40,
         ),
         _entry(
+            strategy_id="task1_sem_burgers_rollout_v0",
+            title="Task 1 spectral-element Burgers rollout family",
+            model_families=["DataInference", "PhysicsSolver", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "early_window_rel_mse",
+                "middle_window_rel_mse",
+                "physics_dynamics_missing",
+            ],
+            hypothesis=(
+                "The current Task 1 plateau is dominated by weak early and middle "
+                "dynamics; a bounded spectral-element Burgers rollout can supply a "
+                "physics-derived trajectory family for Hypothesis Lab to score "
+                "against retrieval and persistence candidates."
+            ),
+            mechanism=(
+                "Use element-local spectral collocation derivatives with an explicit "
+                "RK4 Burgers update, interface blending, and light spectral filtering "
+                "while preserving the first 10 context frames exactly."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "task1_sem_burgers_rollout",
+                "controlled_numpy_sem_burgers_rollout",
+            ],
+            expected_observables=[
+                "early and middle Rel-MSE change relative to retrieval-only search",
+                "physics rollout remains numerically bounded on validation windows",
+                "runtime remains suitable for small-grid sandbox sweeps",
+            ],
+            known_risks=[
+                "explicit dynamics can drift when the hidden viscosity or time scale is mismatched",
+                "interface blending can over-smooth shock-like structures",
+                "a pure physics rollout may underperform data retrieval without later hybridization",
+            ],
+            acceptance_criteria=[
+                "sandbox verifier records a valid score artifact for at least one SEM candidate",
+                "first 10 context frames are preserved exactly",
+                "candidate metadata records viscosity, dt, element count, polynomial order, substeps, and filter strength",
+            ],
+            priority=-1,
+        ),
+        _entry(
             strategy_id="task1_retrieval_refinement_v0",
             title="Task 1 retrieval refinement with early-horizon anchoring",
             model_families=["DataInference", "RetrievalPrior", "all"],

@@ -154,6 +154,36 @@ def test_lookup_local_strategies_exposes_task1_retrieval_refinement(
     ]
 
 
+def test_lookup_local_strategies_exposes_task1_sem_burgers_rollout(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="1D Burgers",
+        model_family="DataInference",
+        failure_modes=["early_window_rel_mse", "middle_window_rel_mse"],
+        max_results=2,
+        output_path=None,
+    )
+
+    sem = next(
+        item
+        for item in result["matches"]
+        if item["strategy_id"] == "task1_sem_burgers_rollout_v0"
+    )
+    assert "run-hypothesis-lab" in sem["implementation_hooks"]
+    assert "task1_sem_burgers_rollout" in sem["implementation_hooks"]
+    assert "controlled_numpy_sem_burgers_rollout" in sem["implementation_hooks"]
+
+
 def test_local_strategy_library_cli_build_and_lookup(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner
