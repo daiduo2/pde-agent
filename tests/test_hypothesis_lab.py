@@ -857,6 +857,114 @@ def test_hypothesis_lab_builds_early_policy_card_from_adaptive_search_policy(
     ]
 
 
+def test_hypothesis_lab_applies_mode_policy_from_adaptive_search_policy(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    policy = {
+        "axis": "mode",
+        "focus_values": ["affine"],
+        "rescue_probe_values": [],
+        "deprioritize_values": ["delta", "raw"],
+        "recommended_actions": [
+            {
+                "action": "keep_focus",
+                "axis": "mode",
+                "value": "affine",
+                "reason": "top_candidate_near_best_early_rel_mse",
+            },
+            {
+                "action": "deprioritize",
+                "axis": "mode",
+                "value": "delta",
+                "reason": "generated_but_not_competitive_in_candidate_pool",
+            },
+            {
+                "action": "deprioritize",
+                "axis": "mode",
+                "value": "raw",
+                "reason": "generated_but_not_competitive_in_candidate_pool",
+            },
+        ],
+    }
+    report_path = tmp_path / "adaptive_mode_policy.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+                "policy_events": [
+                    {
+                        "stage_index": 1,
+                        "action": "continue_current_generator",
+                        "trajectory_state": "improving_or_unblocked",
+                        "reason_codes": ["no_plateau_detected"],
+                        "best_candidate_id": "task1_retrieval_refinement_k48_affine",
+                        "best_score": 110.36,
+                        "hypothesis_lab_search_policy": {
+                            "source_path": str(tmp_path / "hypothesis_lab_report.json"),
+                            "policy": policy,
+                        },
+                    }
+                ],
+                "best_candidate": {
+                    "candidate_id": "task1_retrieval_refinement_k48_affine",
+                    "score": 110.36,
+                    "metadata": {
+                        "source": "hypothesis_lab",
+                        "params": {
+                            "k": 48,
+                            "mode": "affine",
+                            "early_blend_steps": 25,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.5,
+                        },
+                    },
+                },
+                "next_hypothesis_lab_inputs": {
+                    "search_space_policy": {
+                        "source_path": str(tmp_path / "hypothesis_lab_report.json"),
+                        "policy": policy,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[report_path],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["source_type"] == "adaptive_hypothesis_lab_search_policy"
+    assert cards["cards"][0]["implementation_hooks"] == [
+        "task1_retrieval_refinement_local_search"
+    ]
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    candidate_params = blueprints["blueprints"][0]["parameter_grid"][
+        "candidate_params"
+    ]
+    assert {row["mode"] for row in candidate_params} == {"affine"}
+    assert blueprints["blueprints"][0]["experiment_plan"]["axis_plan"][0] == {
+        "axis": "mode",
+        "direction": "focus",
+        "reason": "candidate_pool_search_policy",
+        "budget": 3,
+    }
+
+
 def test_hypothesis_lab_designs_phase_and_bias_aware_early_candidates(
     tmp_path: Path,
 ) -> None:

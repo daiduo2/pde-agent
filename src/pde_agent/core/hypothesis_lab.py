@@ -2449,7 +2449,8 @@ def _adaptive_hypothesis_lab_search_policy_card(
     if policy_bundle is None:
         return None
     policy = policy_bundle["policy"]
-    if policy.get("axis") != "early_anchor":
+    hook = _adaptive_search_policy_hook(policy)
+    if hook is None:
         return None
     params = _adaptive_best_candidate_params(report)
     normalized = _normalize_evidence_params(params) if isinstance(params, dict) else None
@@ -2484,13 +2485,13 @@ def _adaptive_hypothesis_lab_search_policy_card(
         "preconditions": [
             "adaptive heartbeat plateau",
             "previous candidate generator was hypothesis_lab",
-            "candidate pool attribution includes an early_anchor search policy",
+            "candidate pool attribution includes a search-space policy",
         ],
-        "implementation_hooks": ["task1_early_refinement"],
+        "implementation_hooks": [hook],
         "expected_observables": [
-            "rescue_probe anchors remain inside the next candidate budget",
-            "deprioritized anchors are searched later unless they are rescue probes",
-            "Hermes avoids repeating a uniform early-anchor sweep",
+            "focus values remain inside the next candidate budget",
+            "deprioritized values are searched later unless they are rescue probes",
+            "Hermes avoids repeating a uniform axis sweep",
         ],
         "known_risks": sorted(set(reason_codes)),
         "evidence_status": "search_policy_ready",
@@ -2498,11 +2499,48 @@ def _adaptive_hypothesis_lab_search_policy_card(
             "candidate_id": _adaptive_best_candidate_id(report),
             "params": normalized,
             "candidate_pool_attribution": {"search_space_policy": policy},
+            "search_directives": _search_directives_from_candidate_pool_policy(policy),
             "source_hypothesis_lab_report_path": policy_bundle.get("source_path"),
             "task1_total_fast_proxy": _adaptive_best_score(report, event),
             "task1_total_score_proxy": _adaptive_best_score(report, event),
         },
     }
+
+
+def _adaptive_search_policy_hook(policy: dict[str, Any]) -> str | None:
+    axis = str(policy.get("axis", ""))
+    if axis == "early_anchor":
+        return "task1_early_refinement"
+    if axis in {
+        "k",
+        "mode",
+        "early_blend_steps",
+        "persistence_weight_start",
+        "spectral_strength",
+    }:
+        return "task1_retrieval_refinement_local_search"
+    return None
+
+
+def _search_directives_from_candidate_pool_policy(
+    policy: dict[str, Any],
+) -> list[dict[str, Any]]:
+    axis = str(policy.get("axis", ""))
+    if axis != "mode":
+        return []
+    focus_values = _string_list_from_any(policy.get("focus_values"))
+    deprioritize_values = _string_list_from_any(policy.get("deprioritize_values"))
+    if not focus_values and not deprioritize_values:
+        return []
+    return [
+        {
+            "axis": "mode",
+            "direction": "focus",
+            "values": focus_values,
+            "avoid_values": deprioritize_values,
+            "reason": "candidate_pool_search_policy",
+        }
+    ]
 
 
 def _adaptive_hypothesis_lab_search_policy(
@@ -3682,6 +3720,9 @@ def _local_retrieval_refinement_params(
     evidence_params: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     center = _retrieval_refinement_center(evidence_params)
+    directives = _retrieval_refinement_search_directives_from_evidence(
+        evidence_params
+    )
     k0 = int(center["k"])
     mode0 = str(center["mode"])
     early0 = int(center["early_blend_steps"])
@@ -3725,11 +3766,11 @@ def _local_retrieval_refinement_params(
                 "spectral_strength": _clamp_float(strength, 0.0, 2.0),
             }
         )
-    for directive in _retrieval_refinement_search_directives_from_evidence(
-        evidence_params
-    ):
+    for directive in directives:
         axis = directive["axis"]
         direction = directive["direction"]
+        if direction not in {"increase", "decrease"}:
+            continue
         params.extend(
             _directed_retrieval_refinement_params(
                 center=center,
@@ -3765,9 +3806,7 @@ def _local_retrieval_refinement_params(
     return _filter_retrieval_refinement_params_by_directives(
         params=deduped,
         center=center,
-        directives=_retrieval_refinement_search_directives_from_evidence(
-            evidence_params
-        ),
+        directives=directives,
     )
 
 
@@ -4406,9 +4445,9 @@ def _early_refinement_experiment_plan(
 
 def _retrieval_refinement_search_directives_from_evidence(
     evidence_params: list[dict[str, Any]] | None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     directives = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for item in evidence_params or []:
         if not isinstance(item, dict):
             continue
@@ -4420,6 +4459,27 @@ def _retrieval_refinement_search_directives_from_evidence(
                 continue
             axis = str(directive.get("axis", ""))
             direction = str(directive.get("direction", ""))
+            if axis == "mode" and direction == "focus":
+                values = _string_list_from_any(directive.get("values"))
+                avoid_values = _string_list_from_any(directive.get("avoid_values"))
+                if not values and not avoid_values:
+                    continue
+                key = (axis, direction, ",".join(values), ",".join(avoid_values))
+                if key in seen:
+                    continue
+                seen.add(key)
+                directives.append(
+                    {
+                        "axis": axis,
+                        "direction": direction,
+                        "values": values,
+                        "avoid_values": avoid_values,
+                        "reason": str(
+                            directive.get("reason", "candidate_pool_search_policy")
+                        ),
+                    }
+                )
+                continue
             if axis not in {
                 "k",
                 "early_blend_steps",
@@ -4429,7 +4489,7 @@ def _retrieval_refinement_search_directives_from_evidence(
                 continue
             if direction not in {"increase", "decrease"}:
                 continue
-            key = (axis, direction)
+            key = (axis, direction, "", "")
             if key in seen:
                 continue
             seen.add(key)
@@ -4505,8 +4565,8 @@ def _retrieval_refinement_experiment_plan(
 
 
 def _retrieval_refinement_avoid_rules_from_directives(
-    directives: list[dict[str, str]],
-) -> list[dict[str, str]]:
+    directives: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     rules = []
     for directive in directives:
         direction = directive["direction"]
@@ -4514,6 +4574,34 @@ def _retrieval_refinement_avoid_rules_from_directives(
             relation = "below_center"
         elif direction == "decrease":
             relation = "above_center"
+        elif direction == "focus" and directive.get("axis") == "mode":
+            focus_values = _string_list_from_any(directive.get("values"))
+            avoid_values = _string_list_from_any(directive.get("avoid_values"))
+            if focus_values:
+                rules.append(
+                    {
+                        "axis": "mode",
+                        "relation": "not_in_focus_values",
+                        "values": focus_values,
+                        "reason": directive.get(
+                            "reason",
+                            "candidate_pool_search_policy",
+                        ),
+                    }
+                )
+            for value in avoid_values:
+                rules.append(
+                    {
+                        "axis": "mode",
+                        "relation": "equals",
+                        "value": value,
+                        "reason": directive.get(
+                            "reason",
+                            "candidate_pool_search_policy",
+                        ),
+                    }
+                )
+            continue
         else:
             continue
         rules.append(
@@ -4530,7 +4618,7 @@ def _filter_retrieval_refinement_params_by_directives(
     *,
     params: list[dict[str, Any]],
     center: dict[str, Any],
-    directives: list[dict[str, str]],
+    directives: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rules = _retrieval_refinement_avoid_rules_from_directives(directives)
     if not rules:
@@ -4540,6 +4628,15 @@ def _filter_retrieval_refinement_params_by_directives(
         rejected = False
         for rule in rules:
             axis = rule["axis"]
+            if axis == "mode":
+                mode = str(row.get("mode", ""))
+                if rule["relation"] == "not_in_focus_values" and mode not in set(
+                    _string_list_from_any(rule.get("values"))
+                ):
+                    rejected = True
+                if rule["relation"] == "equals" and mode == str(rule.get("value", "")):
+                    rejected = True
+                continue
             if axis not in row or axis not in center:
                 continue
             value = float(row[axis])
