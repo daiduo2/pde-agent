@@ -756,6 +756,107 @@ def test_hypothesis_lab_designs_early_refinement_from_early_bottleneck_report(
     assert blueprints["executable_blueprint_audit"]["decision"] == "approved"
 
 
+def test_hypothesis_lab_builds_early_policy_card_from_adaptive_search_policy(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    policy = {
+        "axis": "early_anchor",
+        "focus_values": ["persistence", "retrieval_derivative_match"],
+        "rescue_probe_values": ["scaled_damped_velocity"],
+        "deprioritize_values": ["second_order_velocity"],
+        "recommended_actions": [
+            {
+                "action": "budget_probe",
+                "axis": "early_anchor",
+                "value": "scaled_damped_velocity",
+                "reason": "non_top_near_best_early_rel_mse",
+            },
+            {
+                "action": "deprioritize",
+                "axis": "early_anchor",
+                "value": "second_order_velocity",
+                "reason": "generated_but_not_competitive_in_candidate_pool",
+            },
+        ],
+    }
+    report_path = tmp_path / "adaptive_policy.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+                "policy_events": [
+                    {
+                        "stage_index": 1,
+                        "action": "continue_hypothesis_lab_with_search_policy",
+                        "trajectory_state": "plateau",
+                        "reason_codes": ["stagnation_detected"],
+                        "best_candidate_id": "task1_scaled_anchor_probe",
+                        "best_score": 85.6,
+                        "hypothesis_lab_search_policy": {
+                            "source_path": str(tmp_path / "hypothesis_lab_report.json"),
+                            "policy": policy,
+                        },
+                    }
+                ],
+                "best_candidate": {
+                    "candidate_id": "task1_scaled_anchor_probe",
+                    "score": 85.6,
+                    "metadata": {
+                        "source": "hypothesis_lab",
+                        "params": {
+                            "k": 64,
+                            "mode": "affine",
+                            "early_blend_steps": 20,
+                            "persistence_weight_start": 0.5,
+                            "spectral_strength": 0.5,
+                            "early_anchor": "persistence",
+                        },
+                    },
+                },
+                "next_hypothesis_lab_inputs": {
+                    "search_space_policy": {
+                        "source_path": str(tmp_path / "hypothesis_lab_report.json"),
+                        "policy": policy,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        adaptive_report_paths=[report_path],
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["source_type"] == "adaptive_hypothesis_lab_search_policy"
+    assert cards["cards"][0]["implementation_hooks"] == ["task1_early_refinement"]
+    assert cards["cards"][0]["evidence"]["candidate_pool_attribution"] == {
+        "search_space_policy": policy
+    }
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+    early_plan = blueprints["blueprints"][0]["experiment_plan"]
+    assert early_plan["memory_policy"]["rescue_probe_anchors"] == [
+        "scaled_damped_velocity"
+    ]
+    assert early_plan["memory_policy"]["deprioritized_anchors"] == [
+        "second_order_velocity"
+    ]
+
+
 def test_hypothesis_lab_designs_phase_and_bias_aware_early_candidates(
     tmp_path: Path,
 ) -> None:

@@ -86,6 +86,8 @@ def build_knowledge_cards(
         report = _read_json(report_file)
         card = _adaptive_retrieval_refinement_card(report_file, report)
         if card is None:
+            card = _adaptive_hypothesis_lab_search_policy_card(report_file, report)
+        if card is None:
             card = _adaptive_plateau_card(report_file, report)
         if card is not None:
             cards.append(card)
@@ -2435,6 +2437,137 @@ def _adaptive_plateau_card(
             "plateau_escape_already_used": escaped_once,
         },
     }
+
+
+def _adaptive_hypothesis_lab_search_policy_card(
+    report_file: Path,
+    report: dict[str, Any],
+) -> dict[str, Any] | None:
+    if report.get("state_hint") != "HERMES_ADAPTIVE_HEARTBEAT_RAN":
+        return None
+    policy_bundle = _adaptive_hypothesis_lab_search_policy(report)
+    if policy_bundle is None:
+        return None
+    policy = policy_bundle["policy"]
+    if policy.get("axis") != "early_anchor":
+        return None
+    params = _adaptive_best_candidate_params(report)
+    normalized = _normalize_evidence_params(params) if isinstance(params, dict) else None
+    if normalized is None:
+        return None
+    event = _last_hypothesis_lab_policy_event(report)
+    reason_codes = []
+    if isinstance(event, dict):
+        reason_codes.extend(
+            str(item) for item in event.get("reason_codes", []) if isinstance(item, str)
+        )
+    reason_codes.extend(
+        str(action.get("reason"))
+        for action in policy.get("recommended_actions", [])
+        if isinstance(action, dict) and isinstance(action.get("reason"), str)
+    )
+    return {
+        "card_id": f"adaptive_hypothesis_lab_search_policy_{report_file.stem}",
+        "source_type": "adaptive_hypothesis_lab_search_policy",
+        "source_path": str(report_file),
+        "claim": (
+            "Hermes plateaued after a Hypothesis Lab run, but the sandbox "
+            "attribution identified which early anchors should stay in focus, "
+            "which deserve rescue probes, and which should be deprioritized."
+        ),
+        "procedural_heuristic": (
+            "Keep the Task 1 early-refinement executor centered on the latest "
+            "Hypothesis Lab candidate, then rank the next grid with the recorded "
+            "focus/rescue/deprioritize policy instead of restarting an unweighted "
+            "anchor sweep."
+        ),
+        "preconditions": [
+            "adaptive heartbeat plateau",
+            "previous candidate generator was hypothesis_lab",
+            "candidate pool attribution includes an early_anchor search policy",
+        ],
+        "implementation_hooks": ["task1_early_refinement"],
+        "expected_observables": [
+            "rescue_probe anchors remain inside the next candidate budget",
+            "deprioritized anchors are searched later unless they are rescue probes",
+            "Hermes avoids repeating a uniform early-anchor sweep",
+        ],
+        "known_risks": sorted(set(reason_codes)),
+        "evidence_status": "search_policy_ready",
+        "evidence": {
+            "candidate_id": _adaptive_best_candidate_id(report),
+            "params": normalized,
+            "candidate_pool_attribution": {"search_space_policy": policy},
+            "source_hypothesis_lab_report_path": policy_bundle.get("source_path"),
+            "task1_total_fast_proxy": _adaptive_best_score(report, event),
+            "task1_total_score_proxy": _adaptive_best_score(report, event),
+        },
+    }
+
+
+def _adaptive_hypothesis_lab_search_policy(
+    report: dict[str, Any],
+) -> dict[str, Any] | None:
+    inputs = report.get("next_hypothesis_lab_inputs")
+    if isinstance(inputs, dict):
+        bundle = inputs.get("search_space_policy")
+        if isinstance(bundle, dict) and isinstance(bundle.get("policy"), dict):
+            return bundle
+    event = _last_hypothesis_lab_policy_event(report)
+    if isinstance(event, dict):
+        bundle = event.get("hypothesis_lab_search_policy")
+        if isinstance(bundle, dict) and isinstance(bundle.get("policy"), dict):
+            return bundle
+    return None
+
+
+def _last_hypothesis_lab_policy_event(report: dict[str, Any]) -> dict[str, Any] | None:
+    events = report.get("policy_events")
+    if not isinstance(events, list):
+        return None
+    for event in reversed(events):
+        if not isinstance(event, dict):
+            continue
+        if isinstance(event.get("hypothesis_lab_search_policy"), dict):
+            return event
+    return None
+
+
+def _adaptive_best_candidate_params(report: dict[str, Any]) -> dict[str, Any] | None:
+    candidate = report.get("best_candidate")
+    if not isinstance(candidate, dict):
+        return None
+    params = candidate.get("params")
+    if isinstance(params, dict):
+        return params
+    metadata = candidate.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("params"), dict):
+        return metadata["params"]
+    return None
+
+
+def _adaptive_best_candidate_id(report: dict[str, Any]) -> str:
+    candidate = report.get("best_candidate")
+    if isinstance(candidate, dict) and candidate.get("candidate_id"):
+        return str(candidate["candidate_id"])
+    event = _last_hypothesis_lab_policy_event(report)
+    if isinstance(event, dict) and event.get("best_candidate_id"):
+        return str(event["best_candidate_id"])
+    return "unknown"
+
+
+def _adaptive_best_score(
+    report: dict[str, Any],
+    event: dict[str, Any] | None,
+) -> float | None:
+    if isinstance(event, dict) and isinstance(event.get("best_score"), int | float):
+        return float(event["best_score"])
+    candidate = report.get("best_candidate")
+    if isinstance(candidate, dict) and isinstance(candidate.get("score"), int | float):
+        return float(candidate["score"])
+    if isinstance(report.get("best_score"), int | float):
+        return float(report["best_score"])
+    return None
 
 
 def _adaptive_retrieval_refinement_card(
