@@ -38,6 +38,95 @@ def test_diagnose_heartbeat_report_routes_plateau_without_blueprint_to_hypothesi
     assert Path(diagnosis["diagnosis_path"]).exists()
 
 
+def test_diagnose_heartbeat_report_routes_hypothesis_lab_plateau_with_search_policy(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_execution_policy import diagnose_heartbeat_report
+
+    lab_report_path = tmp_path / "hypothesis_lab_report.json"
+    lab_report_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HYPOTHESIS_LAB_RAN",
+                "sandbox": {
+                    "candidate_pool_attribution": {
+                        "search_space_policy": {
+                            "axis": "early_anchor",
+                            "focus_values": [
+                                "persistence",
+                                "retrieval_derivative_match",
+                            ],
+                            "rescue_probe_values": ["scaled_damped_velocity"],
+                            "deprioritize_values": ["second_order_velocity"],
+                            "recommended_actions": [
+                                {
+                                    "action": "budget_probe",
+                                    "axis": "early_anchor",
+                                    "value": "scaled_damped_velocity",
+                                    "reason": "non_top_near_best_early_rel_mse",
+                                }
+                            ],
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "heartbeat.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "HERMES_HEARTBEAT_RAN",
+                "stop_reason": "stagnation_detected",
+                "parameters": {"candidate_generator": "hypothesis_lab"},
+                "best_score": 85.6,
+                "batches": [{"score_improved": False}],
+                "best_candidate": {
+                    "candidate_id": "task1_scaled_anchor_probe",
+                    "score": 85.6,
+                    "submission_dir": str(tmp_path / "submission"),
+                    "metadata": {
+                        "source": "hypothesis_lab",
+                        "candidate_report_path": str(lab_report_path),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    diagnosis = diagnose_heartbeat_report(
+        heartbeat_report_path=report_path,
+        verified_blueprint_path=None,
+        output_path=None,
+        force=False,
+    )
+
+    assert diagnosis["recommended_action"] == (
+        "continue_hypothesis_lab_with_search_policy"
+    )
+    assert diagnosis["recommended_candidate_generator"] == "hypothesis_lab"
+    assert diagnosis["next_command"] == "run-hypothesis-lab"
+    assert diagnosis["hypothesis_lab_search_policy"] == {
+        "source_path": str(lab_report_path),
+        "policy": {
+            "axis": "early_anchor",
+            "focus_values": ["persistence", "retrieval_derivative_match"],
+            "rescue_probe_values": ["scaled_damped_velocity"],
+            "deprioritize_values": ["second_order_velocity"],
+            "recommended_actions": [
+                {
+                    "action": "budget_probe",
+                    "axis": "early_anchor",
+                    "value": "scaled_damped_velocity",
+                    "reason": "non_top_near_best_early_rel_mse",
+                }
+            ],
+        },
+    }
+
+
 def test_diagnose_heartbeat_report_routes_plateau_with_blueprint_to_switch(
     tmp_path: Path,
 ) -> None:
@@ -278,6 +367,98 @@ def test_run_adaptive_heartbeat_exposes_hypothesis_lab_inputs_after_verified_pla
     assert inputs["adaptive_report_path"] == result["adaptive_report_path"]
     assert inputs["log_paths"] == [str(tmp_path / "best_2" / "task1_logs.log")]
     assert inputs["manual_report_paths"] == []
+
+
+def test_run_adaptive_heartbeat_exposes_search_policy_after_hypothesis_lab_plateau(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_execution_policy import run_hermes_adaptive_heartbeat
+
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    def fake_heartbeat(**kwargs: Any) -> dict[str, Any]:
+        report_path = Path(kwargs["output_dir"]) / "hermes_heartbeat_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        best_dir = tmp_path / "best"
+        best_dir.mkdir()
+        (best_dir / "task1_logs.log").write_text(
+            "Hermes PDE Agent Scientific Log\n\nTrace:\n- prior\n",
+            encoding="utf-8",
+        )
+        lab_report_path = tmp_path / "hypothesis_lab_report.json"
+        lab_report_path.write_text(
+            json.dumps(
+                {
+                    "state_hint": "HYPOTHESIS_LAB_RAN",
+                    "sandbox": {
+                        "candidate_pool_attribution": {
+                            "search_space_policy": {
+                                "axis": "early_anchor",
+                                "focus_values": [
+                                    "persistence",
+                                    "retrieval_derivative_match",
+                                ],
+                                "rescue_probe_values": ["scaled_damped_velocity"],
+                                "deprioritize_values": ["second_order_velocity"],
+                                "recommended_actions": [
+                                    {
+                                        "action": "budget_probe",
+                                        "axis": "early_anchor",
+                                        "value": "scaled_damped_velocity",
+                                        "reason": "non_top_near_best_early_rel_mse",
+                                    }
+                                ],
+                            }
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        report = {
+            "state_hint": "HERMES_HEARTBEAT_RAN",
+            "heartbeat_report_path": str(report_path),
+            "parameters": {"candidate_generator": kwargs["candidate_generator"]},
+            "batch_count": 1,
+            "batches": [{"score_improved": False}],
+            "best_candidate": {
+                "candidate_id": "task1_scaled_anchor_probe",
+                "score": 85.6,
+                "submission_dir": str(best_dir),
+                "metadata": {
+                    "source": "hypothesis_lab",
+                    "candidate_report_path": str(lab_report_path),
+                },
+            },
+            "best_score": 85.6,
+            "best_objective_score": 85.6,
+            "stop_reason": "stagnation_detected",
+            "decision": "review_before_next_heartbeat",
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report
+
+    result = run_hermes_adaptive_heartbeat(
+        output_dir=tmp_path / "adaptive",
+        initial_submission_dir=initial_dir,
+        verified_blueprint_path=None,
+        max_policy_stages=1,
+        initial_candidate_generator="hypothesis_lab",
+        task1_test_path="task1_test.hdf5",
+        task1_target_path="task1_val.hdf5",
+        heartbeat_runner=fake_heartbeat,
+        force=False,
+    )
+
+    event = result["policy_events"][-1]
+    assert event["action"] == "continue_hypothesis_lab_with_search_policy"
+    assert result["next_command"] == "run-hypothesis-lab"
+    assert event["hypothesis_lab_search_policy"]["policy"]["rescue_probe_values"] == [
+        "scaled_damped_velocity"
+    ]
+    inputs = result["next_hypothesis_lab_inputs"]
+    assert inputs["search_space_policy"] == event["hypothesis_lab_search_policy"]
 
 
 def test_run_hermes_adaptive_heartbeat_cli_returns_payload(

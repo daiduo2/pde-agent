@@ -40,6 +40,7 @@ def diagnose_heartbeat_report(
         _candidate_generator(report) == "linear_trend_spectral"
         and _path_equal(_report_blueprint_path(report), blueprint_file)
     )
+    hypothesis_lab_search_policy = _hypothesis_lab_search_policy(report)
     if trajectory_state == "plateau" and has_blueprint and already_using_blueprint:
         recommended_action = "verified_blueprint_plateau"
         next_command = "run-hypothesis-lab"
@@ -48,6 +49,14 @@ def diagnose_heartbeat_report(
         recommended_action = "switch_to_verified_blueprint"
         next_command = "run-hermes-heartbeat"
         recommended_candidate_generator = "linear_trend_spectral"
+    elif (
+        trajectory_state == "plateau"
+        and _candidate_generator(report) == "hypothesis_lab"
+        and hypothesis_lab_search_policy is not None
+    ):
+        recommended_action = "continue_hypothesis_lab_with_search_policy"
+        next_command = "run-hypothesis-lab"
+        recommended_candidate_generator = "hypothesis_lab"
     elif trajectory_state == "plateau":
         recommended_action = "run_hypothesis_lab"
         next_command = "run-hypothesis-lab"
@@ -75,6 +84,8 @@ def diagnose_heartbeat_report(
         },
         "next_command": next_command,
     }
+    if hypothesis_lab_search_policy is not None:
+        diagnosis["hypothesis_lab_search_policy"] = hypothesis_lab_search_policy
     if output_file is not None:
         diagnosis["diagnosis_path"] = str(output_file)
         _write_json(output_file, diagnosis)
@@ -184,6 +195,10 @@ def run_hermes_adaptive_heartbeat(
             "best_candidate_id": candidate.get("candidate_id"),
             "best_score": candidate.get("score"),
         }
+        if isinstance(diagnosis.get("hypothesis_lab_search_policy"), dict):
+            event["hypothesis_lab_search_policy"] = diagnosis[
+                "hypothesis_lab_search_policy"
+            ]
         policy_events.append(event)
         if diagnosis["recommended_action"] != "switch_to_verified_blueprint":
             break
@@ -200,6 +215,7 @@ def run_hermes_adaptive_heartbeat(
     next_hypothesis_lab_inputs = _next_hypothesis_lab_inputs(
         adaptive_report_path=report_path,
         best_submission_dir=Path(str(best["submission_dir"])),
+        policy_events=policy_events,
     )
     report = {
         "schema_version": 1,
@@ -257,6 +273,82 @@ def _candidate_generator(report: dict[str, Any]) -> str | None:
         if isinstance(value, str):
             return value
     return None
+
+
+def _hypothesis_lab_search_policy(report: dict[str, Any]) -> dict[str, Any] | None:
+    for path in _hypothesis_lab_artifact_paths(report):
+        payload = _read_json_if_available(path)
+        if payload is None:
+            continue
+        policy = _search_policy_from_hypothesis_lab_payload(payload)
+        if policy is not None:
+            return {"source_path": str(path), "policy": policy}
+    return None
+
+
+def _hypothesis_lab_artifact_paths(report: dict[str, Any]) -> list[Path]:
+    paths: list[Path] = []
+    candidates = [report.get("best_candidate")]
+    batch = _read_last_batch_report(report)
+    if isinstance(batch, dict):
+        candidates.append(batch.get("best_candidate"))
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        metadata = candidate.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        for key in (
+            "candidate_report_path",
+            "hypothesis_lab_report_path",
+            "sandbox_report_path",
+        ):
+            value = metadata.get(key)
+            if isinstance(value, str) and value:
+                paths.append(Path(value))
+    return _dedupe_paths(paths)
+
+
+def _read_last_batch_report(report: dict[str, Any]) -> dict[str, Any] | None:
+    last_batch = _last_batch(report)
+    if not isinstance(last_batch, dict):
+        return None
+    value = last_batch.get("batch_report_path")
+    if not isinstance(value, str) or not value:
+        return None
+    return _read_json_if_available(Path(value))
+
+
+def _search_policy_from_hypothesis_lab_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    sandbox = payload.get("sandbox") if isinstance(payload.get("sandbox"), dict) else payload
+    attribution = sandbox.get("candidate_pool_attribution")
+    if not isinstance(attribution, dict):
+        return None
+    policy = attribution.get("search_space_policy")
+    return policy if isinstance(policy, dict) else None
+
+
+def _read_json_if_available(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return _read_json(path)
+    except HermesExecutionPolicyError:
+        return None
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    result: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
 
 
 def _report_blueprint_path(report: dict[str, Any]) -> Path | None:
@@ -339,7 +431,10 @@ def _append_policy_log(*, submission_dir: Path, events: list[dict[str, Any]]) ->
 
 
 def _next_command(events: list[dict[str, Any]]) -> str:
-    if events and events[-1].get("action") == "verified_blueprint_plateau":
+    if events and events[-1].get("action") in {
+        "verified_blueprint_plateau",
+        "continue_hypothesis_lab_with_search_policy",
+    }:
         return "run-hypothesis-lab"
     return "run-hermes-adaptive-heartbeat"
 
@@ -348,15 +443,30 @@ def _next_hypothesis_lab_inputs(
     *,
     adaptive_report_path: Path,
     best_submission_dir: Path,
+    policy_events: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     log_path = best_submission_dir / "task1_logs.log"
     if not log_path.exists():
         return None
-    return {
+    inputs: dict[str, Any] = {
         "manual_report_paths": [],
         "adaptive_report_path": str(adaptive_report_path),
         "log_paths": [str(log_path)],
     }
+    search_policy = _last_hypothesis_lab_search_policy(policy_events)
+    if search_policy is not None:
+        inputs["search_space_policy"] = search_policy
+    return inputs
+
+
+def _last_hypothesis_lab_search_policy(
+    policy_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for event in reversed(policy_events):
+        value = event.get("hypothesis_lab_search_policy")
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
