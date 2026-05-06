@@ -23,7 +23,9 @@ def build_competition_submission_command(
     source_prediction_key: str,
     train_time: float,
     inference_time: float | None,
-    force: bool,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
+    force: bool = False,
     local_loop_chronicle_path: str | None = None,
 ) -> dict[str, object]:
     report = build_competition_submission(
@@ -38,6 +40,8 @@ def build_competition_submission_command(
         source_prediction_key=source_prediction_key,
         train_time=train_time,
         inference_time=inference_time,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     if local_loop_chronicle_path is not None:

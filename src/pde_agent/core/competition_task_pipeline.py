@@ -32,6 +32,8 @@ def run_competition_task_pipeline(
     submission_id: str,
     target_path: str | Path | None = None,
     dataset_key: str = "tensor",
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     family = _model_family(model_family)
@@ -62,6 +64,8 @@ def run_competition_task_pipeline(
         prediction_dataset_key=dataset_key,
         source_prediction_key="prediction",
         train_time=None,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     audit = audit_competition_submission(
@@ -205,8 +209,12 @@ def _write_final_task_log(
         f"- checkpoint_format: {inference.get('checkpoint_format')}",
         f"- sample_count: {inputs['sample_count']}",
         f"- forecast_steps: {inputs['forecast_steps']}",
-        f"- train_time_seconds: {metrics['train_time']:.6f}",
-        f"- inference_time_seconds: {metrics['inference_time']:.6f}",
+        f"- raw_train_time_seconds: {metrics.get('raw_train_time', metrics['train_time']):.6f}",
+        f"- raw_inference_time_seconds: {metrics.get('raw_inference_time', metrics['inference_time']):.6f}",
+        f"- a100_equiv_train_time_seconds: {metrics['train_time']:.6f}",
+        f"- a100_equiv_inference_time_seconds: {metrics['inference_time']:.6f}",
+        f"- timing_profile: {metrics.get('timing_profile', 'a100_80gb')}",
+        f"- timing_factor: {metrics.get('timing_factor', 1.0):.6f}",
         "",
         "Validation/Audit:",
         f"- audit_decision: {audit['decision']}",

@@ -49,6 +49,12 @@ BOUNDED_EXECUTOR_TEMPLATE_STATE_HINT = "BOUNDED_EXECUTOR_TEMPLATE_MATERIALIZED"
 BOUNDED_EXECUTOR_AUDIT_STATE_HINT = "BOUNDED_EXECUTOR_IMPLEMENTATION_VALIDATED"
 BOUNDED_EXECUTOR_SANDBOX_STATE_HINT = "BOUNDED_EXECUTOR_SANDBOX_RAN"
 BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT = "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED"
+BOUNDED_EXECUTOR_AUTHORING_AUDIT_STATE_HINT = (
+    "BOUNDED_EXECUTOR_AUTHORING_TASK_AUDITED"
+)
+BOUNDED_EXECUTOR_AUTHORING_COMPLETION_STATE_HINT = (
+    "BOUNDED_EXECUTOR_AUTHORING_COMPLETED"
+)
 
 VALID_SOURCE_TYPES = {
     "openalex_work",
@@ -646,6 +652,23 @@ def prepare_literature_extraction_context(
                 "mathematical_object",
                 "implementation_requirements",
             ],
+            "optional_card_fields": {
+                "mutation_evidence": {
+                    "purpose": (
+                        "Use only when the extracted algorithm is a deliberate "
+                        "variant of a previously deprioritized candidate family."
+                    ),
+                    "required_when_present": [
+                        "parent_candidate_family",
+                        "mutation_type",
+                        "reason",
+                    ],
+                    "notes": [
+                        "mutation_type must name the concrete algorithmic change.",
+                        "reason should cite the failure or deprioritization signal.",
+                    ],
+                }
+            },
         },
         "next_command": "agent-extract-algorithm-cards",
     }
@@ -2040,44 +2063,46 @@ def compile_algorithm_candidates(
                 card_id=str(card["algorithm_card_id"]),
                 family=family,
             )
-            candidates.append(
-                {
-                    "algorithm_candidate_id": candidate_id,
-                    "parent_algorithm_card_id": card["algorithm_card_id"],
-                    "candidate_family": family_spec["candidate_family"],
-                    "target_problem": "PDE_Burgers",
-                    "target_task": "task1",
-                    "model_family": family_spec["model_family"],
-                    "hypothesis": card["claim"],
-                    "mechanism": card["core_mechanism"],
-                    "literature_hook": hook,
-                    "normalized_hook": normalized_hook,
-                    "executor_spec": _executor_spec(str(family_spec["cli_command"])),
-                    "parameter_grid": _default_parameter_grid(family),
-                    "benchmark_plan": {
-                        "judge": "hermes_local_judge",
-                        "primary_metric": "task1_total_score_proxy",
-                        "sandbox_level": family_spec["sandbox_level"],
-                    },
-                    "ablation_plan": {
-                        "baseline": "persistence_or_current_best",
-                        "contrast": "candidate_disabled_or_weight_zero",
-                    },
-                    "promotion_criteria": {
-                        "min_score_delta": 0.01,
-                        "max_inference_seconds": 120.0,
-                        "requires_ablation": True,
-                    },
-                    "risk_controls": [
-                        "preserve first 10 context steps",
-                        "do not execute external repo code",
-                    ],
-                    "source_grounding": {
-                        "source_ids": card["source_ids"],
-                        "algorithm_card_id": card["algorithm_card_id"],
-                    },
-                }
-            )
+            candidate = {
+                "algorithm_candidate_id": candidate_id,
+                "parent_algorithm_card_id": card["algorithm_card_id"],
+                "candidate_family": family_spec["candidate_family"],
+                "target_problem": "PDE_Burgers",
+                "target_task": "task1",
+                "model_family": family_spec["model_family"],
+                "hypothesis": card["claim"],
+                "mechanism": card["core_mechanism"],
+                "literature_hook": hook,
+                "normalized_hook": normalized_hook,
+                "executor_spec": _executor_spec(str(family_spec["cli_command"])),
+                "parameter_grid": _default_parameter_grid(family),
+                "benchmark_plan": {
+                    "judge": "hermes_local_judge",
+                    "primary_metric": "task1_total_score_proxy",
+                    "sandbox_level": family_spec["sandbox_level"],
+                },
+                "ablation_plan": {
+                    "baseline": "persistence_or_current_best",
+                    "contrast": "candidate_disabled_or_weight_zero",
+                },
+                "promotion_criteria": {
+                    "min_score_delta": 0.01,
+                    "max_inference_seconds": 120.0,
+                    "requires_ablation": True,
+                },
+                "risk_controls": [
+                    "preserve first 10 context steps",
+                    "do not execute external repo code",
+                ],
+                "source_grounding": {
+                    "source_ids": card["source_ids"],
+                    "algorithm_card_id": card["algorithm_card_id"],
+                },
+            }
+            mutation_evidence = card.get("mutation_evidence")
+            if isinstance(mutation_evidence, dict):
+                candidate["mutation_evidence"] = mutation_evidence
+            candidates.append(candidate)
     report = {
         "schema_version": 1,
         "state_hint": ALGORITHM_CANDIDATES_STATE_HINT,
@@ -2131,8 +2156,10 @@ def plan_candidate_sandbox(
         "schema_version": 1,
         "state_hint": SANDBOX_PLAN_STATE_HINT,
         "sandbox_plan_path": str(output_file),
+        "algorithm_candidates_path": str(Path(algorithm_candidates_path)),
         "algorithm_candidate_id": selected_id,
         "candidate_family": selected.get("candidate_family"),
+        "selected_candidate": selected,
         "sandbox_level": _sandbox_level(str(selected.get("candidate_family"))),
         "executor": executor,
         "blocked": blocked,
@@ -2853,6 +2880,270 @@ def record_bounded_executor_sandbox_event(
     return report
 
 
+def record_bounded_executor_sandbox_evidence(
+    *,
+    sandbox_report_path: str | Path,
+    output_path: str | Path,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, Any]:
+    sandbox_file = _require_file(Path(sandbox_report_path), "bounded executor sandbox")
+    sandbox = _read_json(sandbox_file)
+    if sandbox.get("state_hint") != BOUNDED_EXECUTOR_SANDBOX_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor sandbox has invalid state_hint"
+        )
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    metrics = sandbox.get("metric_results")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    score = _float_or_default(metrics.get("segment_score"), 0.0)
+    grounding = (
+        sandbox.get("source_grounding")
+        if isinstance(sandbox.get("source_grounding"), dict)
+        else {}
+    )
+    source_ids = [item for item in grounding.get("source_ids", []) if isinstance(item, str)]
+    evidence = {
+        "schema_version": 1,
+        "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+        "evidence_path": str(output_file),
+        "evidence_id": f"evidence_{_slug(str(sandbox.get('algorithm_candidate_id') or 'bounded_executor'))}",
+        "candidate_id": sandbox.get("algorithm_candidate_id"),
+        "candidate_family": "bounded_executor",
+        "source_report_path": str(sandbox_file),
+        "source_ids": source_ids,
+        "algorithm_card_id": grounding.get("algorithm_card_id"),
+        "rules_passed": bool(sandbox.get("rules_passed")),
+        "score": score,
+        "segment_scores": _bounded_executor_segment_scores(sandbox.get("segments")),
+        "runtime": {
+            "inference_seconds": _float_or_default(
+                metrics.get("inference_seconds"),
+                0.0,
+            )
+        },
+        "physics_metrics": {"residual_delta": 0.0},
+        "ablation_metrics": {
+            "score_delta": _float_or_default(
+                metrics.get("score_delta_vs_persistence"),
+                0.0,
+            )
+        },
+        "score_delta_vs_current_best": score - float(current_best_score),
+        "artifact_paths": [
+            path
+            for path in [
+                sandbox.get("bounded_executor_sandbox_path"),
+                _object_path(sandbox.get("artifacts"), "prediction_path"),
+            ]
+            if path
+        ],
+        "reproducibility": {"deterministic": True, "repeat_count": 1},
+        "next_command": "evaluate-algorithm-candidate-promotion",
+    }
+    _write_json(output_file, evidence)
+    return evidence
+
+
+def complete_bounded_executor_authoring_task(
+    *,
+    authoring_task_path: str | Path,
+    algorithm_candidates_path: str | Path,
+    registry_path: str | Path,
+    current_best_score: float,
+    skill_root: str | Path,
+    force: bool,
+    require_authoring_audit: bool = True,
+) -> dict[str, Any]:
+    authoring_file = _require_file(
+        Path(authoring_task_path),
+        "bounded executor authoring task",
+    )
+    authoring = _read_json(authoring_file)
+    if authoring.get("state_hint") != BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT:
+        raise LiteratureAlgorithmLabError(
+            "bounded executor authoring task has invalid state_hint"
+        )
+    root = authoring_file.parent
+    completion_path = root / "bounded_executor_authoring_completion.json"
+    _guard_output(completion_path, force=force)
+    authoring_audit = audit_bounded_executor_authoring_task(
+        authoring_task_path=authoring_file,
+        skill_root=Path(skill_root),
+        output_path=root / "bounded_executor_authoring_audit.json",
+        force=force,
+    )
+    if require_authoring_audit and authoring_audit.get("decision") != "approved":
+        report = {
+            "schema_version": 1,
+            "state_hint": BOUNDED_EXECUTOR_AUTHORING_COMPLETION_STATE_HINT,
+            "completion_path": str(completion_path),
+            "authoring_task_path": str(authoring_file),
+            "algorithm_candidate_id": authoring.get("algorithm_candidate_id"),
+            "decision": "blocked",
+            "audit": authoring_audit,
+            "artifacts": {
+                "completion_path": str(completion_path),
+                "authoring_audit_path": authoring_audit.get("authoring_audit_path"),
+            },
+            "next_command": "audit-bounded-executor-authoring-task",
+        }
+        _write_json(completion_path, report)
+        return report
+
+    context_path = _authoring_context_path(authoring)
+    target_path = _authoring_target_path(authoring)
+    expected = (
+        authoring.get("expected_artifacts")
+        if isinstance(authoring.get("expected_artifacts"), dict)
+        else {}
+    )
+    audit_path = Path(
+        expected.get("audit_output_path") or root / "bounded_executor_audit.json"
+    )
+    sandbox_dir = Path(
+        expected.get("sandbox_report_path", root / "sandbox" / "x.json")
+    ).parent
+    sandbox_event_path = Path(
+        expected.get("event_output_path")
+        or root / "bounded_executor_registry_event.json"
+    )
+    evidence_path = root / "bounded_executor_sandbox_evidence.json"
+    promotion_path = root / "bounded_executor_candidate_promotion.json"
+    promotion_event_path = root / "bounded_executor_promotion_registry_event.json"
+
+    implementation_audit = validate_bounded_executor_implementation(
+        design_spec_path=authoring["design_spec_path"],
+        manifest_path=authoring["manifest_path"],
+        executor_path=authoring["executor_path"],
+        output_path=audit_path,
+        force=force,
+    )
+    sandbox = run_bounded_executor_sandbox(
+        design_spec_path=authoring["design_spec_path"],
+        manifest_path=authoring["manifest_path"],
+        executor_path=authoring["executor_path"],
+        context_path=context_path,
+        target_path=target_path,
+        output_dir=sandbox_dir,
+        submission_id="team_hermes_bounded_executor_completion",
+        force=force,
+    )
+    sandbox_event = record_bounded_executor_sandbox_event(
+        sandbox_report_path=sandbox["bounded_executor_sandbox_path"],
+        output_path=sandbox_event_path,
+        force=force,
+    )
+    evidence = record_bounded_executor_sandbox_evidence(
+        sandbox_report_path=sandbox["bounded_executor_sandbox_path"],
+        output_path=evidence_path,
+        current_best_score=current_best_score,
+        force=force,
+    )
+    promotion = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=algorithm_candidates_path,
+        algorithm_candidate_id=_nonempty_text(
+            authoring.get("algorithm_candidate_id"),
+            "algorithm_candidate_id",
+        ),
+        sandbox_evidence_paths=[evidence["evidence_path"]],
+        output_path=promotion_path,
+        current_best_score=current_best_score,
+        force=force,
+    )
+    promotion_event = record_literature_registry_event(
+        event_source_path=promotion["algorithm_candidate_promotion_path"],
+        output_path=promotion_event_path,
+        force=force,
+    )
+    registry = update_literature_registry(
+        registry_path=registry_path,
+        event_paths=[
+            sandbox_event["literature_registry_event_path"],
+            promotion_event["literature_registry_event_path"],
+        ],
+        force=not Path(registry_path).exists(),
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_AUTHORING_COMPLETION_STATE_HINT,
+        "completion_path": str(completion_path),
+        "authoring_task_path": str(authoring_file),
+        "decision": promotion["decision"],
+        "audit": authoring_audit,
+        "implementation_audit": implementation_audit,
+        "sandbox": sandbox,
+        "sandbox_event": sandbox_event,
+        "evidence": evidence,
+        "promotion": promotion,
+        "promotion_event": promotion_event,
+        "registry": registry,
+        "artifacts": {
+            "completion_path": str(completion_path),
+            "authoring_audit_path": authoring_audit.get("authoring_audit_path"),
+            "bounded_executor_audit_path": implementation_audit[
+                "bounded_executor_audit_path"
+            ],
+            "sandbox_report_path": sandbox["bounded_executor_sandbox_path"],
+            "sandbox_registry_event_path": sandbox_event[
+                "literature_registry_event_path"
+            ],
+            "sandbox_evidence_path": evidence["evidence_path"],
+            "candidate_promotion_path": promotion[
+                "algorithm_candidate_promotion_path"
+            ],
+            "promotion_registry_event_path": promotion_event[
+                "literature_registry_event_path"
+            ],
+            "literature_registry_path": registry["registry_path"],
+        },
+        "next_command": promotion_event["recommended_next"],
+    }
+    _write_json(completion_path, report)
+    return report
+
+
+def _authoring_context_path(authoring: dict[str, Any]) -> Path:
+    design = str(authoring.get("design_spec_path"))
+    manifest = str(authoring.get("manifest_path"))
+    executor = str(authoring.get("executor_path"))
+    for item in _text_list(authoring.get("allowed_read_paths"), "allowed_read_paths"):
+        if item not in {design, manifest, executor}:
+            return Path(item)
+    raise LiteratureAlgorithmLabError("authoring task missing context read path")
+
+
+def _authoring_target_path(authoring: dict[str, Any]) -> Path:
+    forbidden = _text_list(
+        authoring.get("forbidden_read_paths"),
+        "forbidden_read_paths",
+    )
+    if not forbidden:
+        raise LiteratureAlgorithmLabError("authoring task missing target path")
+    return Path(forbidden[0])
+
+
+def _bounded_executor_segment_scores(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, item in value.items():
+        if isinstance(item, dict) and isinstance(item.get("score"), int | float):
+            result[str(key)] = float(item["score"])
+    return result
+
+
+def _object_path(value: Any, key: str) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    item = value.get(key)
+    if isinstance(item, str) and item.strip():
+        return item
+    return None
+
+
 def prepare_bounded_executor_authoring_task(
     *,
     design_spec_path: str | Path,
@@ -2954,10 +3245,288 @@ def prepare_bounded_executor_authoring_task(
             "sandbox_report_path": str(sandbox_dir / "bounded_executor_sandbox_report.json"),
             "event_output_path": str(event_path),
         },
-        "next_command": "agent-author-bounded-executor",
+        "next_command": "audit-bounded-executor-authoring-task",
     }
     _write_json(output_file, report)
     return report
+
+
+def audit_bounded_executor_authoring_task(
+    *,
+    authoring_task_path: str | Path,
+    skill_root: str | Path,
+    output_path: str | Path,
+    force: bool,
+) -> dict[str, Any]:
+    authoring_file = _require_file(Path(authoring_task_path), "bounded executor authoring task")
+    authoring = _read_json(authoring_file)
+    output_file = Path(output_path)
+    _guard_output(output_file, force=force)
+    issues: list[dict[str, str]] = []
+
+    if authoring.get("state_hint") != BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT:
+        issues.append(
+            {
+                "code": "invalid_state_hint",
+                "message": "authoring task must be BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED",
+            }
+        )
+
+    agent_contract = authoring.get("agent_contract")
+    if not isinstance(agent_contract, dict):
+        agent_contract = {}
+        issues.append(
+            {
+                "code": "agent_contract_missing",
+                "message": "authoring task must include agent_contract",
+            }
+        )
+    skill_name = agent_contract.get("skill_name")
+    if not isinstance(skill_name, str) or not skill_name.strip():
+        skill_name = ""
+        issues.append(
+            {
+                "code": "skill_name_missing",
+                "message": "agent_contract.skill_name must be a non-empty string",
+            }
+        )
+    skill_path = _bounded_executor_authoring_skill_path(
+        skill_root=Path(skill_root),
+        skill_name=skill_name,
+    )
+    if skill_path is None:
+        issues.append(
+            {
+                "code": "skill_file_missing",
+                "message": f"skill file not found for {skill_name or '<missing>'}",
+            }
+        )
+    else:
+        _audit_bounded_executor_skill_text(
+            skill_path=skill_path,
+            skill_name=skill_name,
+            issues=issues,
+        )
+
+    executor_path = _artifact_path_or_issue(authoring, "executor_path", issues)
+    design_path = _artifact_path_or_issue(authoring, "design_spec_path", issues)
+    manifest_path = _artifact_path_or_issue(authoring, "manifest_path", issues)
+    allowed_edit_paths = _path_set_or_issue(
+        authoring.get("allowed_edit_paths"),
+        "allowed_edit_paths",
+        issues,
+    )
+    allowed_read_paths = _path_set_or_issue(
+        authoring.get("allowed_read_paths"),
+        "allowed_read_paths",
+        issues,
+    )
+    forbidden_read_paths = _path_set_or_issue(
+        authoring.get("forbidden_read_paths"),
+        "forbidden_read_paths",
+        issues,
+    )
+    expected_edit_paths = {str(executor_path)} if executor_path is not None else set()
+    if allowed_edit_paths != expected_edit_paths:
+        issues.append(
+            {
+                "code": "allowed_edit_paths_not_executor_only",
+                "message": "allowed_edit_paths must contain only executor_path",
+            }
+        )
+    required_read_paths = {
+        str(path)
+        for path in [design_path, manifest_path, executor_path]
+        if path is not None
+    }
+    missing_required_reads = sorted(required_read_paths - allowed_read_paths)
+    if missing_required_reads:
+        issues.append(
+            {
+                "code": "allowed_read_paths_missing_required_artifacts",
+                "message": ",".join(missing_required_reads),
+            }
+        )
+    overlapping_reads = sorted(allowed_read_paths & forbidden_read_paths)
+    if overlapping_reads:
+        issues.append(
+            {
+                "code": "forbidden_read_path_allowed",
+                "message": ",".join(overlapping_reads),
+            }
+        )
+    if not forbidden_read_paths:
+        issues.append(
+            {
+                "code": "forbidden_read_paths_empty",
+                "message": "target or labels must be listed as forbidden read paths",
+            }
+        )
+    for path in _unique_path_objects(
+        [design_path, manifest_path, executor_path]
+        + [Path(path) for path in allowed_read_paths]
+    ):
+        if not path.exists():
+            issues.append(
+                {
+                    "code": "required_authoring_path_missing",
+                    "message": str(path),
+                }
+            )
+
+    commands = authoring.get("validation_commands")
+    if not isinstance(commands, list) or len(commands) != 3:
+        issues.append(
+            {
+                "code": "validation_commands_invalid",
+                "message": "validation_commands must contain exactly three commands",
+            }
+        )
+    else:
+        expected_tokens = [
+            "validate-bounded-executor-implementation",
+            "run-bounded-executor-sandbox",
+            "record-bounded-executor-sandbox-event",
+        ]
+        for index, token in enumerate(expected_tokens):
+            command = commands[index]
+            if not isinstance(command, str) or token not in command:
+                issues.append(
+                    {
+                        "code": "validation_command_order_invalid",
+                        "message": f"validation command {index} must include {token}",
+                    }
+                )
+    if authoring.get("next_command") != "audit-bounded-executor-authoring-task":
+        issues.append(
+            {
+                "code": "next_command_invalid",
+                "message": "next_command must be audit-bounded-executor-authoring-task",
+            }
+        )
+
+    issue_codes = sorted({issue["code"] for issue in issues})
+    decision = "approved" if not issues else "rejected"
+    report = {
+        "schema_version": 1,
+        "state_hint": BOUNDED_EXECUTOR_AUTHORING_AUDIT_STATE_HINT,
+        "authoring_audit_path": str(output_file),
+        "authoring_task_path": str(authoring_file),
+        "algorithm_candidate_id": authoring.get("algorithm_candidate_id"),
+        "decision": decision,
+        "issue_count": len(issues),
+        "issue_codes": issue_codes,
+        "issues": issues,
+        "skill_name": skill_name,
+        "skill_path": str(skill_path) if skill_path is not None else None,
+        "allowed_edit_paths": sorted(allowed_edit_paths),
+        "forbidden_read_paths": sorted(forbidden_read_paths),
+        "next_command": "agent-author-bounded-executor"
+        if decision == "approved"
+        else "prepare-expansion-blocked-executor-authoring-tasks",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def _bounded_executor_authoring_skill_path(
+    *,
+    skill_root: Path,
+    skill_name: str,
+) -> Path | None:
+    if not skill_name:
+        return None
+    candidates = [
+        skill_root / skill_name / "SKILL.md",
+        skill_root / skill_name.replace("-", "_") / "SKILL.md",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _audit_bounded_executor_skill_text(
+    *,
+    skill_path: Path,
+    skill_name: str,
+    issues: list[dict[str, str]],
+) -> None:
+    text = skill_path.read_text(encoding="utf-8")
+    required_terms = [
+        f"name: {skill_name}",
+        BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT,
+        "allowed_edit_paths",
+        "forbidden_read_paths",
+        "validation_commands",
+        "def predict(context, candidate, params)",
+    ]
+    missing_terms = [term for term in required_terms if term not in text]
+    if missing_terms:
+        issues.append(
+            {
+                "code": "skill_contract_terms_missing",
+                "message": ",".join(missing_terms),
+            }
+        )
+
+
+def _artifact_path_or_issue(
+    artifact: dict[str, Any],
+    key: str,
+    issues: list[dict[str, str]],
+) -> Path | None:
+    value = artifact.get(key)
+    if not isinstance(value, str) or not value.strip():
+        issues.append(
+            {
+                "code": f"{key}_missing",
+                "message": f"{key} must be a non-empty path",
+            }
+        )
+        return None
+    return Path(value)
+
+
+def _path_set_or_issue(
+    value: Any,
+    key: str,
+    issues: list[dict[str, str]],
+) -> set[str]:
+    if not isinstance(value, list):
+        issues.append(
+            {
+                "code": f"{key}_invalid",
+                "message": f"{key} must be a list of paths",
+            }
+        )
+        return set()
+    result = set()
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            issues.append(
+                {
+                    "code": f"{key}_invalid_item",
+                    "message": f"{key} contains a non-string path",
+                }
+            )
+            continue
+        result.add(str(Path(item)))
+    return result
+
+
+def _unique_path_objects(paths: list[Path | None]) -> list[Path]:
+    seen: set[str] = set()
+    result = []
+    for path in paths:
+        if path is None:
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
 
 
 def _blocked_candidate(*, card: dict[str, Any], hook: str) -> dict[str, Any]:
@@ -3366,17 +3935,24 @@ def _apply_literature_registry_event_artifact(
         ]
         _set_candidate_status(registry, candidate_id, status)
         candidate = _find_registry_candidate(registry, candidate_id)
+        candidate_family = payload.get("candidate_family")
+        if isinstance(candidate_family, str) and candidate_family.strip():
+            candidate["candidate_family"] = candidate_family.strip()
         failure_codes = _normalize_failure_codes(payload.get("failure_codes", []))
         if failure_codes:
+            failure_entry = {
+                "artifact_path": str(artifact_file),
+                "failure_codes": failure_codes,
+                "recommended_next": payload.get("recommended_next"),
+                "retry_allowed": bool(payload.get("retry_allowed")),
+            }
+            metric_results = payload.get("metric_results")
+            if isinstance(metric_results, dict) and metric_results:
+                failure_entry["metric_results"] = metric_results
             _append_unique_object(
                 candidate,
                 "failure_history",
-                {
-                    "artifact_path": str(artifact_file),
-                    "failure_codes": failure_codes,
-                    "recommended_next": payload.get("recommended_next"),
-                    "retry_allowed": bool(payload.get("retry_allowed")),
-                },
+                failure_entry,
             )
         algorithm_node_id = None
         algorithm_card_id = payload.get("algorithm_card_id")
@@ -4906,7 +5482,40 @@ def _validate_algorithm_card_v2(card: Any, *, index: int) -> list[dict[str, Any]
             failure_code="candidate_schema_invalid",
             message="provenance must be a non-empty object",
         )
+    _validate_algorithm_card_v2_mutation_evidence(
+        issues,
+        value=card.get("mutation_evidence"),
+        base_path=f"{base}.mutation_evidence",
+    )
     return issues
+
+
+def _validate_algorithm_card_v2_mutation_evidence(
+    issues: list[dict[str, Any]],
+    *,
+    value: Any,
+    base_path: str,
+) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        _append_algorithm_card_v2_issue(
+            issues,
+            code="invalid_mutation_evidence",
+            path=base_path,
+            failure_code="candidate_schema_invalid",
+            message="mutation_evidence must be an object when present",
+        )
+        return
+    for field in ("parent_candidate_family", "mutation_type", "reason"):
+        if not _is_nonempty_string(value.get(field)):
+            _append_algorithm_card_v2_issue(
+                issues,
+                code=f"missing_{field}",
+                path=f"{base_path}.{field}",
+                failure_code="candidate_schema_invalid",
+                message=f"mutation_evidence.{field} must be a non-empty string",
+            )
 
 
 def _validate_algorithm_card_v2_enum(
@@ -5442,6 +6051,17 @@ def _evaluate_candidate_promotion_checks(
 
     if evidence.get("rules_passed") is True:
         passed["validity"] = {"passed": True}
+    elif _evidence_has_gate_issue(
+        evidence,
+        "target_reference_local_validation_only",
+    ):
+        failed["validity"] = _promotion_check(
+            failure_code="target_leakage_risk",
+            message=(
+                "sandbox evidence used a target-reference local validation signal "
+                "and must be refined against a legal reference split"
+            ),
+        )
     else:
         failed["validity"] = _promotion_check(
             failure_code="sandbox_rule_failed",
@@ -5531,8 +6151,12 @@ def _candidate_promotion_decision(
 ) -> str:
     if "executor" in failed_checks:
         return "blocked"
-    hard_reject = {"validity", "runtime"}
-    if hard_reject.intersection(failed_checks):
+    if "runtime" in failed_checks:
+        return "reject"
+    validity_failure = failed_checks.get("validity")
+    if isinstance(validity_failure, dict):
+        if validity_failure.get("failure_code") == "target_leakage_risk":
+            return "refine" if "score" not in failed_checks else "deprioritize"
         return "reject"
     if "score" in failed_checks:
         return "deprioritize" if evidence.get("rules_passed") is True else "reject"
@@ -5563,6 +6187,8 @@ def _candidate_promotion_metric_results(
         "inference_seconds": _evidence_runtime_seconds(evidence),
         "physics_residual_delta": _evidence_physics_delta(evidence),
         "rules_passed": evidence.get("rules_passed"),
+        "candidate_gate_issues": _evidence_gate_issues(evidence),
+        "diagnostic_only": evidence.get("diagnostic_only"),
     }
 
 
@@ -5593,6 +6219,22 @@ def _evidence_physics_delta(evidence: dict[str, Any]) -> float:
     if isinstance(physics, dict):
         return _float_or_default(physics.get("residual_delta"), 0.0)
     return 0.0
+
+
+def _evidence_has_gate_issue(evidence: dict[str, Any], issue: str) -> bool:
+    return issue in _evidence_gate_issues(evidence)
+
+
+def _evidence_gate_issues(evidence: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    for key in ["candidate_gate_issues", "gate_issues", "diagnostic_flags"]:
+        value = evidence.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if isinstance(item, str) and item.strip() and item not in issues:
+                issues.append(item.strip())
+    return issues
 
 
 def _float_or_default(value: Any, default: float) -> float:

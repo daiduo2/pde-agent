@@ -71,6 +71,30 @@ def test_score_competition_prediction_uses_future_steps_only(
     )
 
 
+def test_score_competition_prediction_truncates_task2_validation_extra_steps(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.competition_scoring import score_competition_prediction
+
+    prediction = np.ones((2, 200, 256), dtype=np.float32)
+    target = np.ones((2, 210, 256), dtype=np.float32)
+    prediction_path = _write_hdf5(tmp_path / "task2_pred.hdf5", prediction)
+    target_path = _write_hdf5(tmp_path / "task2_val.hdf5", target)
+
+    report = score_competition_prediction(
+        task_id=2,
+        prediction_path=prediction_path,
+        target_path=target_path,
+        output_path=None,
+        prediction_dataset_key="tensor",
+        target_dataset_key="tensor",
+    )
+
+    assert report["prediction_shape"] == [2, 200, 256]
+    assert report["target_shape"] == [2, 200, 256]
+    assert report["segment_score"] == pytest.approx(100.0)
+
+
 def test_score_competition_prediction_cli_returns_payload(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner

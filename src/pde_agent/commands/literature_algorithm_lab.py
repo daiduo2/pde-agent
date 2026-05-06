@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from pde_agent.core.json_output import success_payload
+from pde_agent.core.hypothesis_lab_trace import HypothesisLabTraceStore
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATES_STATE_HINT,
     ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
@@ -11,6 +12,8 @@ from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CARDS_V2_VALIDATED_STATE_HINT,
     ARXIV_MINERU_PARSE_PIPELINE_STATE_HINT,
     BOUNDED_EXECUTOR_AUDIT_STATE_HINT,
+    BOUNDED_EXECUTOR_AUTHORING_AUDIT_STATE_HINT,
+    BOUNDED_EXECUTOR_AUTHORING_COMPLETION_STATE_HINT,
     BOUNDED_EXECUTOR_AUTHORING_TASK_STATE_HINT,
     BOUNDED_EXECUTOR_DESIGN_SPEC_STATE_HINT,
     BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
@@ -36,9 +39,11 @@ from pde_agent.core.literature_algorithm_lab import (
     SOURCE_RECORDS_STATE_HINT,
     UNET_LITERATURE_ADAPTATION_TASK_STATE_HINT,
     adapt_fno_architecture_candidate,
+    audit_bounded_executor_authoring_task,
     build_blocked_candidate_handoff,
     build_executor_taxonomy,
     build_literature_source_records,
+    complete_bounded_executor_authoring_task,
     compile_algorithm_candidates,
     create_bounded_executor_design_spec,
     create_executor_design_request,
@@ -57,6 +62,7 @@ from pde_agent.core.literature_algorithm_lab import (
     prepare_fno_literature_adaptation_task,
     prepare_literature_extraction_context,
     prepare_unet_literature_adaptation_task,
+    record_bounded_executor_sandbox_evidence,
     materialize_bounded_executor_template,
     record_literature_registry_event,
     record_bounded_executor_sandbox_event,
@@ -927,6 +933,7 @@ def run_bounded_executor_sandbox_command(
     output_dir: str,
     submission_id: str,
     force: bool,
+    trace_path: str | None = None,
 ) -> dict[str, object]:
     report = run_bounded_executor_sandbox(
         design_spec_path=Path(design_spec_path),
@@ -938,11 +945,34 @@ def run_bounded_executor_sandbox_command(
         submission_id=submission_id,
         force=force,
     )
+    trace_event = None
+    if trace_path is not None:
+        trace_event = HypothesisLabTraceStore(trace_path).append_event(
+            event_type="bounded_executor_sandbox",
+            payload={
+                "algorithm_candidate_id": report["algorithm_candidate_id"],
+                "candidate_family": report.get("candidate_family"),
+                "outcome": "passed" if report["rules_passed"] else "failed",
+                "score_delta": report["metric_results"][
+                    "score_delta_vs_persistence"
+                ],
+                "rules_passed": report["rules_passed"],
+                "inference_seconds": report["metric_results"]["inference_seconds"],
+            },
+            run_id="local",
+            source_artifact_path=report["artifacts"]["sandbox_report_path"],
+            tags=["literature", "bounded_executor", "sandbox"],
+        )
     return success_payload(
         run_id="local",
         command="run-bounded-executor-sandbox",
         state_hint=BOUNDED_EXECUTOR_SANDBOX_STATE_HINT,
-        artifacts=report["artifacts"],
+        artifacts={
+            **report["artifacts"],
+            **({"trace_path": trace_path, "trace_event_id": trace_event["event_id"]}
+               if trace_event is not None
+               else {}),
+        },
         metrics={
             "algorithm_candidate_id": report["algorithm_candidate_id"],
             "rules_passed": report["rules_passed"],
@@ -950,6 +980,7 @@ def run_bounded_executor_sandbox_command(
                 "score_delta_vs_persistence"
             ],
             "inference_seconds": report["metric_results"]["inference_seconds"],
+            "trace_event_recorded": trace_event is not None,
         },
         next_hint=report["next_command"],
     )
@@ -980,6 +1011,39 @@ def record_bounded_executor_sandbox_event_command(
             "algorithm_candidate_id": report["algorithm_candidate_id"],
             "event_type": report["event_type"],
             "retry_allowed": report["retry_allowed"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def record_bounded_executor_sandbox_evidence_command(
+    *,
+    sandbox_report_path: str,
+    output_path: str,
+    current_best_score: float,
+    force: bool,
+) -> dict[str, object]:
+    report = record_bounded_executor_sandbox_evidence(
+        sandbox_report_path=Path(sandbox_report_path),
+        output_path=Path(output_path),
+        current_best_score=current_best_score,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="record-bounded-executor-sandbox-evidence",
+        state_hint="SANDBOX_EVIDENCE_RECORDED",
+        artifacts={
+            "sandbox_evidence_path": report["evidence_path"],
+            "source_report_path": report["source_report_path"],
+        },
+        metrics={
+            "candidate_id": report["candidate_id"],
+            "rules_passed": report["rules_passed"],
+            "score": report["score"],
+            "score_delta_vs_current_best": report[
+                "score_delta_vs_current_best"
+            ],
         },
         next_hint=report["next_command"],
     )
@@ -1028,3 +1092,155 @@ def prepare_bounded_executor_authoring_task_command(
         },
         next_hint=report["next_command"],
     )
+
+
+def audit_bounded_executor_authoring_task_command(
+    *,
+    authoring_task_path: str,
+    skill_root: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = audit_bounded_executor_authoring_task(
+        authoring_task_path=Path(authoring_task_path),
+        skill_root=Path(skill_root),
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="audit-bounded-executor-authoring-task",
+        state_hint=BOUNDED_EXECUTOR_AUTHORING_AUDIT_STATE_HINT,
+        artifacts={
+            "bounded_executor_authoring_audit_path": report[
+                "authoring_audit_path"
+            ],
+            "authoring_task_path": report["authoring_task_path"],
+            "skill_path": report["skill_path"],
+        },
+        metrics={
+            "algorithm_candidate_id": report["algorithm_candidate_id"],
+            "decision": report["decision"],
+            "issue_count": report["issue_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def complete_bounded_executor_authoring_task_command(
+    *,
+    authoring_task_path: str,
+    algorithm_candidates_path: str,
+    registry_path: str,
+    current_best_score: float,
+    skill_root: str,
+    force: bool,
+    trace_path: str | None = None,
+) -> dict[str, object]:
+    report = complete_bounded_executor_authoring_task(
+        authoring_task_path=Path(authoring_task_path),
+        algorithm_candidates_path=Path(algorithm_candidates_path),
+        registry_path=Path(registry_path),
+        current_best_score=current_best_score,
+        skill_root=Path(skill_root),
+        force=force,
+    )
+    trace_event = None
+    if trace_path is not None:
+        trace_event = HypothesisLabTraceStore(trace_path).append_event(
+            event_type="bounded_executor_completion",
+            payload=_completion_trace_payload(report),
+            run_id="local",
+            source_artifact_path=_completion_source_artifact_path(report),
+            tags=["literature", "bounded_executor", "completion"],
+        )
+    return success_payload(
+        run_id="local",
+        command="complete-bounded-executor-authoring-task",
+        state_hint=BOUNDED_EXECUTOR_AUTHORING_COMPLETION_STATE_HINT,
+        artifacts={
+            **report["artifacts"],
+            **(
+                {"trace_path": trace_path, "trace_event_id": trace_event["event_id"]}
+                if trace_event is not None
+                else {}
+            ),
+        },
+        metrics={
+            "algorithm_candidate_id": _completion_algorithm_candidate_id(report),
+            "decision": report["decision"],
+            "issue_count": report.get("audit", {}).get("issue_count")
+            if isinstance(report.get("audit"), dict)
+            else None,
+            "rules_passed": report.get("sandbox", {}).get("rules_passed")
+            if isinstance(report.get("sandbox"), dict)
+            else None,
+            "registry_event_count": report.get("registry", {}).get("event_count")
+            if isinstance(report.get("registry"), dict)
+            else None,
+            "trace_event_recorded": trace_event is not None,
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def _completion_algorithm_candidate_id(report: dict[str, object]) -> object:
+    promotion = report.get("promotion")
+    if isinstance(promotion, dict):
+        return promotion.get("algorithm_candidate_id")
+    return report.get("algorithm_candidate_id")
+
+
+def _completion_trace_payload(report: dict[str, object]) -> dict[str, object]:
+    promotion = report.get("promotion") if isinstance(report.get("promotion"), dict) else {}
+    sandbox = report.get("sandbox") if isinstance(report.get("sandbox"), dict) else {}
+    audit = report.get("audit") if isinstance(report.get("audit"), dict) else {}
+    registry = report.get("registry") if isinstance(report.get("registry"), dict) else {}
+    promotion_metrics = (
+        promotion.get("metric_results")
+        if isinstance(promotion.get("metric_results"), dict)
+        else {}
+    )
+    sandbox_metrics = (
+        sandbox.get("metric_results")
+        if isinstance(sandbox.get("metric_results"), dict)
+        else {}
+    )
+    score_delta = _completion_number(
+        promotion_metrics.get("score_delta_vs_current_best")
+    )
+    if score_delta is None:
+        score_delta = _completion_number(sandbox_metrics.get("score_delta_vs_persistence"))
+    return {
+        "algorithm_candidate_id": _completion_algorithm_candidate_id(report),
+        "candidate_family": promotion.get("candidate_family")
+        or report.get("candidate_family"),
+        "outcome": promotion.get("decision") or report.get("decision"),
+        "rules_passed": sandbox.get("rules_passed"),
+        "score_delta": score_delta,
+        "score_delta_vs_current_best": _completion_number(
+            promotion_metrics.get("score_delta_vs_current_best")
+        ),
+        "score_delta_vs_persistence": _completion_number(
+            sandbox_metrics.get("score_delta_vs_persistence")
+        ),
+        "segment_score": _completion_number(sandbox_metrics.get("segment_score")),
+        "inference_seconds": _completion_number(sandbox_metrics.get("inference_seconds")),
+        "audit_decision": audit.get("decision"),
+        "issue_count": audit.get("issue_count"),
+        "registry_event_count": registry.get("event_count"),
+        "next_command": report.get("next_command"),
+    }
+
+
+def _completion_source_artifact_path(report: dict[str, object]) -> object:
+    artifacts = report.get("artifacts")
+    if isinstance(artifacts, dict):
+        return artifacts.get("completion_path")
+    return None
+
+
+def _completion_number(value: object) -> float | None:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None

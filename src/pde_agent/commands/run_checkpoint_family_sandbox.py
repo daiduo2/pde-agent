@@ -21,7 +21,9 @@ def run_checkpoint_family_sandbox_command(
     prediction_dataset_key: str,
     calibration_weights: list[float],
     fno_finetune_steps: int,
-    force: bool,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
+    force: bool = False,
 ) -> dict[str, object]:
     report = run_checkpoint_family_sandbox(
         checkpoint_paths=[Path(path) for path in checkpoint_paths],
@@ -34,6 +36,8 @@ def run_checkpoint_family_sandbox_command(
         prediction_dataset_key=prediction_dataset_key,
         calibration_weights=calibration_weights,
         fno_finetune_steps=fno_finetune_steps,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     best = report["best_candidate"]
@@ -53,6 +57,10 @@ def run_checkpoint_family_sandbox_command(
             "best_rules_passed": best.get("rules_passed"),
             "best_train_time": best.get("train_time"),
             "best_inference_time": best.get("inference_time"),
+            "best_raw_train_time": best.get("raw_train_time"),
+            "best_raw_inference_time": best.get("raw_inference_time"),
+            "best_timing_profile": best.get("timing_profile"),
+            "best_timing_factor": best.get("timing_factor"),
         },
         next_hint=report["next_command"],
     )

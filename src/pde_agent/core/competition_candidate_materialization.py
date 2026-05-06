@@ -29,6 +29,8 @@ def materialize_competition_candidate(
     prediction_dataset_key: str = "tensor",
     source_prediction_key: str = "prediction",
     train_time: float | None = None,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     candidate_file = Path(candidate_report_path)
@@ -49,6 +51,8 @@ def materialize_competition_candidate(
         source_prediction_key=source_prediction_key,
         train_time=elapsed,
         inference_time=inference_elapsed,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     score = None

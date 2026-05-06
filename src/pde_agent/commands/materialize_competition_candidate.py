@@ -21,7 +21,9 @@ def materialize_competition_candidate_command(
     prediction_dataset_key: str,
     source_prediction_key: str,
     train_time: float | None,
-    force: bool,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
+    force: bool = False,
 ) -> dict[str, object]:
     report = materialize_competition_candidate(
         task_id=task_id,
@@ -34,6 +36,8 @@ def materialize_competition_candidate_command(
         prediction_dataset_key=prediction_dataset_key,
         source_prediction_key=source_prediction_key,
         train_time=train_time,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     score = report["score"]
@@ -49,6 +53,14 @@ def materialize_competition_candidate_command(
             "task_prediction_score": score["task_prediction_score"]
             if score is not None
             else None,
+            "train_time": report["submission"]["metrics"]["train_time"],
+            "inference_time": report["submission"]["metrics"]["inference_time"],
+            "raw_train_time": report["submission"]["metrics"]["raw_train_time"],
+            "raw_inference_time": report["submission"]["metrics"][
+                "raw_inference_time"
+            ],
+            "timing_profile": report["submission"]["metrics"]["timing_profile"],
+            "timing_factor": report["submission"]["metrics"]["timing_factor"],
         },
         next_hint=str(report["next_command"]),
     )

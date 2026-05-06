@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+from pde_agent.core.competition_timing import normalize_timing
+
 
 STATE_HINT = "COMPETITION_SUBMISSION_READY"
 PROBLEM_ID = "PDE_Burgers"
@@ -36,6 +38,8 @@ def build_competition_submission(
     source_prediction_key: str = "prediction",
     train_time: float = 0.0,
     inference_time: float | None = None,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     if task_id not in {1, 2}:
@@ -94,9 +98,17 @@ def build_competition_submission(
             key=source_prediction_key,
         )
     measured_inference_time = time.perf_counter() - start
-    reported_inference_time = (
+    raw_inference_time = (
         measured_inference_time if inference_time is None else inference_time
     )
+    timing = normalize_timing(
+        raw_train_time=train_time,
+        raw_inference_time=raw_inference_time,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
+    )
+    reported_train_time = float(timing["train_time"])
+    reported_inference_time = float(timing["inference_time"])
     _validate_prediction(prediction=prediction, context=context)
 
     submission_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +120,7 @@ def build_competition_submission(
     )
     _write_time_csv(
         path=time_path,
-        train_time=train_time,
+        train_time=reported_train_time,
         inference_time=reported_inference_time,
     )
     _write_submission_json(path=submission_json_path, submission_id=submission_id)
@@ -123,8 +135,11 @@ def build_competition_submission(
         source_prediction_path=Path(source_prediction_path)
         if source_prediction_path is not None
         else None,
+        raw_inference_time=raw_inference_time,
+        raw_train_time=train_time,
         inference_time=reported_inference_time,
-        train_time=train_time,
+        train_time=reported_train_time,
+        timing=timing,
     )
     _write_code_stubs(model_path=model_py_path, train_path=train_py_path)
     _write_submission_zip(
@@ -151,9 +166,18 @@ def build_competition_submission(
             "sample_count": int(prediction.shape[0]),
             "prediction_shape": list(prediction.shape),
             "method": method,
-            "train_time": train_time,
+            "raw_train_time": train_time,
+            "raw_inference_time": raw_inference_time,
+            "train_time": reported_train_time,
             "inference_time": reported_inference_time,
             "packaging_inference_time": measured_inference_time,
+            "timing_profile": timing["timing_profile"],
+            "timing_factor": timing["timing_factor"],
+            "timing_profile_official_listed": timing[
+                "timing_profile_official_listed"
+            ],
+            "timing_policy": timing["timing_policy"],
+            "timing_valid_for_submission": timing["timing_valid_for_submission"],
         },
         "next_command": "submit-zip-to-competition",
     }
@@ -313,8 +337,11 @@ def _write_log(
     sample_count: int,
     method: str,
     source_prediction_path: Path | None,
+    raw_train_time: float,
+    raw_inference_time: float,
     train_time: float,
     inference_time: float,
+    timing: dict[str, Any],
 ) -> None:
     model_change = (
         "no learned weights; repeat the last observed context state over the 190 hidden steps."
@@ -345,8 +372,13 @@ def _write_log(
                 f"- model_change: {model_change}",
                 "- validation_contract: output shape is (N, 200, 256); first 10 steps are copied from the test context.",
                 f"- samples: {sample_count}",
-                f"- train_time_seconds: {train_time:.6f}",
-                f"- inference_time_seconds: {inference_time:.6f}",
+                f"- raw_train_time_seconds: {raw_train_time:.6f}",
+                f"- raw_inference_time_seconds: {raw_inference_time:.6f}",
+                f"- a100_equiv_train_time_seconds: {train_time:.6f}",
+                f"- a100_equiv_inference_time_seconds: {inference_time:.6f}",
+                f"- timing_profile: {timing['timing_profile']}",
+                f"- timing_factor: {timing['timing_factor']:.6f}",
+                f"- timing_valid_for_submission: {timing['timing_valid_for_submission']}",
                 "",
                 "Conclusion:",
                 "- This artifact is a structurally valid baseline submission and a stable target for subsequent Hermes strategy upgrades.",

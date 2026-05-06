@@ -101,6 +101,12 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
     lines.extend(["", "Hermes Submission Candidate:"])
     candidate_lines = _hermes_submission_candidate_lines(records)
     lines.extend(candidate_lines or ["- No Hermes submission candidate artifact was provided."])
+    lines.extend(["", "Repair Policy Memory:"])
+    repair_policy_lines = _repair_policy_memory_lines(records)
+    lines.extend(
+        repair_policy_lines
+        or ["- No repair policy memory artifact was provided."]
+    )
     lines.extend(["", "Submission Decision:"])
     submission_lines = _submission_lines(records)
     lines.extend(submission_lines or ["- No competition submission pipeline artifact was provided."])
@@ -201,6 +207,50 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + str(_nested(payload, ["audit", "issue_count"], "unknown"))
             + " next="
             + str(payload.get("next_command", "unknown"))
+        ]
+    if kind == "hermes_runtime_closed_loop":
+        return [
+            "- Hermes runtime closed loop best_score="
+            + str(_nested(payload, ["heartbeat", "best_score"], "unknown"))
+            + " decision="
+            + str(_nested(payload, ["heartbeat", "decision"], "unknown"))
+            + " repair_policy_action_count="
+            + str(
+                _nested(
+                    payload,
+                    ["metrics", "repair_policy_recommended_action_count"],
+                    "unknown",
+                )
+            )
+        ]
+    if kind == "hermes_runtime_audit_chain":
+        metrics = payload.get("metrics")
+        if not isinstance(metrics, dict):
+            metrics = {}
+        return [
+            "- Hermes runtime audit chain decision="
+            + str(payload.get("decision", "unknown"))
+            + " auto_repair_decision="
+            + str(metrics.get("auto_repair_decision", "unknown"))
+            + " memory_bridge_passed="
+            + str(metrics.get("auto_repair_memory_bridge_passed", "unknown"))
+        ]
+    if kind == "hermes_heartbeat":
+        return [
+            "- Hermes heartbeat best_candidate="
+            + str(_nested(payload, ["best_candidate", "candidate_id"], "unknown"))
+            + " best_score="
+            + str(payload.get("best_score", "unknown"))
+            + " decision="
+            + str(payload.get("decision", "unknown"))
+            + " repair_policy_action_count="
+            + str(
+                _nested(
+                    payload,
+                    ["parameters", "repair_policy_recommended_action_count"],
+                    "unknown",
+                )
+            )
         ]
     return ["- Recorded artifact state=" + _state(payload)]
 
@@ -406,6 +456,151 @@ def _hermes_submission_candidate_lines(records: list[dict[str, Any]]) -> list[st
     return lines
 
 
+def _repair_policy_memory_lines(records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        payload = record["payload"]
+        if record["kind"] == "hermes_runtime_closed_loop":
+            candidate_plan = payload.get("candidate_plan")
+            if not isinstance(candidate_plan, dict):
+                candidate_plan = {}
+            metrics = payload.get("metrics")
+            if not isinstance(metrics, dict):
+                metrics = {}
+            nonconverged = _string_list(
+                candidate_plan.get("repair_nonconvergence_errors")
+            )
+            converged = _string_list(candidate_plan.get("repair_convergence_errors"))
+            lines.append(
+                "- runtime path="
+                + record["path"]
+                + " runtime_action_count="
+                + str(metrics.get("repair_policy_recommended_action_count", 0))
+                + " nonconverged_repair_errors="
+                + _join_or_none(nonconverged)
+                + " converged_repair_errors="
+                + _join_or_none(converged)
+            )
+            lines.extend(
+                _repair_action_lines(
+                    source="runtime",
+                    actions=candidate_plan.get("repair_policy_recommended_actions"),
+                )
+            )
+        if record["kind"] == "hermes_runtime_audit_chain":
+            metrics = payload.get("metrics")
+            if not isinstance(metrics, dict):
+                metrics = {}
+            repair_convergence = payload.get("repair_convergence")
+            if not isinstance(repair_convergence, dict):
+                repair_convergence = {}
+            converged = _string_list(repair_convergence.get("input_repair_errors"))
+            if repair_convergence.get("decision") != "converged":
+                converged = []
+            nonconverged = _string_list(
+                repair_convergence.get("repeated_audit_errors")
+            )
+            lines.append(
+                "- auto_repair path="
+                + record["path"]
+                + " auto_repair_decision="
+                + str(metrics.get("auto_repair_decision", "unknown"))
+                + " memory_bridge_passed="
+                + str(metrics.get("auto_repair_memory_bridge_passed", "unknown"))
+                + " auto_repair_action_count="
+                + str(
+                    metrics.get(
+                        "auto_repair_repair_policy_recommended_action_count",
+                        0,
+                    )
+                )
+                + " nonconverged_repair_errors="
+                + _join_or_none(nonconverged)
+                + " converged_repair_errors="
+                + _join_or_none(converged)
+            )
+            lines.extend(
+                _repair_action_lines(
+                    source="auto_repair",
+                    actions=_auto_repair_actions(repair_convergence),
+                )
+            )
+        if record["kind"] == "hermes_heartbeat":
+            parameters = payload.get("parameters")
+            if not isinstance(parameters, dict):
+                parameters = {}
+            lines.append(
+                "- heartbeat path="
+                + record["path"]
+                + " heartbeat_action_count="
+                + str(parameters.get("repair_policy_recommended_action_count", 0))
+                + " repair_policy_summary_path="
+                + str(parameters.get("repair_policy_summary_path", "unknown"))
+            )
+            lines.extend(
+                _repair_action_lines(
+                    source="heartbeat",
+                    actions=payload.get("repair_policy_recommended_actions"),
+                )
+            )
+            batches = payload.get("batches")
+            if isinstance(batches, list):
+                for batch in batches:
+                    if not isinstance(batch, dict):
+                        continue
+                    lines.append(
+                        "- heartbeat_batch="
+                        + str(batch.get("batch_index", "unknown"))
+                        + " candidate_generator="
+                        + str(batch.get("candidate_generator", "unknown"))
+                        + " repair_policy_action_count="
+                        + str(batch.get("repair_policy_recommended_action_count", 0))
+                    )
+    return lines
+
+
+def _repair_action_lines(*, source: str, actions: Any) -> list[str]:
+    lines: list[str] = []
+    if not isinstance(actions, list):
+        return lines
+    seen: set[tuple[str, str, str]] = set()
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        key = (
+            str(action.get("audit_error", "unknown")),
+            str(action.get("action", "unknown")),
+            str(action.get("reason", "unknown")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(
+            "- repair_action source="
+            + source
+            + " audit_error="
+            + key[0]
+            + " action="
+            + key[1]
+            + " reason="
+            + key[2]
+        )
+    return lines
+
+
+def _auto_repair_actions(repair_convergence: dict[str, Any]) -> list[dict[str, str]]:
+    if repair_convergence.get("decision") != "converged":
+        return []
+    return [
+        {
+            "audit_error": error,
+            "action": "prefer_previously_converged_repair_path",
+            "reason": "repair_converged",
+        }
+        for error in _string_list(repair_convergence.get("input_repair_errors"))
+    ]
+
+
 def _artifact_kind(payload: dict[str, Any]) -> str:
     state = _state(payload)
     if "session_id" in payload and "tool_call_summary" in payload:
@@ -424,6 +619,12 @@ def _artifact_kind(payload: dict[str, Any]) -> str:
         return "unet_prediction"
     if state == "HERMES_SUBMISSION_CANDIDATE_READY":
         return "hermes_submission_candidate"
+    if state == "HERMES_RUNTIME_CLOSED_LOOP_RAN":
+        return "hermes_runtime_closed_loop"
+    if state == "HERMES_RUNTIME_AUDIT_CHAIN_RAN":
+        return "hermes_runtime_audit_chain"
+    if state == "HERMES_HEARTBEAT_RAN":
+        return "hermes_heartbeat"
     return "generic"
 
 
@@ -438,6 +639,16 @@ def _nested(payload: dict[str, Any], keys: list[str], default: Any) -> Any:
             return default
         value = value[key]
     return value
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _join_or_none(values: list[str]) -> str:
+    return ",".join(values) if values else "none"
 
 
 def _append_chronicle(*, log_path: Path, chronicle: str) -> None:

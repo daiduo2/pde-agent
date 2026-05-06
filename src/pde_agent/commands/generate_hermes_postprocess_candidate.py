@@ -20,6 +20,8 @@ def generate_hermes_postprocess_candidate_command(
     submission_id: str,
     dataset_key: str,
     prediction_dataset_key: str,
+    timing_profile: str | None,
+    timing_factor: float | None,
     force: bool,
 ) -> dict[str, object]:
     report = generate_hermes_postprocess_candidate(
@@ -32,6 +34,8 @@ def generate_hermes_postprocess_candidate_command(
         submission_id=submission_id,
         dataset_key=dataset_key,
         prediction_dataset_key=prediction_dataset_key,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     return success_payload(

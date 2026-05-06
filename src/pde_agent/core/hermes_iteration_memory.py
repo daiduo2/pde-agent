@@ -59,6 +59,7 @@ def build_hermes_iteration_memory(
         "metrics": {
             "trajectory_count": len(memory["trajectory_summary"]),
             "avoid_count": len(memory["avoid_repeating"]),
+            "search_guidance_count": len(memory["search_guidance"]),
             "updated_log_count": len(updated_logs),
         },
         "next_command": "run-hermes-batch-optimization-loop",
@@ -69,6 +70,10 @@ def _build_memory(*, loop: dict[str, Any], source_path: Path) -> dict[str, Any]:
     trajectory = _trajectory(loop)
     best = _best(loop)
     avoid = _avoid_repeating(trajectory=trajectory, best=best)
+    family_outcomes = _family_outcomes(trajectory=trajectory, best=best)
+    avoid_candidate_families = _avoid_candidate_families(family_outcomes)
+    positive_signals = _positive_signals(trajectory=trajectory)
+    search_guidance = _search_guidance(trajectory=trajectory)
     return {
         "schema_version": 1,
         "state_hint": STATE_HINT,
@@ -78,7 +83,17 @@ def _build_memory(*, loop: dict[str, Any], source_path: Path) -> dict[str, Any]:
         "best_candidate": best,
         "trajectory_summary": [_trajectory_item(item) for item in trajectory],
         "avoid_repeating": avoid,
-        "next_hints": _next_hints(best=best, avoid=avoid),
+        "avoid_candidate_families": avoid_candidate_families,
+        "family_outcomes": family_outcomes,
+        "positive_signals": positive_signals,
+        "search_guidance": search_guidance,
+        "next_hints": _next_hints(
+            best=best,
+            avoid=avoid,
+            avoid_candidate_families=avoid_candidate_families,
+            positive_signals=positive_signals,
+            search_guidance=search_guidance,
+        ),
     }
 
 
@@ -120,6 +135,7 @@ def _trajectory_item(item: dict[str, Any]) -> dict[str, Any]:
         "strategy": meta.get("strategy"),
         "blend_weight": meta.get("blend_weight"),
         "source": meta.get("source"),
+        "candidate_family": _candidate_family(item),
     }
 
 
@@ -153,7 +169,199 @@ def _avoid_repeating(
     return avoid
 
 
-def _next_hints(*, best: dict[str, Any], avoid: list[dict[str, Any]]) -> list[str]:
+def _family_outcomes(
+    *,
+    trajectory: list[dict[str, Any]],
+    best: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    initial_score = _objective_score(trajectory[0])
+    best_id = best.get("candidate_id")
+    rows: dict[str, dict[str, Any]] = {}
+    for item in trajectory[1:]:
+        family = _candidate_family(item)
+        if not family:
+            continue
+        score = _objective_score(item)
+        delta = None
+        if score is not None and initial_score is not None:
+            delta = score - initial_score
+        row = rows.setdefault(
+            family,
+            {
+                "candidate_family": family,
+                "status": "neutral",
+                "attempt_count": 0,
+                "best_candidate_id": None,
+                "best_score": None,
+                "best_delta_vs_initial": None,
+                "worst_candidate_id": None,
+                "worst_score": None,
+                "worst_delta_vs_initial": None,
+                "failure_reasons": [],
+            },
+        )
+        row["attempt_count"] += 1
+        if score is not None and (
+            row["best_score"] is None or score > float(row["best_score"])
+        ):
+            meta = _metadata(item)
+            row["best_candidate_id"] = item.get("candidate_id")
+            row["best_score"] = score
+            row["best_delta_vs_initial"] = delta
+            row["best_strategy"] = meta.get("strategy")
+            row["best_blend_weight"] = meta.get("blend_weight")
+        if score is not None and (
+            row["worst_score"] is None or score < float(row["worst_score"])
+        ):
+            row["worst_candidate_id"] = item.get("candidate_id")
+            row["worst_score"] = score
+            row["worst_delta_vs_initial"] = delta
+        if item.get("rules_passed") is False:
+            _append_unique(row["failure_reasons"], "rule_gate_failed")
+        elif delta is not None and delta <= -5.0:
+            _append_unique(row["failure_reasons"], "severe_score_regression")
+        elif item.get("improved") is False:
+            _append_unique(row["failure_reasons"], "below_min_effective_improvement")
+        if item.get("candidate_id") == best_id and delta is not None and delta > 0.0:
+            row["status"] = "positive_signal"
+        elif row["status"] != "positive_signal":
+            best_delta = row.get("best_delta_vs_initial")
+            if isinstance(best_delta, int | float) and best_delta <= -5.0:
+                row["status"] = "blocked"
+            elif isinstance(best_delta, int | float) and best_delta >= -0.05:
+                row["status"] = "near_miss"
+            elif row["failure_reasons"]:
+                row["status"] = "weak_or_failed"
+    for row in rows.values():
+        if (
+            row["status"] == "weak_or_failed"
+            and "severe_score_regression" in row["failure_reasons"]
+        ):
+            row["status"] = "blocked"
+    return rows
+
+
+def _avoid_candidate_families(
+    family_outcomes: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    avoid = []
+    for family, row in sorted(family_outcomes.items()):
+        if row.get("status") != "blocked":
+            continue
+        reason = "blocked_by_prior_evidence"
+        reasons = row.get("failure_reasons")
+        if isinstance(reasons, list) and "severe_score_regression" in reasons:
+            reason = "severe_score_regression"
+        elif isinstance(reasons, list) and reasons:
+            reason = str(reasons[0])
+        avoid.append({"candidate_family": family, "reason": reason})
+    return avoid
+
+
+def _positive_signals(*, trajectory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    initial_score = _objective_score(trajectory[0])
+    signals = []
+    for item in trajectory[1:]:
+        score = _objective_score(item)
+        if score is None or initial_score is None or score <= initial_score:
+            continue
+        meta = _metadata(item)
+        signals.append(
+            {
+                "candidate_id": item.get("candidate_id"),
+                "candidate_family": _candidate_family(item),
+                "strategy": meta.get("strategy"),
+                "blend_weight": meta.get("blend_weight"),
+                "objective_delta_vs_initial": round(score - initial_score, 10),
+                "score": score,
+            }
+        )
+    signals.sort(
+        key=lambda item: float(item.get("objective_delta_vs_initial") or 0.0),
+        reverse=True,
+    )
+    return signals
+
+
+def _search_guidance(*, trajectory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not trajectory:
+        return []
+    initial_score = _objective_score(trajectory[0])
+    guidance: list[dict[str, Any]] = []
+    for item in trajectory[1:]:
+        meta = _metadata(item)
+        if meta.get("source") != "sem_window_gate_blend_multi_search":
+            continue
+        memory_guidance_spec_count = _int_value(
+            meta.get("memory_guidance_spec_count")
+        )
+        if (
+            memory_guidance_spec_count is not None
+            and memory_guidance_spec_count > 0
+            and item.get("improved") is False
+        ):
+            guidance.append(
+                {
+                    "guidance_type": "escalate_after_guided_search_exhaustion",
+                    "reason": "memory_guided_specs_failed_to_improve",
+                    "candidate_id": item.get("candidate_id"),
+                    "source": meta.get("source"),
+                    "memory_guidance_spec_count": memory_guidance_spec_count,
+                    "search_evaluated_count": meta.get("search_evaluated_count"),
+                    "feature_name": meta.get("feature_name"),
+                    "validation_selection_metric": meta.get(
+                        "validation_selection_metric"
+                    ),
+                    "validation_selection_score": meta.get(
+                        "validation_selection_score"
+                    ),
+                    "recommended_action": (
+                        "switch_gate_feature_family_or_try_new_dynamics_source"
+                    ),
+                }
+            )
+            continue
+        if _int_value(meta.get("selected_sample_count")) != 0:
+            continue
+        objective_score = _objective_score(item)
+        if objective_score is None or initial_score is None:
+            continue
+        delta = round(objective_score - initial_score, 6)
+        if delta < -0.25:
+            continue
+        guidance.append(
+            {
+                "guidance_type": "refine_gating_after_near_miss",
+                "reason": "near_miss_with_empty_gate_selection",
+                "candidate_id": item.get("candidate_id"),
+                "source": meta.get("source"),
+                "objective_delta_vs_initial": delta,
+                "feature_name": meta.get("feature_name"),
+                "threshold": meta.get("threshold"),
+                "selected_sample_count": meta.get("selected_sample_count"),
+                "search_evaluated_count": meta.get("search_evaluated_count"),
+                "validation_selection_metric": meta.get(
+                    "validation_selection_metric"
+                ),
+                "validation_selection_score": meta.get("validation_selection_score"),
+                "window_start": meta.get("window_start"),
+                "window_stop": meta.get("window_stop"),
+                "recommended_action": (
+                    "relax_or_recenter_gate_threshold_and_window_before_repeating_family"
+                ),
+            }
+        )
+    return guidance
+
+
+def _next_hints(
+    *,
+    best: dict[str, Any],
+    avoid: list[dict[str, Any]],
+    avoid_candidate_families: list[dict[str, Any]],
+    positive_signals: list[dict[str, Any]],
+    search_guidance: list[dict[str, Any]],
+) -> list[str]:
     hints = []
     strategy = best.get("strategy")
     weight = best.get("blend_weight")
@@ -161,8 +369,23 @@ def _next_hints(*, best: dict[str, Any], avoid: list[dict[str, Any]]) -> list[st
         hints.append(
             f"Try local refinement around blend_weight={weight} for strategy={strategy}."
         )
+    guidance_types = {item.get("guidance_type") for item in search_guidance}
+    if "escalate_after_guided_search_exhaustion" in guidance_types:
+        hints.append(
+            "Switch gate feature family or dynamics source before repeating the "
+            "guided sem-window search."
+        )
+    elif search_guidance:
+        hints.append(
+            "Use search_guidance before repeating a near-miss generator; refine the "
+            "gate/window instead of treating the whole candidate family as exhausted."
+        )
     if avoid:
         hints.append("Exclude avoid_repeating entries unless new evidence changes.")
+    if avoid_candidate_families:
+        hints.append("Block failed candidate families unless a smoke test changes evidence.")
+    if positive_signals:
+        hints.append("Promote positive_signals into the exploration scheduler before adding new families.")
     hints.append("Carry this memory into the next batch to avoid repeated low-value trials.")
     return hints
 
@@ -172,9 +395,55 @@ def _metadata(item: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _candidate_family(item: dict[str, Any]) -> str | None:
+    meta = _metadata(item)
+    source = meta.get("source")
+    if isinstance(source, str) and source and source != "initial_submission":
+        return source
+    candidate_id = item.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id:
+        return None
+    for prefix in (
+        "linear_trend_spectral",
+        "physics_residual_nudge",
+        "checkpoint_window_gate",
+        "sem_window_gate_blend",
+        "postprocess",
+        "hypothesis_lab",
+    ):
+        if candidate_id.startswith(prefix):
+            return prefix
+    return candidate_id.split("_w", maxsplit=1)[0]
+
+
+def _append_unique(values: list[Any], value: Any) -> None:
+    if value not in values:
+        values.append(value)
+
+
 def _objective(item: dict[str, Any]) -> dict[str, Any] | None:
     value = item.get("objective")
     return value if isinstance(value, dict) else None
+
+
+def _objective_score(item: dict[str, Any]) -> float | None:
+    objective = _objective(item)
+    if isinstance(objective, dict):
+        value = objective.get("objective_score")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+    value = item.get("score")
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _render_markdown(memory: dict[str, Any]) -> str:
@@ -229,6 +498,66 @@ def _render_markdown(memory: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No avoid entries were identified.")
+    lines.extend(["", "Family Outcomes:"])
+    family_outcomes = memory.get("family_outcomes")
+    if isinstance(family_outcomes, dict) and family_outcomes:
+        for family, item in sorted(family_outcomes.items()):
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                "- family="
+                + str(family)
+                + " status="
+                + str(item.get("status"))
+                + " best_score="
+                + str(item.get("best_score"))
+                + " best_delta="
+                + str(item.get("best_delta_vs_initial"))
+                + " failures="
+                + str(item.get("failure_reasons"))
+            )
+    else:
+        lines.append("- No family outcomes were identified.")
+    lines.extend(["", "Positive Signals:"])
+    positive_signals = memory.get("positive_signals")
+    if isinstance(positive_signals, list) and positive_signals:
+        for item in positive_signals:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                "- candidate="
+                + str(item.get("candidate_id"))
+                + " family="
+                + str(item.get("candidate_family"))
+                + " delta="
+                + str(item.get("objective_delta_vs_initial"))
+                + " strategy="
+                + str(item.get("strategy"))
+                + " blend_weight="
+                + str(item.get("blend_weight"))
+            )
+    else:
+        lines.append("- No positive signals were identified.")
+    lines.extend(["", "Search Guidance:"])
+    guidance = memory["search_guidance"]
+    if guidance:
+        for item in guidance:
+            lines.append(
+                "- type="
+                + str(item.get("guidance_type"))
+                + " reason="
+                + str(item.get("reason"))
+                + " candidate="
+                + str(item.get("candidate_id"))
+                + " delta="
+                + str(item.get("objective_delta_vs_initial"))
+                + " selected_sample_count="
+                + str(item.get("selected_sample_count"))
+                + " action="
+                + str(item.get("recommended_action"))
+            )
+    else:
+        lines.append("- No search guidance was identified.")
     lines.extend(["", "Next Hints:"])
     for hint in memory["next_hints"]:
         lines.append("- " + hint)

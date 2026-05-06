@@ -262,3 +262,146 @@ def test_build_research_chronicle_summarizes_operator_tuning_and_submission_cand
     assert "rollout_seconds=94.0" in chronicle
     assert "Hermes Submission Candidate:" in chronicle
     assert "audit_decision=passed" in chronicle
+
+
+def test_build_research_chronicle_records_repair_policy_memory(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.research_chronicle import build_research_chronicle
+
+    repair_action = {
+        "audit_error": "repair_convergence_consistency",
+        "action": "switch_repair_strategy_or_reload_missing_evidence",
+        "reason": "repair_nonconverged",
+    }
+    runtime = _write_json(
+        tmp_path / "runtime.json",
+        {
+            "state_hint": "HERMES_RUNTIME_CLOSED_LOOP_RAN",
+            "metrics": {
+                "repair_policy_recommended_action_count": 1,
+                "repair_policy_nonconverged_repair_error_count": 1,
+                "repair_policy_converged_repair_error_count": 0,
+            },
+            "candidate_plan": {
+                "repair_policy_recommended_actions": [repair_action],
+                "repair_nonconvergence_errors": ["repair_convergence_consistency"],
+                "repair_convergence_errors": [],
+            },
+            "heartbeat": {
+                "best_score": 101.0,
+                "decision": "continue_next_heartbeat",
+            },
+        },
+    )
+    heartbeat = _write_json(
+        tmp_path / "heartbeat.json",
+        {
+            "state_hint": "HERMES_HEARTBEAT_RAN",
+            "parameters": {
+                "repair_policy_summary_path": str(tmp_path / "repair_policy.json"),
+                "repair_policy_recommended_action_count": 1,
+            },
+            "repair_policy_recommended_actions": [repair_action],
+            "batches": [
+                {
+                    "batch_index": 1,
+                    "candidate_generator": "physics_residual_nudge",
+                    "repair_policy_recommended_actions": [repair_action],
+                    "repair_policy_recommended_action_count": 1,
+                }
+            ],
+            "best_candidate": {"candidate_id": "physics_repair_candidate"},
+            "best_score": 101.0,
+            "decision": "continue_next_heartbeat",
+            "stop_reason": "max_batches_exhausted",
+        },
+    )
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    (submission_dir / "task1_logs.log").write_text(
+        "Hermes PDE Agent Scientific Log\n\nTrace:\n- prior\n",
+        encoding="utf-8",
+    )
+
+    report = build_research_chronicle(
+        artifact_paths=[runtime, heartbeat],
+        output_path=tmp_path / "chronicle.md",
+        submission_dir=submission_dir,
+        task_ids=[1],
+        force=True,
+    )
+
+    chronicle = Path(report["artifacts"]["chronicle_path"]).read_text(
+        encoding="utf-8"
+    )
+    assert "Repair Policy Memory:" in chronicle
+    assert "runtime_action_count=1" in chronicle
+    assert "heartbeat_action_count=1" in chronicle
+    assert "audit_error=repair_convergence_consistency" in chronicle
+    assert "action=switch_repair_strategy_or_reload_missing_evidence" in chronicle
+    assert "reason=repair_nonconverged" in chronicle
+    assert "nonconverged_repair_errors=repair_convergence_consistency" in chronicle
+
+    updated_log = (submission_dir / "task1_logs.log").read_text(encoding="utf-8")
+    assert "Repair Policy Memory:" in updated_log
+    assert "switch_repair_strategy_or_reload_missing_evidence" in updated_log
+
+
+def test_build_research_chronicle_records_auto_repair_memory_bridge(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.research_chronicle import build_research_chronicle
+
+    audit_chain = _write_json(
+        tmp_path / "audit_chain.json",
+        {
+            "state_hint": "HERMES_RUNTIME_AUDIT_CHAIN_RAN",
+            "decision": "repaired",
+            "repair_convergence": {
+                "decision": "converged",
+                "input_repair_errors": ["runtime_memory_bridge_smoke_gate"],
+                "repeated_audit_errors": [],
+            },
+            "metrics": {
+                "auto_repair_attempted": True,
+                "auto_repair_decision": "passed",
+                "auto_repair_memory_bridge_passed": True,
+                "auto_repair_repair_policy_recommended_action_count": 2,
+                "auto_repair_batch_memory_constraint_action_count": 2,
+            },
+            "auto_repair": {
+                "artifacts": {
+                    "smoke_report_path": str(tmp_path / "smoke.json"),
+                    "runtime_loop_report_path": str(tmp_path / "runtime.json"),
+                    "audit_report_path": str(tmp_path / "audit.json"),
+                },
+                "metrics": {
+                    "memory_bridge_passed": True,
+                    "repair_policy_recommended_action_count": 2,
+                    "batch_memory_constraint_action_count": 2,
+                },
+            },
+            "chain_learning_signals": ["audit_repair_auto_repaired"],
+        },
+    )
+
+    report = build_research_chronicle(
+        artifact_paths=[audit_chain],
+        output_path=tmp_path / "chronicle.md",
+        force=True,
+    )
+
+    chronicle = Path(report["artifacts"]["chronicle_path"]).read_text(
+        encoding="utf-8"
+    )
+    assert "auto_repair_decision=passed" in chronicle
+    assert "memory_bridge_passed=True" in chronicle
+    assert "auto_repair_action_count=2" in chronicle
+    assert "converged_repair_errors=runtime_memory_bridge_smoke_gate" in chronicle
+    assert (
+        "repair_action source=auto_repair "
+        "audit_error=runtime_memory_bridge_smoke_gate "
+        "action=prefer_previously_converged_repair_path "
+        "reason=repair_converged"
+    ) in chronicle

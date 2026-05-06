@@ -22,6 +22,18 @@ from pde_agent.core.pi_deeponet_correction_head import (
     fit_pi_deeponet_correction_head,
     pi_deeponet_params_from_any,
 )
+from pde_agent.core.task1_early_transition_expert import (
+    early_transition_expert_params_from_any,
+    fit_task1_early_transition_expert,
+)
+from pde_agent.core.task1_front25_dynamics import (
+    fit_task1_front25_dynamics,
+    front25_dynamics_params_from_any,
+)
+from pde_agent.core.task1_short_window_corrector import (
+    fit_task1_short_window_corrector,
+    short_window_corrector_params_from_any,
+)
 from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.hermes_literature_expansion import (
     FAILURE_MEMORY_STATE_HINT,
@@ -177,6 +189,8 @@ def generate_hypotheses(
             grouped_cards.setdefault("task1_retrieval_refinement", []).append(card)
         if "task1_early_refinement" in hooks:
             grouped_cards.setdefault("task1_early_refinement", []).append(card)
+        if "task1_early_transition_expert" in hooks:
+            grouped_cards.setdefault("task1_early_transition_expert", []).append(card)
         if "task1_physics_residual_refinement" in hooks:
             grouped_cards.setdefault("task1_physics_residual_refinement", []).append(
                 card
@@ -250,6 +264,28 @@ def generate_hypotheses(
                 ),
                 "known_risks": _merge_card_list(source_cards, "known_risks"),
                 "priority": -7,
+            }
+        )
+    if "task1_early_transition_expert" in grouped_cards:
+        source_cards = grouped_cards["task1_early_transition_expert"]
+        hypotheses.append(
+            {
+                "hypothesis_id": "h_task1_early_transition_expert_001",
+                "source_card_ids": [card["card_id"] for card in source_cards],
+                "candidate_family": "task1_early_transition_expert",
+                "mechanism": (
+                    "Fit a lightweight local transition expert from legal "
+                    "reference trajectories, then splice only the first "
+                    "predicted segment into a guarded base trajectory."
+                ),
+                "preconditions": _merge_card_list(source_cards, "preconditions"),
+                "expected_observables": _merge_card_list(
+                    source_cards,
+                    "expected_observables",
+                ),
+                "known_risks": _merge_card_list(source_cards, "known_risks"),
+                "evidence_params": _ranked_evidence_params(source_cards),
+                "priority": -6,
             }
         )
     if "task1_early_refinement" in grouped_cards:
@@ -635,6 +671,7 @@ def _rank_hypotheses(hypotheses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         priority = int(item.get("priority", 10))
         novelty_bonus = {
             "official_checkpoint_calibration": 45.0,
+            "task1_early_transition_expert": 51.0,
             "task1_early_refinement": 47.0,
             "task1_retrieval_refinement_local_search": 46.0,
             "task1_retrieval_refinement": 44.0,
@@ -982,6 +1019,51 @@ def design_algorithm_blueprints(
                     "risks": hypothesis.get("known_risks", []),
                 }
             )
+        if hypothesis.get("candidate_family") == "task1_early_transition_expert":
+            candidate_params = _early_transition_expert_params(
+                hypothesis.get("evidence_params", [])
+            )
+            blueprints.append(
+                {
+                    "blueprint_id": "bp_task1_early_transition_expert_001",
+                    "hypothesis_id": hypothesis["hypothesis_id"],
+                    "candidate_family": "task1_early_transition_expert",
+                    "search_mode": "early_segment_transition_expert_search",
+                    "algorithm": {
+                        "summary": (
+                            "Fit a local reference-conditioned transition map for "
+                            "the first 47 predicted frames, using the base "
+                            "retrieval-refinement candidate only as the middle and "
+                            "late guardrail trajectory."
+                        ),
+                        "pseudocode": [
+                            "base = retrieval_refinement(context, reference, base params)",
+                            "neighbors = retrieve reference contexts by last frame and velocity",
+                            "expert = local ridge map from context velocity to future delta",
+                            "splice expert into frames 10:57 with correction_weight",
+                            "score early rel-mse with middle/late guardrails",
+                            "prediction[:10] = context",
+                        ],
+                    },
+                    "parameter_grid": {
+                        "candidate_params": candidate_params,
+                    },
+                    "experiment_plan": _early_refinement_experiment_plan(
+                        evidence_params=hypothesis.get("evidence_params", []),
+                        candidate_budget=len(candidate_params),
+                    ),
+                    "seed_params": hypothesis.get("evidence_params", []),
+                    "sandbox": {
+                        "allowed_executor": (
+                            "controlled_numpy_task1_early_transition_expert"
+                        ),
+                        "primary_metric": "task1_early_rel_mse_guarded_score",
+                        "promotion_min_score_delta": 0.01,
+                        "max_inference_seconds": 120.0,
+                    },
+                    "risks": hypothesis.get("known_risks", []),
+                }
+            )
         if hypothesis.get("candidate_family") == "task1_retrieval_prior":
             blueprints.append(
                 {
@@ -1266,8 +1348,12 @@ def run_blueprint_sandbox(
     blueprint: dict[str, Any],
     context_path: str | Path,
     target_path: str | Path,
+    reference_path: str | Path | None = None,
+    reference_sample_limit: int | None = None,
     output_dir: str | Path,
     submission_id: str,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool,
 ) -> dict[str, Any]:
     family = str(blueprint.get("candidate_family"))
@@ -1278,6 +1364,9 @@ def run_blueprint_sandbox(
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
         "task1_early_refinement",
+        "task1_early_transition_expert",
+        "task1_front25_dynamics",
+        "task1_short_window_corrector",
         "task1_sem_burgers_rollout",
         "task1_physics_residual_refinement",
         "task1_pi_deeponet_correction_head",
@@ -1293,6 +1382,18 @@ def run_blueprint_sandbox(
     if context.shape[1] != 10:
         context = context[:, :10, :]
     target = load_hdf5_tensor(target_path)
+    reference = _load_sandbox_reference(
+        reference_path=reference_path,
+        target_path=target_path,
+        target=target,
+        sample_limit=reference_sample_limit,
+    )
+    reference_audit = _reference_audit(
+        reference_path=reference_path,
+        target_path=target_path,
+        reference=reference,
+        reference_sample_limit=reference_sample_limit,
+    )
     baseline_prediction = make_persistence_prediction(context)
     baseline_score = score_prediction_arrays(
         prediction=baseline_prediction,
@@ -1305,6 +1406,7 @@ def run_blueprint_sandbox(
             family=family,
             context=context,
             target=target,
+            reference=reference,
             params=params,
         )
         elapsed = time.perf_counter() - start
@@ -1318,6 +1420,8 @@ def run_blueprint_sandbox(
                     family=family,
                     context=context,
                     target=target,
+                    reference=reference,
+                    reference_audit=reference_audit,
                     params=params,
                 ),
                 "elapsed_seconds": elapsed,
@@ -1331,7 +1435,18 @@ def run_blueprint_sandbox(
                 "_prediction": prediction,
             }
         )
-    rows.sort(key=lambda item: _candidate_selection_key(item, family=family), reverse=True)
+    selection_objective_name = _blueprint_selection_objective_name(
+        blueprint=blueprint,
+        family=family,
+    )
+    rows.sort(
+        key=lambda item: _candidate_selection_key(
+            item,
+            family=family,
+            selection_objective=selection_objective_name,
+        ),
+        reverse=True,
+    )
     best = rows[0]
     prediction_path = root / "best_prediction.npz"
     np.savez_compressed(prediction_path, prediction=best["_prediction"])
@@ -1345,6 +1460,8 @@ def run_blueprint_sandbox(
         source_prediction_key="prediction",
         train_time=0.0,
         inference_time=float(best["elapsed_seconds"]),
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     judge = judge_hermes_submission(
@@ -1418,7 +1535,10 @@ def run_blueprint_sandbox(
         target=target,
         candidates=serializable_rows,
     )
-    selection_objective = _selection_objective(family)
+    selection_objective = _selection_objective(
+        family,
+        selection_objective=selection_objective_name,
+    )
     promotion_score = _sandbox_promotion_score(metric_results)
     pareto_gate = _sandbox_pareto_promotion_gate(
         family=family,
@@ -1456,6 +1576,7 @@ def run_blueprint_sandbox(
                 inference_seconds=0.0,
             ),
         },
+        "reference_audit": reference_audit,
         "best_candidate": {k: v for k, v in best.items() if k != "_prediction"},
         "verifier": verifier,
         "top_candidates": serializable_rows[:20],
@@ -1474,6 +1595,102 @@ def run_blueprint_sandbox(
     return report
 
 
+def _load_sandbox_reference(
+    *,
+    reference_path: str | Path | None,
+    target_path: str | Path,
+    target: np.ndarray,
+    sample_limit: int | None,
+) -> np.ndarray:
+    if sample_limit is not None and sample_limit < 2:
+        raise HypothesisLabError("reference_sample_limit must be at least 2")
+    if reference_path is None:
+        reference = np.asarray(target, dtype=np.float32)
+    else:
+        reference = _load_reference_tensor(
+            path=Path(reference_path),
+            sample_limit=sample_limit,
+        )
+    if reference.ndim != 3:
+        raise HypothesisLabError(f"expected rank-3 reference tensor, got {reference.shape}")
+    if reference.shape[1] <= 10:
+        raise HypothesisLabError(
+            f"reference must contain more than 10 time steps, got {reference.shape}"
+        )
+    reference = np.asarray(reference[:, :200, :], dtype=np.float32)
+    if reference.shape[2] != 256:
+        raise HypothesisLabError(
+            f"reference spatial width must be 256 after reduction, got {reference.shape[2]}"
+        )
+    if sample_limit is not None:
+        reference = reference[: int(sample_limit)]
+    if reference.shape[0] < 1:
+        raise HypothesisLabError("reference library must contain at least 1 sample")
+    if not np.isfinite(reference).all():
+        raise HypothesisLabError("reference contains NaN or Inf")
+    _ = target_path
+    return reference
+
+
+def _reference_audit(
+    *,
+    reference_path: str | Path | None,
+    target_path: str | Path,
+    reference: np.ndarray,
+    reference_sample_limit: int | None,
+) -> dict[str, Any]:
+    target_file = Path(target_path)
+    reference_file = Path(reference_path) if reference_path is not None else target_file
+    uses_target_as_reference = reference_path is None or _same_existing_path(
+        reference_file,
+        target_file,
+    )
+    return {
+        "reference_path": str(reference_file),
+        "target_path": str(target_file),
+        "uses_target_as_reference": uses_target_as_reference,
+        "reference_count": int(reference.shape[0]),
+        "reference_time_steps": int(reference.shape[1]),
+        "reference_sample_limit": int(reference_sample_limit)
+        if reference_sample_limit is not None
+        else None,
+        "submission_validity": "local_validation_only"
+        if uses_target_as_reference
+        else "submission_plausible_reference",
+        "risk": "target_reference_leakage"
+        if uses_target_as_reference
+        else "external_reference_distribution_shift",
+    }
+
+
+def _load_reference_tensor(*, path: Path, sample_limit: int | None) -> np.ndarray:
+    h5py = __import__("h5py")
+    with h5py.File(path, "r") as handle:
+        if "tensor" not in handle:
+            raise HypothesisLabError(f"dataset 'tensor' not found in reference: {path}")
+        dataset = handle["tensor"]
+        if dataset.ndim != 3:
+            raise HypothesisLabError(
+                f"expected rank-3 reference tensor, got {dataset.shape}"
+            )
+        stop = int(sample_limit) if sample_limit is not None else dataset.shape[0]
+        data = np.asarray(dataset[:stop], dtype=np.float32)
+    if data.ndim != 3:
+        raise HypothesisLabError(f"expected rank-3 reference tensor, got {data.shape}")
+    if data.shape[1] == 1000:
+        data = data[:, ::5, :]
+    if data.shape[2] == 1024:
+        data = data[:, :, ::4]
+    return data
+
+
+def _same_existing_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return str(left) == str(right)
+
+
 def run_hypothesis_lab(
     *,
     manual_report_paths: list[str | Path],
@@ -1486,8 +1703,12 @@ def run_hypothesis_lab(
     failure_memory_output_path: str | Path | None = None,
     context_path: str | Path,
     target_path: str | Path,
+    reference_path: str | Path | None = None,
+    reference_sample_limit: int | None = None,
     output_dir: str | Path,
     submission_id: str,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool,
 ) -> dict[str, Any]:
     root = Path(output_dir)
@@ -1524,8 +1745,12 @@ def run_hypothesis_lab(
         blueprint=executable_blueprint,
         context_path=context_path,
         target_path=target_path,
+        reference_path=reference_path,
+        reference_sample_limit=reference_sample_limit,
         output_dir=root / "sandbox",
         submission_id=submission_id,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     verified_blueprints_path = root / "verified_blueprints.json"
@@ -1613,6 +1838,7 @@ def _first_executable_blueprint(blueprints: list[Any]) -> dict[str, Any] | None:
             "task1_retrieval_refinement",
             "task1_retrieval_refinement_local_search",
             "task1_early_refinement",
+            "task1_early_transition_expert",
             "task1_sem_burgers_rollout",
             "task1_physics_residual_refinement",
             "task1_pi_deeponet_correction_head",
@@ -1940,6 +2166,7 @@ def _pareto_memory_card(
     family = str(event.get("candidate_family", "")).strip()
     if family not in {
         "task1_early_refinement",
+        "task1_early_transition_expert",
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
     }:
@@ -2137,6 +2364,7 @@ def _candidate_hypothesis_hooks(value: Any) -> list[str]:
         "task1_retrieval_refinement",
         "task1_retrieval_refinement_local_search",
         "task1_early_refinement",
+        "task1_early_transition_expert",
         "linear_trend_spectral",
         "linear_trend_spectral_escape",
         "linear_trend_late_spectral_ramp",
@@ -3170,6 +3398,7 @@ def _prediction_from_blueprint_params(
     family: str,
     context: np.ndarray,
     target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     if family == "linear_trend_spectral":
@@ -3186,25 +3415,43 @@ def _prediction_from_blueprint_params(
     if family == "task1_retrieval_prior":
         return _prediction_from_task1_retrieval_prior(
             context=context,
-            target=target,
+            reference=reference,
             params=params,
         )
     if family == "task1_retrieval_refinement":
         return _prediction_from_task1_retrieval_refinement(
             context=context,
-            target=target,
+            reference=reference,
             params=params,
         )
     if family == "task1_retrieval_refinement_local_search":
         return _prediction_from_task1_retrieval_refinement(
             context=context,
-            target=target,
+            reference=reference,
             params=params,
         )
     if family == "task1_early_refinement":
         return _prediction_from_task1_retrieval_refinement(
             context=context,
-            target=target,
+            reference=reference,
+            params=params,
+        )
+    if family == "task1_early_transition_expert":
+        return _prediction_from_task1_early_transition_expert(
+            context=context,
+            reference=reference,
+            params=params,
+        )
+    if family == "task1_front25_dynamics":
+        return _prediction_from_task1_front25_dynamics(
+            context=context,
+            reference=reference,
+            params=params,
+        )
+    if family == "task1_short_window_corrector":
+        return _prediction_from_task1_short_window_corrector(
+            context=context,
+            reference=reference,
             params=params,
         )
     if family == "task1_sem_burgers_rollout":
@@ -3214,12 +3461,14 @@ def _prediction_from_blueprint_params(
         return _prediction_from_task1_physics_residual_refinement(
             context=context,
             target=target,
+            reference=reference,
             params=params,
         )
     if family == "task1_pi_deeponet_correction_head":
         return _prediction_from_task1_pi_deeponet_correction_head(
             context=context,
             target=target,
+            reference=reference,
             params=params,
         )
     raise HypothesisLabError(f"unsupported blueprint candidate_family: {family}")
@@ -3229,12 +3478,14 @@ def _prediction_from_task1_pi_deeponet_correction_head(
     *,
     context: np.ndarray,
     target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     pi_params = pi_deeponet_params_from_any(params)
     base_prediction = _base_prediction_for_physics_residual_refinement(
         context=context,
         target=target,
+        reference=reference,
         params=pi_params,
     )
     result = fit_pi_deeponet_correction_head(
@@ -3255,12 +3506,14 @@ def _prediction_from_task1_physics_residual_refinement(
     *,
     context: np.ndarray,
     target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     residual_params = physics_residual_refinement_params_from_any(params)
     base_prediction = _base_prediction_for_physics_residual_refinement(
         context=context,
         target=target,
+        reference=reference,
         params=residual_params,
     )
     return residual_guided_refinement(
@@ -3279,6 +3532,7 @@ def _base_prediction_for_physics_residual_refinement(
     *,
     context: np.ndarray,
     target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     base_family = str(params.get("base_family", "task1_retrieval_refinement"))
@@ -3287,13 +3541,13 @@ def _base_prediction_for_physics_residual_refinement(
     if base_family == "task1_retrieval_prior":
         return _prediction_from_task1_retrieval_prior(
             context=context,
-            target=target,
+            reference=reference,
             params=params,
         )
     if base_family == "task1_retrieval_refinement":
         return _prediction_from_task1_retrieval_refinement(
             context=context,
-            target=target,
+            reference=reference,
             params=params,
         )
     raise HypothesisLabError(
@@ -3304,15 +3558,15 @@ def _base_prediction_for_physics_residual_refinement(
 def _prediction_from_task1_retrieval_prior(
     *,
     context: np.ndarray,
-    target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     leave_one_out = bool(
-        context.shape[0] == target.shape[0]
-        and np.allclose(context, target[:, : context.shape[1], :], atol=1e-6)
+        context.shape[0] == reference.shape[0]
+        and np.allclose(context, reference[:, : context.shape[1], :], atol=1e-6)
     )
     retrieval = predict_retrieval_prior(
-        reference=target,
+        reference=reference,
         context=context,
         k=int(params["k"]),
         mode=str(params.get("mode", "affine")),
@@ -3326,12 +3580,12 @@ def _prediction_from_task1_retrieval_prior(
 def _prediction_from_task1_retrieval_refinement(
     *,
     context: np.ndarray,
-    target: np.ndarray,
+    reference: np.ndarray,
     params: dict[str, Any],
 ) -> np.ndarray:
     retrieval = _prediction_from_task1_retrieval_prior(
         context=context,
-        target=target,
+        reference=reference,
         params=params,
     )
     persistence = make_persistence_prediction(context)
@@ -3414,6 +3668,114 @@ def _prediction_from_task1_retrieval_refinement(
         )
     prediction[:, : context.shape[1], :] = context
     return prediction.astype(np.float32, copy=False)
+
+
+def _prediction_from_task1_early_transition_expert(
+    *,
+    context: np.ndarray,
+    reference: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    expert_params = early_transition_expert_params_from_any(params)
+    base_params = _normalize_retrieval_refinement_params(
+        {
+            "k": params.get("base_k", params.get("k", 48)),
+            "mode": params.get("base_mode", params.get("mode", "affine")),
+            "early_blend_steps": params.get("early_blend_steps", 0),
+            "persistence_weight_start": params.get("persistence_weight_start", 0.0),
+            "spectral_strength": params.get("base_spectral_strength", 0.0),
+        }
+    )
+    if reference.shape[1] >= 200:
+        base_prediction = _prediction_from_task1_retrieval_refinement(
+            context=context,
+            reference=reference,
+            params=base_params,
+        )
+    else:
+        base_prediction = make_persistence_prediction(context)
+    result = fit_task1_early_transition_expert(
+        context=context,
+        base_prediction=base_prediction,
+        reference=reference,
+        **expert_params,
+    )
+    return result["prediction"]
+
+
+def _prediction_from_task1_front25_dynamics(
+    *,
+    context: np.ndarray,
+    reference: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    dynamics_params = front25_dynamics_params_from_any(params)
+    base_params = _normalize_retrieval_refinement_params(
+        {
+            "k": params.get("base_k", params.get("k", 64)),
+            "mode": params.get("base_mode", params.get("mode", "affine")),
+            "early_blend_steps": params.get("early_blend_steps", 0),
+            "persistence_weight_start": params.get("persistence_weight_start", 0.0),
+            "spectral_strength": params.get("base_spectral_strength", 0.0),
+        }
+    )
+    if reference.shape[1] >= 200:
+        base_prediction = _prediction_from_task1_retrieval_refinement(
+            context=context,
+            reference=reference,
+            params=base_params,
+        )
+    else:
+        base_prediction = make_persistence_prediction(context)
+    result = fit_task1_front25_dynamics(
+        context=context,
+        base_prediction=base_prediction,
+        reference=reference,
+        **dynamics_params,
+    )
+    return result["prediction"]
+
+
+def _prediction_from_task1_short_window_corrector(
+    *,
+    context: np.ndarray,
+    reference: np.ndarray,
+    params: dict[str, Any],
+) -> np.ndarray:
+    corrector_params = short_window_corrector_params_from_any(params)
+    base_k = min(int(params.get("base_k", 96)), _max_retrieval_k(context, reference))
+    base_params = _normalize_retrieval_refinement_params(
+        {
+            "k": base_k,
+            "mode": params.get("base_mode", "affine"),
+            "early_blend_steps": params.get("early_blend_steps", 0),
+            "persistence_weight_start": params.get("persistence_weight_start", 0.0),
+            "spectral_strength": params.get("base_spectral_strength", 0.0),
+        }
+    )
+    if reference.shape[1] >= 200:
+        base_prediction = _prediction_from_task1_retrieval_refinement(
+            context=context,
+            reference=reference,
+            params=base_params,
+        )
+    else:
+        base_prediction = make_persistence_prediction(context)
+    result = fit_task1_short_window_corrector(
+        context=context,
+        base_prediction=base_prediction,
+        reference=reference,
+        **corrector_params,
+    )
+    return result["prediction"]
+
+
+def _max_retrieval_k(context: np.ndarray, reference: np.ndarray) -> int:
+    leave_one_out = bool(
+        context.shape[0] == reference.shape[0]
+        and np.allclose(context, reference[:, : context.shape[1], :], atol=1e-6)
+    )
+    return max(1, reference.shape[0] - 1 if leave_one_out else reference.shape[0])
 
 
 def _linear_velocity_anchor_prediction(context: np.ndarray, steps: int) -> np.ndarray:
@@ -3657,6 +4019,8 @@ def _candidate_metadata(
     family: str,
     context: np.ndarray,
     target: np.ndarray,
+    reference: np.ndarray,
+    reference_audit: dict[str, Any],
     params: dict[str, Any],
 ) -> dict[str, Any]:
     if family == "task1_sem_burgers_rollout":
@@ -3675,6 +4039,7 @@ def _candidate_metadata(
         base_prediction = _base_prediction_for_physics_residual_refinement(
             context=context,
             target=target,
+            reference=reference,
             params=residual_params,
         )
         candidate_prediction = residual_guided_refinement(
@@ -3702,6 +4067,11 @@ def _candidate_metadata(
         return {
             "executor": "residual_guided_refinement",
             "base_family": residual_params["base_family"],
+            **_base_reference_metadata(
+                base_family=str(residual_params["base_family"]),
+                reference=reference,
+                reference_audit=reference_audit,
+            ),
             "viscosity": residual_params["viscosity"],
             "dt": residual_params["dt"],
             "dx": residual_params["dx"],
@@ -3726,6 +4096,7 @@ def _candidate_metadata(
         base_prediction = _base_prediction_for_physics_residual_refinement(
             context=context,
             target=target,
+            reference=reference,
             params=pi_params,
         )
         result = fit_pi_deeponet_correction_head(
@@ -3741,6 +4112,128 @@ def _candidate_metadata(
         )
         metadata = dict(result["metadata"])
         metadata["base_family"] = pi_params["base_family"]
+        metadata.update(
+            _base_reference_metadata(
+                base_family=str(pi_params["base_family"]),
+                reference=reference,
+                reference_audit=reference_audit,
+            )
+        )
+        return metadata
+    if family == "task1_early_transition_expert":
+        if reference.shape[1] >= 200:
+            base_prediction = _prediction_from_task1_retrieval_refinement(
+                context=context,
+                reference=reference,
+                params=_normalize_retrieval_refinement_params(
+                    {
+                        "k": params.get("base_k", params.get("k", 48)),
+                        "mode": params.get("base_mode", params.get("mode", "affine")),
+                        "early_blend_steps": params.get("early_blend_steps", 0),
+                        "persistence_weight_start": params.get(
+                            "persistence_weight_start",
+                            0.0,
+                        ),
+                        "spectral_strength": params.get("base_spectral_strength", 0.0),
+                    }
+                ),
+            )
+        else:
+            base_prediction = make_persistence_prediction(context)
+        result = fit_task1_early_transition_expert(
+            context=context,
+            base_prediction=base_prediction,
+            reference=reference,
+            **early_transition_expert_params_from_any(params),
+        )
+        metadata = dict(result["metadata"])
+        metadata.update(
+            {
+                "early_objective": "early_rel_mse",
+                "reference_path": reference_audit["reference_path"],
+                "uses_target_as_reference": reference_audit[
+                    "uses_target_as_reference"
+                ],
+                "submission_validity": reference_audit["submission_validity"],
+            }
+        )
+        return metadata
+    if family == "task1_front25_dynamics":
+        if reference.shape[1] >= 200:
+            base_prediction = _prediction_from_task1_retrieval_refinement(
+                context=context,
+                reference=reference,
+                params=_normalize_retrieval_refinement_params(
+                    {
+                        "k": params.get("base_k", params.get("k", 64)),
+                        "mode": params.get("base_mode", params.get("mode", "affine")),
+                        "early_blend_steps": params.get("early_blend_steps", 0),
+                        "persistence_weight_start": params.get(
+                            "persistence_weight_start",
+                            0.0,
+                        ),
+                        "spectral_strength": params.get("base_spectral_strength", 0.0),
+                    }
+                ),
+            )
+        else:
+            base_prediction = make_persistence_prediction(context)
+        result = fit_task1_front25_dynamics(
+            context=context,
+            base_prediction=base_prediction,
+            reference=reference,
+            **front25_dynamics_params_from_any(params),
+        )
+        metadata = dict(result["metadata"])
+        metadata.update(
+            {
+                "early_objective": "early_rel_mse",
+                "reference_path": reference_audit["reference_path"],
+                "uses_target_as_reference": reference_audit[
+                    "uses_target_as_reference"
+                ],
+                "submission_validity": reference_audit["submission_validity"],
+            }
+        )
+        return metadata
+    if family == "task1_short_window_corrector":
+        if reference.shape[1] >= 200:
+            base_k = min(int(params.get("base_k", 96)), _max_retrieval_k(context, reference))
+            base_prediction = _prediction_from_task1_retrieval_refinement(
+                context=context,
+                reference=reference,
+                params=_normalize_retrieval_refinement_params(
+                    {
+                        "k": base_k,
+                        "mode": params.get("base_mode", "affine"),
+                        "early_blend_steps": params.get("early_blend_steps", 0),
+                        "persistence_weight_start": params.get(
+                            "persistence_weight_start",
+                            0.0,
+                        ),
+                        "spectral_strength": params.get("base_spectral_strength", 0.0),
+                    }
+                ),
+            )
+        else:
+            base_prediction = make_persistence_prediction(context)
+        result = fit_task1_short_window_corrector(
+            context=context,
+            base_prediction=base_prediction,
+            reference=reference,
+            **short_window_corrector_params_from_any(params),
+        )
+        metadata = dict(result["metadata"])
+        metadata.update(
+            {
+                "early_objective": "early_rel_mse",
+                "reference_path": reference_audit["reference_path"],
+                "uses_target_as_reference": reference_audit[
+                    "uses_target_as_reference"
+                ],
+                "submission_validity": reference_audit["submission_validity"],
+            }
+        )
         return metadata
     if family not in {
         "task1_retrieval_prior",
@@ -3751,10 +4244,13 @@ def _candidate_metadata(
         return {}
     metadata = {
         "leave_one_out": bool(
-            context.shape[0] == target.shape[0]
-            and np.allclose(context, target[:, : context.shape[1], :], atol=1e-6)
+            context.shape[0] == reference.shape[0]
+            and np.allclose(context, reference[:, : context.shape[1], :], atol=1e-6)
         ),
-        "reference_count": int(target.shape[0]),
+        "reference_count": int(reference.shape[0]),
+        "reference_path": reference_audit["reference_path"],
+        "uses_target_as_reference": reference_audit["uses_target_as_reference"],
+        "submission_validity": reference_audit["submission_validity"],
         "k": int(params["k"]),
         "mode": str(params.get("mode", "affine")),
     }
@@ -3787,13 +4283,38 @@ def _candidate_metadata(
     return metadata
 
 
+def _base_reference_metadata(
+    *,
+    base_family: str,
+    reference: np.ndarray,
+    reference_audit: dict[str, Any],
+) -> dict[str, Any]:
+    if base_family not in {"task1_retrieval_prior", "task1_retrieval_refinement"}:
+        return {}
+    return {
+        "base_reference_path": reference_audit["reference_path"],
+        "base_reference_count": int(reference.shape[0]),
+        "base_uses_target_as_reference": reference_audit["uses_target_as_reference"],
+        "base_submission_validity": reference_audit["submission_validity"],
+    }
+
+
 def _candidate_pool_attribution(
     *,
     rows: list[dict[str, Any]],
     top_candidate_count: int,
     family: str,
 ) -> dict[str, Any]:
-    axis = "early_anchor" if family == "task1_early_refinement" else "mode"
+    if family == "task1_early_refinement":
+        axis = "early_anchor"
+    elif family == "task1_early_transition_expert":
+        axis = "transition_mode"
+    elif family == "task1_front25_dynamics":
+        axis = "dynamics_mode"
+    elif family == "task1_short_window_corrector":
+        axis = "corrector_mode"
+    else:
+        axis = "mode"
     top_ids = {
         str(row.get("candidate_id", ""))
         for row in rows[: max(0, int(top_candidate_count))]
@@ -4047,6 +4568,12 @@ def _iter_parameter_grid(
         return _retrieval_refinement_parameter_grid(grid)
     if family == "task1_early_refinement":
         return _retrieval_refinement_parameter_grid(grid)
+    if family == "task1_early_transition_expert":
+        return _early_transition_expert_parameter_grid(grid)
+    if family == "task1_front25_dynamics":
+        return _front25_dynamics_parameter_grid(grid)
+    if family == "task1_short_window_corrector":
+        return _short_window_corrector_parameter_grid(grid)
     if family == "task1_sem_burgers_rollout":
         return _sem_burgers_parameter_grid(grid)
     if family == "task1_physics_residual_refinement":
@@ -4199,6 +4726,200 @@ def _sem_burgers_parameter_grid(grid: dict[str, list[Any]]) -> list[dict[str, An
         for substeps in required["substeps"]
         for filter_strength in required["filter_strength"]
     ]
+
+
+def _early_transition_expert_parameter_grid(
+    grid: dict[str, list[Any]],
+) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "early transition expert candidate_params entries must be objects"
+                )
+            rows.append(_normalize_early_transition_expert_params(row))
+        if not rows:
+            raise HypothesisLabError(
+                "early transition expert candidate_params must not be empty"
+            )
+        return rows
+    required = {
+        "k": grid.get("k"),
+        "horizon_steps": grid.get("horizon_steps", [47]),
+        "ridge_alpha": grid.get("ridge_alpha", [1e-3]),
+        "correction_weight": grid.get("correction_weight"),
+        "transition_mode": grid.get("transition_mode", ["velocity_ridge"]),
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(
+                f"early transition expert blueprint missing {key} list"
+            )
+    rows = []
+    for k in required["k"]:
+        for horizon_steps in required["horizon_steps"]:
+            for ridge_alpha in required["ridge_alpha"]:
+                for correction_weight in required["correction_weight"]:
+                    for transition_mode in required["transition_mode"]:
+                        rows.append(
+                            _normalize_early_transition_expert_params(
+                                {
+                                    "k": k,
+                                    "mode": grid.get("mode", ["affine"])[0],
+                                    "early_blend_steps": grid.get(
+                                        "early_blend_steps",
+                                        [0],
+                                    )[0],
+                                    "persistence_weight_start": grid.get(
+                                        "persistence_weight_start",
+                                        [0.0],
+                                    )[0],
+                                    "spectral_strength": grid.get(
+                                        "spectral_strength",
+                                        [0.0],
+                                    )[0],
+                                    "horizon_steps": horizon_steps,
+                                    "ridge_alpha": ridge_alpha,
+                                    "correction_weight": correction_weight,
+                                    "transition_mode": transition_mode,
+                                }
+                            )
+                        )
+    return rows
+
+
+def _front25_dynamics_parameter_grid(
+    grid: dict[str, list[Any]],
+) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "front25 dynamics candidate_params entries must be objects"
+                )
+            normalized = front25_dynamics_params_from_any(row)
+            for key in [
+                "base_k",
+                "base_mode",
+                "early_blend_steps",
+                "persistence_weight_start",
+            ]:
+                if key in row:
+                    normalized[key] = row[key]
+            rows.append(normalized)
+        if not rows:
+            raise HypothesisLabError(
+                "front25 dynamics candidate_params must not be empty"
+            )
+        return rows
+    ks = grid.get("k")
+    modes = grid.get("dynamics_mode")
+    if not isinstance(ks, list) or not ks:
+        raise HypothesisLabError("front25 dynamics blueprint missing k list")
+    if not isinstance(modes, list) or not modes:
+        raise HypothesisLabError(
+            "front25 dynamics blueprint missing dynamics_mode list"
+        )
+    feature_modes = grid.get("feature_mode", ["last_velocity_gradient"])
+    horizon_steps = grid.get("horizon_steps", [25])
+    ridge_alphas = grid.get("ridge_alpha", [1e-4])
+    correction_weights = grid.get("correction_weight", [1.0])
+    rows = []
+    for k in ks:
+        for mode in modes:
+            for feature_mode in feature_modes:
+                for horizon in horizon_steps:
+                    for ridge_alpha in ridge_alphas:
+                        for weight in correction_weights:
+                            rows.append(
+                                front25_dynamics_params_from_any(
+                                    {
+                                        "k": k,
+                                        "dynamics_mode": mode,
+                                        "feature_mode": feature_mode,
+                                        "horizon_steps": horizon,
+                                        "ridge_alpha": ridge_alpha,
+                                        "correction_weight": weight,
+                                    }
+                                )
+                            )
+    return rows
+
+
+def _short_window_corrector_parameter_grid(
+    grid: dict[str, list[Any]],
+) -> list[dict[str, Any]]:
+    candidate_params = grid.get("candidate_params")
+    if isinstance(candidate_params, list):
+        rows = []
+        for row in candidate_params:
+            if not isinstance(row, dict):
+                raise HypothesisLabError(
+                    "short window corrector candidate_params entries must be objects"
+                )
+            normalized = short_window_corrector_params_from_any(row)
+            for key in [
+                "base_k",
+                "base_mode",
+                "early_blend_steps",
+                "persistence_weight_start",
+                "base_spectral_strength",
+            ]:
+                if key in row:
+                    normalized[key] = row[key]
+            rows.append(normalized)
+        if not rows:
+            raise HypothesisLabError(
+                "short window corrector candidate_params must not be empty"
+            )
+        return rows
+    starts = grid.get("start_step", [20])
+    stops = grid.get("stop_step", [35])
+    feature_counts = grid.get("feature_count", [24])
+    ridge_alphas = grid.get("ridge_alpha", [1e-4])
+    correction_weights = grid.get("correction_weight", [1.0])
+    modes = grid.get("corrector_mode", ["context_pod_ridge"])
+    required = {
+        "start_step": starts,
+        "stop_step": stops,
+        "feature_count": feature_counts,
+        "ridge_alpha": ridge_alphas,
+        "correction_weight": correction_weights,
+        "corrector_mode": modes,
+    }
+    for key, value in required.items():
+        if not isinstance(value, list) or not value:
+            raise HypothesisLabError(
+                f"short window corrector blueprint missing {key} list"
+            )
+    rows = []
+    for start in starts:
+        for stop in stops:
+            for feature_count in feature_counts:
+                for ridge_alpha in ridge_alphas:
+                    for weight in correction_weights:
+                        for mode in modes:
+                            rows.append(
+                                short_window_corrector_params_from_any(
+                                    {
+                                        "start_step": start,
+                                        "stop_step": stop,
+                                        "feature_count": feature_count,
+                                        "ridge_alpha": ridge_alpha,
+                                        "correction_weight": weight,
+                                        "corrector_mode": mode,
+                                        "reference_time_stride": grid.get(
+                                            "reference_time_stride",
+                                            [1],
+                                        )[0],
+                                    }
+                                )
+                            )
+    return rows
 
 
 def _physics_residual_refinement_parameter_grid(
@@ -4726,6 +5447,62 @@ def _early_refinement_params(
         params=deduped,
         memory_policy=memory_policy,
     )[:160]
+
+
+def _early_transition_expert_params(
+    evidence_params: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    center = _retrieval_refinement_center(evidence_params)
+    rows: list[dict[str, Any]] = []
+    for k in _dedupe_values([int(center["k"]), 32, 48, 64]):
+        for mode in ["velocity_ridge", "delta_mean", "hybrid"]:
+            for correction_weight in [0.5, 0.75, 1.0]:
+                rows.append(
+                    {
+                        "k": _clamp_task1_retrieval_k(int(k)),
+                        "mode": str(center.get("mode", "affine")),
+                        "early_blend_steps": 0,
+                        "persistence_weight_start": 0.0,
+                        "spectral_strength": 0.0,
+                        "horizon_steps": 47,
+                        "ridge_alpha": 1e-3,
+                        "correction_weight": correction_weight,
+                        "transition_mode": mode,
+                        "feature_mode": "last_velocity",
+                    }
+                )
+    for ridge_alpha in [1e-4, 1e-3, 1e-2]:
+        rows.append(
+            {
+                "k": _clamp_task1_retrieval_k(int(center["k"])),
+                "mode": str(center.get("mode", "affine")),
+                "early_blend_steps": 0,
+                "persistence_weight_start": 0.0,
+                "spectral_strength": 0.0,
+                "horizon_steps": 47,
+                "ridge_alpha": ridge_alpha,
+                "correction_weight": 1.0,
+                "transition_mode": "velocity_ridge",
+                "feature_mode": "last_velocity",
+            }
+        )
+    deduped = []
+    seen: set[tuple[int, str, int, float, float, str]] = set()
+    for row in rows:
+        normalized = _normalize_early_transition_expert_params(row)
+        key = (
+            int(normalized["k"]),
+            str(normalized["transition_mode"]),
+            int(normalized["horizon_steps"]),
+            float(normalized["ridge_alpha"]),
+            float(normalized["correction_weight"]),
+            str(normalized["feature_mode"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped[:48]
 
 
 def _early_memory_policy(
@@ -5476,7 +6253,61 @@ def _normalize_retrieval_refinement_params(row: dict[str, Any]) -> dict[str, Any
     return normalized
 
 
+def _normalize_early_transition_expert_params(row: dict[str, Any]) -> dict[str, Any]:
+    base = _normalize_retrieval_refinement_params(
+        {
+            "k": row.get("k", row.get("base_k", 48)),
+            "mode": row.get("mode", row.get("base_mode", "affine")),
+            "early_blend_steps": row.get("early_blend_steps", 0),
+            "persistence_weight_start": row.get("persistence_weight_start", 0.0),
+            "spectral_strength": row.get("base_spectral_strength", 0.0),
+        }
+    )
+    expert = early_transition_expert_params_from_any(row)
+    normalized = {
+        **base,
+        **expert,
+    }
+    if "base_k" in row:
+        normalized["base_k"] = int(row["base_k"])
+    if "base_mode" in row:
+        normalized["base_mode"] = str(row["base_mode"])
+    return normalized
+
+
 def _candidate_id(params: dict[str, Any], *, family: str | None = None) -> str:
+    if family == "task1_short_window_corrector":
+        corrector_params = short_window_corrector_params_from_any(params)
+        return (
+            "task1_short_window_corrector"
+            f"_{corrector_params['corrector_mode']}"
+            f"_w{int(corrector_params['start_step'])}_{int(corrector_params['stop_step'])}"
+            f"_fc{int(corrector_params['feature_count'])}"
+            f"_cw{float(corrector_params['correction_weight']):g}"
+            f"_ra{float(corrector_params['ridge_alpha']):g}"
+            f"_ts{int(corrector_params['reference_time_stride'])}"
+        )
+    if family == "task1_front25_dynamics":
+        dynamics_params = front25_dynamics_params_from_any(params)
+        return (
+            "task1_front25_dynamics"
+            f"_k{int(dynamics_params['k'])}"
+            f"_{dynamics_params['dynamics_mode']}"
+            f"_h{int(dynamics_params['horizon_steps'])}"
+            f"_cw{float(dynamics_params['correction_weight']):g}"
+            f"_ra{float(dynamics_params['ridge_alpha']):g}"
+            f"_ts{int(dynamics_params['reference_time_stride'])}"
+        )
+    if family == "task1_early_transition_expert":
+        expert_params = early_transition_expert_params_from_any(params)
+        return (
+            "task1_early_transition_expert"
+            f"_k{int(expert_params['k'])}"
+            f"_{expert_params['transition_mode']}"
+            f"_h{int(expert_params['horizon_steps'])}"
+            f"_cw{float(expert_params['correction_weight']):g}"
+            f"_ra{float(expert_params['ridge_alpha']):g}"
+        )
     if family == "task1_pi_deeponet_correction_head":
         pi_params = pi_deeponet_params_from_any(params)
         return (
@@ -5557,8 +6388,61 @@ def _context_preserved(*, prediction: np.ndarray, context: np.ndarray) -> bool:
     return bool(np.allclose(prediction[:, : context.shape[1], :], context, atol=1e-6))
 
 
-def _candidate_selection_key(row: dict[str, Any], *, family: str) -> tuple[float, ...]:
-    if family == "task1_early_refinement":
+def _blueprint_selection_objective_name(
+    *,
+    blueprint: dict[str, Any],
+    family: str,
+) -> str | None:
+    sandbox = blueprint.get("sandbox")
+    requested = None
+    if isinstance(sandbox, dict):
+        requested = sandbox.get("selection_objective")
+        if requested is None:
+            requested = sandbox.get("primary_metric")
+    if str(requested) in {
+        "middle_late_score",
+        "task1_middle_late_score",
+        "task1_middle_late_base_score",
+    }:
+        return "middle_late_score"
+    if str(requested) in {
+        "early_rel_mse",
+        "task1_early_rel_mse_guarded_score",
+    } and family in {
+        "task1_early_refinement",
+        "task1_early_transition_expert",
+        "task1_front25_dynamics",
+        "task1_short_window_corrector",
+    }:
+        return "early_rel_mse"
+    return None
+
+
+def _candidate_selection_key(
+    row: dict[str, Any],
+    *,
+    family: str,
+    selection_objective: str | None = None,
+) -> tuple[float, ...]:
+    if selection_objective == "middle_late_score":
+        segments = row.get("segments") if isinstance(row.get("segments"), dict) else {}
+        middle = segments.get("middle") if isinstance(segments.get("middle"), dict) else {}
+        late = segments.get("late") if isinstance(segments.get("late"), dict) else {}
+        middle_score = middle.get("score", 0.0)
+        late_score = late.get("score", 0.0)
+        middle_late_score = 0.25 * float(middle_score) + 0.5 * float(late_score)
+        return (
+            middle_late_score,
+            float(row.get("segment_score", 0.0)),
+            float(row.get("task1_total_score_proxy", 0.0)),
+            -float(row.get("elapsed_seconds", 0.0)),
+        )
+    if family in {
+        "task1_early_refinement",
+        "task1_early_transition_expert",
+        "task1_front25_dynamics",
+        "task1_short_window_corrector",
+    }:
         early = row.get("segments", {}).get("early", {})
         rel_mse = early.get("rel_mse")
         if not isinstance(rel_mse, int | float):
@@ -5576,8 +6460,27 @@ def _candidate_selection_key(row: dict[str, Any], *, family: str) -> tuple[float
     )
 
 
-def _selection_objective(family: str) -> dict[str, Any]:
-    if family == "task1_early_refinement":
+def _selection_objective(
+    family: str,
+    *,
+    selection_objective: str | None = None,
+) -> dict[str, Any]:
+    if selection_objective == "middle_late_score":
+        return {
+            "primary": "middle_late_score",
+            "direction": "maximize",
+            "secondary": [
+                "segment_score",
+                "task1_total_score_proxy",
+                "elapsed_seconds",
+            ],
+        }
+    if selection_objective == "early_rel_mse" or family in {
+        "task1_early_refinement",
+        "task1_early_transition_expert",
+        "task1_front25_dynamics",
+        "task1_short_window_corrector",
+    }:
         return {
             "primary": "early_rel_mse",
             "direction": "minimize",

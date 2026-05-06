@@ -113,6 +113,37 @@ def test_record_local_strategy_result_continues_after_negative_result(
     ]
 
 
+def test_local_strategy_library_recalls_adaptive_spectral_smooth_skill(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="Burgers",
+        model_family="DataInference",
+        failure_modes=["task1_accuracy_plateau", "timing_sensitive_postprocess"],
+        max_results=5,
+        output_path=None,
+    )
+
+    strategy_ids = [item["strategy_id"] for item in result["matches"]]
+    assert "task1_adaptive_spectral_smooth_v0" in strategy_ids
+    skill = next(
+        item
+        for item in result["matches"]
+        if item["strategy_id"] == "task1_adaptive_spectral_smooth_v0"
+    )
+    assert "run-hermes-batch-optimization-loop" in skill["implementation_hooks"]
+    assert "spectral_smooth" in skill["implementation_hooks"]
+
+
 def test_local_strategy_leaderboard_cli_records_failed_result(tmp_path: Path) -> None:
     from pde_agent.cli import app
     from typer.testing import CliRunner

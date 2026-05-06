@@ -35,13 +35,22 @@ def predict(context, candidate, params):
 
 ## Validation Loop
 
-Run the commands listed in `validation_commands` in order:
+After editing `executor_path`, prefer a paired
+`BOUNDED_EXECUTOR_COMPLETION_TASK_PREPARED` artifact when the runtime report
+provides one. Run its `command` exactly. That single command performs static
+audit, sandbox execution, evidence recording, promotion evaluation, and registry
+writeback.
+
+If no completion task is available, run the commands listed in
+`validation_commands` in order:
 
 1. `validate-bounded-executor-implementation`
 2. `run-bounded-executor-sandbox`
 3. `record-bounded-executor-sandbox-event`
 
-If validation fails, revise only `executor_path` and rerun from step 1. Stop after producing the event artifact or after a clear failure that should be recorded.
+If validation fails, revise only `executor_path` and rerun from step 1. Stop
+after producing the completion artifact, event artifact, or after a clear
+failure that should be recorded.
 
 ## Output
 
@@ -52,3 +61,4 @@ When finished, report:
 - sandbox `rules_passed`
 - score delta vs persistence
 - registry event path
+- completion task path, when used

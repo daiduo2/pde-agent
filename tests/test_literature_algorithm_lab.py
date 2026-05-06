@@ -469,6 +469,9 @@ def test_prepare_literature_extraction_context_packs_sections(
     assert method_unit["line_start"] == 4
     assert "Fourier layer" in method_unit["text"]
     assert report["agent_contract"]["output_state_hint"] == "ALGORITHM_CARDS_EXTRACTED"
+    assert report["agent_contract"]["optional_card_fields"]["mutation_evidence"][
+        "required_when_present"
+    ] == ["parent_candidate_family", "mutation_type", "reason"]
     assert report["next_command"] == "agent-extract-algorithm-cards"
 
 
@@ -1223,7 +1226,10 @@ def test_update_literature_registry_writes_failure_event_back_to_candidate(
                     "candidate_family": "lightweight_residual_corrector",
                     "evidence_id": "evidence_residual_001",
                 },
-                "metric_results": {"score_delta_vs_current_best": -1.0},
+                "metric_results": {
+                    "score": 84.0,
+                    "score_delta_vs_current_best": -1.0,
+                },
             }
         ),
         encoding="utf-8",
@@ -1251,6 +1257,10 @@ def test_update_literature_registry_writes_failure_event_back_to_candidate(
             "failure_codes": ["sandbox_rule_failed", "score_regressed"],
             "recommended_next": "avoid_repeating_without_new_evidence",
             "retry_allowed": False,
+            "metric_results": {
+                "score": 84.0,
+                "score_delta_vs_current_best": -1.0,
+            },
         }
     ]
     assert algorithm["strategy_status"] == "rejected"
@@ -1843,6 +1853,142 @@ def test_validate_algorithm_cards_v2_rejects_missing_operation_and_bad_enum(
     )
 
 
+def test_validate_algorithm_cards_v2_accepts_and_compiles_mutation_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        compile_algorithm_candidates,
+        validate_algorithm_cards_v2,
+    )
+
+    cards = tmp_path / "cards_v2.json"
+    mutation_evidence = {
+        "parent_candidate_family": "local_strategy_skill",
+        "mutation_type": "new_ablation_axis",
+        "reason": "responds_to_deprioritized_completion_trace",
+        "expected_difference": "Adds a new ablation axis before retrying.",
+    }
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_v2_mutated",
+                        "source_ids": ["paper_mutation"],
+                        "claim": "A modified operator correction can avoid repeat failure.",
+                        "core_mechanism": "Change the ablation axis for retry.",
+                        "operator_target": "postprocess_to_solution",
+                        "mechanism_type": "postprocess",
+                        "mathematical_object": "correction_operator",
+                        "operation": "Evaluate mutated postprocess correction on Burgers.",
+                        "implementation_hooks": ["operator_correction_postprocess"],
+                        "implementation_requirements": {
+                            "requires_training": False,
+                            "requires_checkpoint": False,
+                            "requires_target_data": True,
+                            "requires_new_executor": False,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": True,
+                        },
+                        "mutation_evidence": mutation_evidence,
+                        "preconditions": ["Prior local_strategy_skill was deprioritized"],
+                        "expected_observables": ["score recovers after mutation"],
+                        "failure_modes": ["mutation still repeats failed behavior"],
+                        "minimal_experiment": "Run sandbox with mutation ablation.",
+                        "evidence_status": "extracted",
+                        "provenance": {
+                            "parse_id": "parse_mutation",
+                            "source_content_hash": "hash_mutation",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = validate_algorithm_cards_v2(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "cards_v2_audit.json",
+        force=False,
+    )
+    candidates = compile_algorithm_candidates(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "algorithm_candidates.json",
+        force=False,
+    )
+
+    assert audit["decision"] == "approved"
+    assert candidates["algorithm_candidates"][0]["mutation_evidence"] == (
+        mutation_evidence
+    )
+
+
+def test_validate_algorithm_cards_v2_rejects_invalid_mutation_evidence(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import validate_algorithm_cards_v2
+
+    cards = tmp_path / "cards_v2.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_v2_bad_mutation",
+                        "source_ids": ["paper_bad_mutation"],
+                        "claim": "A modified strategy should be retried.",
+                        "core_mechanism": "Mutation evidence is malformed.",
+                        "operator_target": "postprocess_to_solution",
+                        "mechanism_type": "postprocess",
+                        "mathematical_object": "correction_operator",
+                        "operation": "Evaluate modified correction on Burgers.",
+                        "implementation_hooks": ["operator_correction_postprocess"],
+                        "implementation_requirements": {
+                            "requires_training": False,
+                            "requires_checkpoint": False,
+                            "requires_target_data": True,
+                            "requires_new_executor": False,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": True,
+                        },
+                        "mutation_evidence": {
+                            "parent_candidate_family": "local_strategy_skill",
+                            "reason": "missing mutation_type",
+                        },
+                        "preconditions": ["Prior candidate was deprioritized"],
+                        "expected_observables": ["score recovers after mutation"],
+                        "failure_modes": ["invalid mutation contract"],
+                        "minimal_experiment": "Run sandbox.",
+                        "evidence_status": "extracted",
+                        "provenance": {
+                            "parse_id": "parse_bad_mutation",
+                            "source_content_hash": "hash_bad_mutation",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_algorithm_cards_v2(
+        algorithm_cards_path=cards,
+        output_path=tmp_path / "cards_v2_audit.json",
+        force=False,
+    )
+
+    assert report["decision"] == "rejected"
+    issues = {issue["code"]: issue for issue in report["issues"]}
+    assert issues["missing_mutation_type"]["path"] == (
+        "algorithm_cards[0].mutation_evidence.mutation_type"
+    )
+
+
 def test_validate_algorithm_cards_v2_cli_returns_payload(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
@@ -2026,6 +2172,83 @@ def test_evaluate_algorithm_candidate_promotion_rejects_rule_failures(
     assert "score_regressed" in report["reason_codes"]
     assert report["failed_checks"]["validity"]["failure_code"] == "sandbox_rule_failed"
     assert report["next_command"] == "record-literature-registry-event"
+
+
+def test_evaluate_algorithm_candidate_promotion_refines_target_reference_signal(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        evaluate_algorithm_candidate_promotion,
+        record_literature_registry_event,
+    )
+
+    candidate_id = "candidate_local_strategy_task1_early_subsegment_patch_v0"
+    candidates = tmp_path / "algorithm_candidates.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "local_strategy_skill",
+                        "executor_spec": {
+                            "cli_command": "run-hermes-batch-optimization-loop"
+                        },
+                        "promotion_criteria": {
+                            "min_score_delta": 0.01,
+                            "max_inference_seconds": 300.0,
+                            "requires_ablation": False,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "sandbox_evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "state_hint": "SANDBOX_EVIDENCE_RECORDED",
+                "evidence_id": "evidence_local_validation_only",
+                "candidate_id": candidate_id,
+                "rules_passed": False,
+                "score": 128.77,
+                "runtime": {"inference_seconds": 3.0},
+                "physics_metrics": {"residual_delta": 0.0},
+                "ablation_metrics": {"score_delta": 10.38},
+                "score_delta_vs_current_best": 10.38,
+                "candidate_gate_issues": ["target_reference_local_validation_only"],
+                "artifact_paths": [],
+                "reproducibility": {"deterministic": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_algorithm_candidate_promotion(
+        algorithm_candidates_path=candidates,
+        algorithm_candidate_id=candidate_id,
+        sandbox_evidence_paths=[evidence],
+        output_path=tmp_path / "candidate_promotion.json",
+        current_best_score=118.39,
+        force=False,
+    )
+
+    assert report["decision"] == "refine"
+    assert report["promote_to_strategy_growth"] is False
+    assert report["failed_checks"]["validity"]["failure_code"] == "target_leakage_risk"
+    assert report["next_command"] == "refine-algorithm-candidate"
+
+    event = record_literature_registry_event(
+        event_source_path=report["algorithm_candidate_promotion_path"],
+        output_path=tmp_path / "registry_event.json",
+        force=False,
+    )
+    assert event["recommended_next"] == "refine_with_new_ablation_or_variant"
+    assert event["retry_allowed"] is True
 
 
 def test_evaluate_algorithm_candidate_promotion_blocks_unsupported_executor(
@@ -3722,7 +3945,468 @@ def test_prepare_bounded_executor_authoring_task_contract(tmp_path: Path) -> Non
     assert report["agent_contract"]["skill_name"] == "pde-bounded-executor-author"
     assert "validate-bounded-executor-implementation" in report["validation_commands"][0]
     assert "run-bounded-executor-sandbox" in report["validation_commands"][1]
+    assert report["next_command"] == "audit-bounded-executor-authoring-task"
+
+
+def test_audit_bounded_executor_authoring_task_contract(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        audit_bounded_executor_authoring_task,
+    )
+
+    skill_dir = tmp_path / "skills" / "pde_bounded_executor_author"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: pde-bounded-executor-author",
+                "description: Use when an agent receives a BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED artifact.",
+                "---",
+                "# PDE Bounded Executor Author",
+                "Only edit allowed_edit_paths and do not read forbidden_read_paths.",
+                "Run validation_commands in order.",
+                "Implement def predict(context, candidate, params).",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    design_path = tmp_path / "design.json"
+    manifest_path = tmp_path / "manifest.json"
+    executor_path = tmp_path / "executor.py"
+    context_path = tmp_path / "context_fixture.hdf5"
+    target_path = tmp_path / "target.hdf5"
+    for path in [design_path, manifest_path, executor_path, context_path, target_path]:
+        path.write_text("{}", encoding="utf-8")
+    authoring_path = tmp_path / "authoring_task.json"
+    authoring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED",
+                "algorithm_candidate_id": "candidate_bounded",
+                "design_spec_path": str(design_path),
+                "manifest_path": str(manifest_path),
+                "executor_path": str(executor_path),
+                "allowed_edit_paths": [str(executor_path)],
+                "allowed_read_paths": [
+                    str(design_path),
+                    str(manifest_path),
+                    str(executor_path),
+                    str(context_path),
+                ],
+                "forbidden_read_paths": [str(target_path)],
+                "agent_contract": {
+                    "skill_name": "pde-bounded-executor-author",
+                    "forbidden_actions": [
+                        "read target_path manually",
+                        "edit any file outside allowed_edit_paths",
+                    ],
+                },
+                "validation_commands": [
+                    "uv run --frozen pde-agent validate-bounded-executor-implementation --output-path audit.json",
+                    "uv run --frozen pde-agent run-bounded-executor-sandbox --target-path target.hdf5",
+                    "uv run --frozen pde-agent record-bounded-executor-sandbox-event --output-path event.json",
+                ],
+                "expected_artifacts": {
+                    "audit_output_path": str(tmp_path / "audit.json"),
+                    "sandbox_report_path": str(tmp_path / "sandbox.json"),
+                    "event_output_path": str(tmp_path / "event.json"),
+                },
+                "next_command": "audit-bounded-executor-authoring-task",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_bounded_executor_authoring_task(
+        authoring_task_path=authoring_path,
+        skill_root=tmp_path / "skills",
+        output_path=tmp_path / "authoring_audit.json",
+        force=False,
+    )
+
+    assert report["state_hint"] == "BOUNDED_EXECUTOR_AUTHORING_TASK_AUDITED"
+    assert report["decision"] == "approved"
+    assert report["issue_count"] == 0
+    assert report["skill_path"] == str(skill_dir / "SKILL.md")
     assert report["next_command"] == "agent-author-bounded-executor"
+
+
+def test_audit_bounded_executor_authoring_task_rejects_missing_skill(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        audit_bounded_executor_authoring_task,
+    )
+
+    executor_path = tmp_path / "executor.py"
+    executor_path.write_text("", encoding="utf-8")
+    authoring_path = tmp_path / "authoring_task.json"
+    authoring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED",
+                "algorithm_candidate_id": "candidate_bounded",
+                "design_spec_path": str(tmp_path / "design.json"),
+                "manifest_path": str(tmp_path / "manifest.json"),
+                "executor_path": str(executor_path),
+                "allowed_edit_paths": [str(executor_path)],
+                "allowed_read_paths": [str(executor_path)],
+                "forbidden_read_paths": [str(tmp_path / "target.hdf5")],
+                "agent_contract": {
+                    "skill_name": "pde-bounded-executor-author",
+                    "forbidden_actions": ["read target_path manually"],
+                },
+                "validation_commands": [
+                    "uv run --frozen pde-agent validate-bounded-executor-implementation",
+                    "uv run --frozen pde-agent run-bounded-executor-sandbox",
+                    "uv run --frozen pde-agent record-bounded-executor-sandbox-event",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_bounded_executor_authoring_task(
+        authoring_task_path=authoring_path,
+        skill_root=tmp_path / "missing_skills",
+        output_path=tmp_path / "authoring_audit.json",
+        force=False,
+    )
+
+    assert report["decision"] == "rejected"
+    assert "skill_file_missing" in report["issue_codes"]
+    assert report["next_command"] == "prepare-expansion-blocked-executor-authoring-tasks"
+
+
+def test_record_bounded_executor_sandbox_evidence_for_promotion(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        record_bounded_executor_sandbox_evidence,
+    )
+
+    sandbox_path = tmp_path / "bounded_executor_sandbox_report.json"
+    sandbox_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_SANDBOX_RAN",
+                "algorithm_candidate_id": "candidate_bounded",
+                "requested_executor_id": "bounded_executor",
+                "source_grounding": {
+                    "source_ids": ["source_a"],
+                    "algorithm_card_id": "card_a",
+                },
+                "rules_passed": True,
+                "context_preserved": True,
+                "metric_results": {
+                    "segment_score": 12.0,
+                    "score_delta_vs_persistence": -2.0,
+                    "inference_seconds": 0.25,
+                },
+                "segments": {"early": {"score": 1.0}},
+                "artifacts": {"prediction_path": str(tmp_path / "prediction.npz")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    evidence = record_bounded_executor_sandbox_evidence(
+        sandbox_report_path=sandbox_path,
+        output_path=tmp_path / "bounded_executor_sandbox_evidence.json",
+        current_best_score=120.0,
+        force=False,
+    )
+
+    assert evidence["state_hint"] == "SANDBOX_EVIDENCE_RECORDED"
+    assert evidence["candidate_id"] == "candidate_bounded"
+    assert evidence["candidate_family"] == "bounded_executor"
+    assert evidence["rules_passed"] is True
+    assert evidence["score"] == 12.0
+    assert evidence["score_delta_vs_current_best"] == -108.0
+    assert evidence["ablation_metrics"]["score_delta"] == -2.0
+    assert evidence["runtime"]["inference_seconds"] == 0.25
+    assert evidence["next_command"] == "evaluate-algorithm-candidate-promotion"
+
+
+def test_complete_bounded_executor_authoring_task_records_promotion_and_registry(
+    tmp_path: Path,
+) -> None:
+    import h5py
+    import numpy as np
+
+    from pde_agent.core.literature_algorithm_lab import (
+        complete_bounded_executor_authoring_task,
+        materialize_bounded_executor_template,
+        prepare_bounded_executor_authoring_task,
+    )
+
+    candidate_id = "candidate_bounded_completion"
+    design_path = tmp_path / "bounded_executor_design_spec.json"
+    design_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_DESIGN_SPEC_CREATED",
+                "algorithm_candidate_id": candidate_id,
+                "requested_executor_id": "bounded_completion_executor",
+                "candidate_family": "local_strategy_skill",
+                "hypothesis": "A bounded executor can be audited and scored.",
+                "mechanism": "Use the scaffold persistence rollout.",
+                "source_grounding": {
+                    "source_ids": ["local_completion"],
+                    "algorithm_card_id": "card_completion",
+                },
+                "executor_api": {
+                    "function_name": "predict",
+                    "required_args": ["context", "candidate", "params"],
+                },
+                "security_policy": {
+                    "allowed_imports": ["numpy", "math", "typing"],
+                    "forbidden_calls": ["open", "eval", "exec", "__import__"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    materialized = materialize_bounded_executor_template(
+        design_spec_path=design_path,
+        output_dir=tmp_path / "executor",
+        force=False,
+    )
+    context_path = tmp_path / "context.hdf5"
+    target_path = tmp_path / "target.hdf5"
+    with h5py.File(context_path, "w") as handle:
+        handle.create_dataset("tensor", data=np.ones((2, 10, 256), dtype=np.float32))
+    with h5py.File(target_path, "w") as handle:
+        handle.create_dataset("tensor", data=np.ones((2, 200, 256), dtype=np.float32))
+    authoring = prepare_bounded_executor_authoring_task(
+        design_spec_path=design_path,
+        manifest_path=materialized["manifest_path"],
+        executor_path=materialized["executor_path"],
+        context_path=context_path,
+        target_path=target_path,
+        output_path=tmp_path / "authoring_task.json",
+        sandbox_output_dir=tmp_path / "sandbox",
+        audit_output_path=tmp_path / "bounded_executor_audit.json",
+        event_output_path=tmp_path / "bounded_executor_registry_event.json",
+        submission_id="bounded-completion-smoke",
+        force=False,
+    )
+    candidates_path = tmp_path / "algorithm_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": candidate_id,
+                        "candidate_family": "local_strategy_skill",
+                        "executor_spec": {
+                            "cli_command": "run-hermes-batch-optimization-loop"
+                        },
+                        "promotion_criteria": {
+                            "min_score_delta": 0.01,
+                            "max_inference_seconds": 120.0,
+                            "requires_ablation": True,
+                        },
+                        "source_grounding": {
+                            "source_ids": ["local_completion"],
+                            "algorithm_card_id": "card_completion",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry_path = tmp_path / "literature_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_REGISTRY_UPDATED",
+                "registry_path": str(registry_path),
+                "sources": [
+                    {
+                        "source_id": "paper_keep",
+                        "source_type": "arxiv_paper",
+                        "title": "Keep existing paper",
+                    }
+                ],
+                "algorithm_nodes": [],
+                "candidate_nodes": [],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = complete_bounded_executor_authoring_task(
+        authoring_task_path=authoring["bounded_executor_authoring_task_path"],
+        algorithm_candidates_path=candidates_path,
+        registry_path=registry_path,
+        current_best_score=120.0,
+        skill_root=Path("skills"),
+        force=True,
+    )
+
+    assert report["state_hint"] == "BOUNDED_EXECUTOR_AUTHORING_COMPLETED"
+    assert report["audit"]["decision"] == "approved"
+    assert report["sandbox"]["rules_passed"] is True
+    assert report["promotion"]["decision"] == "deprioritize"
+    assert report["registry"]["event_count"] == 2
+    assert report["registry"]["source_count"] == 1
+    assert Path(report["artifacts"]["sandbox_evidence_path"]).exists()
+    assert report["next_command"] == "avoid_repeating_without_new_evidence"
+
+
+def test_complete_bounded_executor_authoring_task_command_reports_blocked_audit(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.commands.literature_algorithm_lab import (
+        complete_bounded_executor_authoring_task_command,
+    )
+
+    candidate_id = "candidate_bounded_rejected"
+    design_path = tmp_path / "design.json"
+    manifest_path = tmp_path / "manifest.json"
+    executor_path = tmp_path / "executor.py"
+    context_path = tmp_path / "context.hdf5"
+    target_path = tmp_path / "target.hdf5"
+    for path in [design_path, manifest_path, executor_path, context_path]:
+        path.write_text("{}", encoding="utf-8")
+    authoring_path = tmp_path / "authoring_task.json"
+    authoring_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "BOUNDED_EXECUTOR_AUTHORING_TASK_PREPARED",
+                "algorithm_candidate_id": candidate_id,
+                "design_spec_path": str(design_path),
+                "manifest_path": str(manifest_path),
+                "executor_path": str(executor_path),
+                "allowed_edit_paths": [str(executor_path)],
+                "allowed_read_paths": [
+                    str(design_path),
+                    str(manifest_path),
+                    str(executor_path),
+                    str(context_path),
+                ],
+                "forbidden_read_paths": [str(target_path)],
+                "agent_contract": {
+                    "skill_name": "pde-bounded-executor-author",
+                    "forbidden_actions": ["read target_path manually"],
+                },
+                "validation_commands": [
+                    "uv run --frozen pde-agent validate-bounded-executor-implementation",
+                    "uv run --frozen pde-agent run-bounded-executor-sandbox",
+                    "uv run --frozen pde-agent record-bounded-executor-sandbox-event",
+                ],
+                "next_command": "audit-bounded-executor-authoring-task",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = complete_bounded_executor_authoring_task_command(
+        authoring_task_path=str(authoring_path),
+        algorithm_candidates_path=str(tmp_path / "missing_candidates.json"),
+        registry_path=str(tmp_path / "registry.json"),
+        current_best_score=120.0,
+        skill_root=str(tmp_path / "missing_skills"),
+        force=False,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["state_hint"] == "BOUNDED_EXECUTOR_AUTHORING_COMPLETED"
+    assert payload["metrics"]["algorithm_candidate_id"] == candidate_id
+    assert payload["metrics"]["decision"] == "blocked"
+    assert payload["metrics"]["issue_count"] >= 1
+    assert payload["next_hint"] == "audit-bounded-executor-authoring-task"
+    assert Path(payload["artifacts"]["completion_path"]).exists()
+    assert Path(payload["artifacts"]["authoring_audit_path"]).exists()
+
+
+def test_complete_bounded_executor_authoring_task_command_records_trace_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pde_agent.commands import literature_algorithm_lab as command_module
+    from pde_agent.commands.literature_algorithm_lab import (
+        complete_bounded_executor_authoring_task_command,
+    )
+
+    completion_path = tmp_path / "bounded_executor_completion.json"
+    completion_path.write_text("{}", encoding="utf-8")
+
+    def fake_complete_bounded_executor_authoring_task(**_: object) -> dict[str, object]:
+        return {
+            "state_hint": "BOUNDED_EXECUTOR_AUTHORING_COMPLETED",
+            "decision": "deprioritize",
+            "next_command": "avoid_repeating_without_new_evidence",
+            "artifacts": {
+                "completion_path": str(completion_path),
+                "sandbox_report_path": str(tmp_path / "sandbox_report.json"),
+                "sandbox_evidence_path": str(tmp_path / "sandbox_evidence.json"),
+                "candidate_promotion_path": str(tmp_path / "promotion.json"),
+                "literature_registry_path": str(tmp_path / "registry.json"),
+            },
+            "audit": {"decision": "approved", "issue_count": 0},
+            "sandbox": {
+                "rules_passed": True,
+                "metric_results": {
+                    "segment_score": 85.0,
+                    "score_delta_vs_persistence": -2.0,
+                    "inference_seconds": 0.2,
+                },
+            },
+            "promotion": {
+                "algorithm_candidate_id": "candidate_completion_trace",
+                "candidate_family": "bounded_executor",
+                "decision": "deprioritize",
+                "metric_results": {
+                    "score_delta_vs_current_best": -35.0,
+                },
+            },
+            "registry": {"event_count": 2},
+        }
+
+    monkeypatch.setattr(
+        command_module,
+        "complete_bounded_executor_authoring_task",
+        fake_complete_bounded_executor_authoring_task,
+    )
+    trace_path = tmp_path / "trace.jsonl"
+
+    payload = complete_bounded_executor_authoring_task_command(
+        authoring_task_path=str(tmp_path / "authoring_task.json"),
+        algorithm_candidates_path=str(tmp_path / "algorithm_candidates.json"),
+        registry_path=str(tmp_path / "literature_registry.json"),
+        current_best_score=120.0,
+        skill_root=str(tmp_path / "skills"),
+        force=True,
+        trace_path=str(trace_path),
+    )
+
+    assert payload["metrics"]["trace_event_recorded"] is True
+    assert payload["artifacts"]["trace_path"] == str(trace_path)
+    event = json.loads(trace_path.read_text(encoding="utf-8").strip())
+    assert event["event_type"] == "bounded_executor_completion"
+    assert event["source_artifact_path"] == str(completion_path)
+    assert event["tags"] == ["literature", "bounded_executor", "completion"]
+    assert event["payload"]["algorithm_candidate_id"] == "candidate_completion_trace"
+    assert event["payload"]["candidate_family"] == "bounded_executor"
+    assert event["payload"]["outcome"] == "deprioritize"
+    assert event["payload"]["rules_passed"] is True
+    assert event["payload"]["score_delta"] == -35.0
+    assert event["payload"]["score_delta_vs_current_best"] == -35.0
+    assert event["payload"]["registry_event_count"] == 2
 
 
 def test_adapt_fno_architecture_candidate_to_checkpoint_resource(

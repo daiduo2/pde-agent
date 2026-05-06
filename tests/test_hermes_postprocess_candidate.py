@@ -2,6 +2,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 def _write_hdf5(path: Path, data: np.ndarray, key: str = "tensor") -> Path:
@@ -133,3 +134,55 @@ def test_generate_hermes_postprocess_candidate_cli_returns_payload(
     assert payload["status"] == "ok"
     assert payload["state_hint"] == "HERMES_POSTPROCESS_CANDIDATE_READY"
     assert payload["metrics"]["strategy"] == "context_anchor_blend"
+
+
+def test_generate_hermes_postprocess_candidate_uses_raw_base_time_for_profile(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.competition_submission import build_competition_submission
+    from pde_agent.core.hermes_postprocess_candidate import (
+        generate_hermes_postprocess_candidate,
+    )
+
+    context = np.ones((1, 10, 256), dtype=np.float32)
+    future = np.ones((1, 190, 256), dtype=np.float32)
+    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    prediction_path = tmp_path / "future.npz"
+    np.savez(prediction_path, prediction=future)
+    base = build_competition_submission(
+        task_id=1,
+        test_path=test_path,
+        output_dir=tmp_path / "base",
+        submission_id="team_hermes",
+        method="external_prediction",
+        source_prediction_path=prediction_path,
+        train_time=200.0,
+        inference_time=121.0,
+        timing_profile="mac_mini_m4_local_dev",
+        force=True,
+    )
+
+    candidate = generate_hermes_postprocess_candidate(
+        base_submission_dir=base["artifacts"]["submission_dir"],
+        output_dir=tmp_path / "candidate",
+        task_id=1,
+        test_path=test_path,
+        strategy="spectral_smooth",
+        blend_weight=0.25,
+        submission_id="team_hermes",
+        timing_profile="mac_mini_m4_local_dev",
+        force=False,
+    )
+
+    rows = list(
+        csv.DictReader(
+            Path(candidate["submission"]["artifacts"]["time_csv_path"]).open(
+                encoding="utf-8"
+            )
+        )
+    )
+    assert float(rows[0]["train_time"]) == pytest.approx(6.0)
+    assert float(rows[0]["inference_time"]) >= 3.63
+    assert float(rows[0]["inference_time"]) < 4.6
+    assert candidate["timing"]["base_raw_inference_time"] == pytest.approx(121.0)
+    assert candidate["timing"]["reported_inference_time"] < 4.6

@@ -16,10 +16,18 @@ data = [
 torch = [
   "torch>=2.2",
 ]
+agent = [
+    "claude-agent-sdk>=0.1.74",
+]
 
 [dependency-groups]
 dev = [
   "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+norecursedirs = [
+  "external",
 ]
 
 [project.scripts]

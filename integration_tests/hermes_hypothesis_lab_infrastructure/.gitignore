@@ -1,0 +1,5 @@
+hermes_home/sessions/
+runs/*
+reports/audit_*.json
+!runs/.gitkeep
+!reports/.gitkeep

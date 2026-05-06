@@ -40,6 +40,8 @@ def generate_hermes_postprocess_candidate(
     submission_id: str = "team_hermes",
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     if task_id not in {1, 2}:
@@ -85,8 +87,10 @@ def generate_hermes_postprocess_candidate(
         method="external_prediction",
         source_prediction_path=candidate_prediction_path,
         source_prediction_key="prediction",
-        train_time=base_timing["train_time"],
-        inference_time=base_timing["inference_time"] + postprocess_elapsed,
+        train_time=base_timing["raw_train_time"],
+        inference_time=base_timing["raw_inference_time"] + postprocess_elapsed,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=True,
     )
     candidate_id = f"postprocess_{strategy}_w{blend_weight:g}"
@@ -102,9 +106,16 @@ def generate_hermes_postprocess_candidate(
         "timing": {
             "base_train_time": base_timing["train_time"],
             "base_inference_time": base_timing["inference_time"],
+            "base_raw_train_time": base_timing["raw_train_time"],
+            "base_raw_inference_time": base_timing["raw_inference_time"],
             "postprocess_elapsed_seconds": postprocess_elapsed,
             "reported_train_time": submission["metrics"]["train_time"],
             "reported_inference_time": submission["metrics"]["inference_time"],
+            "timing_profile": submission["metrics"].get("timing_profile"),
+            "timing_factor": submission["metrics"].get("timing_factor"),
+            "timing_valid_for_submission": submission["metrics"].get(
+                "timing_valid_for_submission"
+            ),
         },
         "submission_dir": submission["artifacts"]["submission_dir"],
         "artifacts": {
@@ -139,7 +150,50 @@ def _read_base_timing(*, base_submission_dir: Path, task_id: int) -> dict[str, f
         raise HermesPostprocessCandidateError(
             f"base time csv contains negative values: {path}"
         )
-    return {"train_time": train_time, "inference_time": inference_time}
+    log_values = _read_base_raw_timing_from_log(
+        base_submission_dir=base_submission_dir,
+        task_id=task_id,
+    )
+    raw_train_time = log_values.get("raw_train_time", train_time)
+    raw_inference_time = log_values.get("raw_inference_time", inference_time)
+    if raw_train_time < 0.0 or raw_inference_time < 0.0:
+        raise HermesPostprocessCandidateError(
+            f"base log contains negative raw timing values: {base_submission_dir}"
+        )
+    return {
+        "train_time": train_time,
+        "inference_time": inference_time,
+        "raw_train_time": raw_train_time,
+        "raw_inference_time": raw_inference_time,
+    }
+
+
+def _read_base_raw_timing_from_log(
+    *,
+    base_submission_dir: Path,
+    task_id: int,
+) -> dict[str, float]:
+    path = base_submission_dir / f"task{task_id}_logs.log"
+    if not path.exists():
+        return {}
+    values: dict[str, float] = {}
+    field_map = {
+        "raw_train_time_seconds": "raw_train_time",
+        "raw_inference_time_seconds": "raw_inference_time",
+    }
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        for label, key in field_map.items():
+            prefix = f"- {label}:"
+            if not text.startswith(prefix):
+                continue
+            try:
+                values[key] = float(text[len(prefix) :].strip())
+            except ValueError as exc:
+                raise HermesPostprocessCandidateError(
+                    f"invalid raw timing value in {path}: {text}"
+                ) from exc
+    return values
 
 
 def _load_prediction(*, path: Path, dataset_key: str) -> np.ndarray:

@@ -369,6 +369,68 @@ def test_run_adaptive_heartbeat_exposes_hypothesis_lab_inputs_after_verified_pla
     assert inputs["manual_report_paths"] == []
 
 
+def test_run_adaptive_heartbeat_passes_objective_and_generator_schedules(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hermes_execution_policy import run_hermes_adaptive_heartbeat
+
+    calls: list[dict[str, Any]] = []
+    initial_dir = tmp_path / "initial"
+    initial_dir.mkdir()
+
+    def fake_heartbeat(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        report_path = Path(kwargs["output_dir"]) / "hermes_heartbeat_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        best_dir = tmp_path / "best"
+        best_dir.mkdir(exist_ok=True)
+        report = {
+            "state_hint": "HERMES_HEARTBEAT_RAN",
+            "heartbeat_report_path": str(report_path),
+            "parameters": {
+                "candidate_generator": kwargs["candidate_generator"],
+                "learning_objective_schedule": kwargs["learning_objective_schedule"],
+                "candidate_generator_schedule": kwargs["candidate_generator_schedule"],
+            },
+            "batch_count": 1,
+            "batches": [{"score_improved": True}],
+            "best_candidate": {
+                "candidate_id": "scheduled_best",
+                "score": 101.0,
+                "submission_dir": str(best_dir),
+            },
+            "best_score": 101.0,
+            "best_objective_score": 101.0,
+            "stop_reason": "max_batches_exhausted",
+            "decision": "continue_next_heartbeat",
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report
+
+    run_hermes_adaptive_heartbeat(
+        output_dir=tmp_path / "adaptive",
+        initial_submission_dir=initial_dir,
+        verified_blueprint_path=None,
+        max_policy_stages=1,
+        learning_objective_schedule=["early_accuracy", "accuracy"],
+        candidate_generator_schedule=[
+            "sem_window_gate_blend_multi_early_search",
+            "sem_window_gate_blend_multi_search",
+        ],
+        heartbeat_runner=fake_heartbeat,
+        force=False,
+    )
+
+    assert calls[0]["learning_objective_schedule"] == [
+        "early_accuracy",
+        "accuracy",
+    ]
+    assert calls[0]["candidate_generator_schedule"] == [
+        "sem_window_gate_blend_multi_early_search",
+        "sem_window_gate_blend_multi_search",
+    ]
+
+
 def test_run_adaptive_heartbeat_exposes_search_policy_after_hypothesis_lab_plateau(
     tmp_path: Path,
 ) -> None:

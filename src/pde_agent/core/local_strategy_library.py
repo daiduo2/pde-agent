@@ -609,6 +609,92 @@ def _builtin_entries() -> list[dict[str, Any]]:
             priority=-3,
         ),
         _entry(
+            strategy_id="task1_early_transition_expert_v0",
+            title="Task 1 local transition expert for early Burgers frames",
+            model_families=["DataInference", "RetrievalPrior", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "early_window_rel_mse",
+                "transport_lag",
+                "task1_accuracy_plateau",
+            ],
+            hypothesis=(
+                "The first predicted Burgers segment is a distinct transport "
+                "estimation problem; a local reference-conditioned transition "
+                "expert can map the context velocity to short-window future "
+                "increments better than persistence or full-horizon retrieval alone."
+            ),
+            mechanism=(
+                "Retrieve legal reference contexts by last frame and velocity, "
+                "fit a local ridge map from context velocity to future deltas, "
+                "and splice only frames 10-56 into a guarded base trajectory."
+            ),
+            implementation_hooks=[
+                "run-hypothesis-lab",
+                "task1_early_transition_expert",
+                "controlled_numpy_task1_early_transition_expert",
+            ],
+            expected_observables=[
+                "early Rel-MSE decreases relative to persistence and retrieval anchors",
+                "middle and late segments remain controlled by the base trajectory",
+                "metadata records transition mode, neighbor count, and ridge strength",
+            ],
+            known_risks=[
+                "local velocity maps may overfit validation-like reference contexts",
+                "strong early splicing can create a discontinuity at the handoff point",
+                "reference retrieval quality controls hidden-test transfer",
+            ],
+            acceptance_criteria=[
+                "sandbox verifier selects by early_rel_mse with guardrails",
+                "first 10 context frames are preserved exactly",
+                "candidate uses only the legal reference library, not target labels",
+            ],
+            priority=-4,
+        ),
+        _entry(
+            strategy_id="task1_early_subsegment_patch_v0",
+            title="Task 1 early subsegment source selection patch",
+            model_families=["DataInference", "RetrievalPrior", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "early_window_rel_mse",
+                "task1_accuracy_plateau",
+                "window_selection_uncertainty",
+            ],
+            hypothesis=(
+                "The first 47 predicted Burgers steps are not one homogeneous "
+                "failure mode; Hermes can improve early accuracy by selecting "
+                "different legal candidate sources for short early sub-windows."
+            ),
+            mechanism=(
+                "Run early-refinement, early-transition, and middle/late retrieval "
+                "sandboxes, then splice frames 10-19, 20-34, and 35-56 from the "
+                "source with the best local validation Rel-MSE while preserving "
+                "the context prefix exactly."
+            ),
+            implementation_hooks=[
+                "run-hermes-batch-optimization-loop",
+                "hypothesis_lab_early_subsegment_patch_search",
+                "early_subsegment_patch",
+            ],
+            expected_observables=[
+                "early Rel-MSE decreases versus whole-segment early patching",
+                "window source attribution identifies which candidate owns each early sub-window",
+                "middle and late scores remain controlled by the base trajectory",
+            ],
+            known_risks=[
+                "local_validation_window_selection can overfit public validation windows",
+                "hard sub-window splicing can create handoff discontinuities",
+                "candidate source diversity limits how much the first two windows can improve",
+            ],
+            acceptance_criteria=[
+                "candidate report records window_sources for all three early sub-windows",
+                "submission audit confirms exact context preservation",
+                "Task 1 proxy improves over whole early-segment patch baseline",
+            ],
+            priority=-5,
+        ),
+        _entry(
             strategy_id="task1_retrieval_refinement_v0",
             title="Task 1 retrieval refinement with early-horizon anchoring",
             model_families=["DataInference", "RetrievalPrior", "all"],
@@ -652,6 +738,53 @@ def _builtin_entries() -> list[dict[str, Any]]:
                 "best candidate metadata records k, mode, early blend, persistence weight, and smoothing",
             ],
             priority=0,
+        ),
+        _entry(
+            strategy_id="task1_adaptive_spectral_smooth_v0",
+            title="Task 1 adaptive spectral smoothing refinement",
+            model_families=["DataInference", "RetrievalPrior", "all"],
+            applicable_pdes=["1D Burgers", "Burgers"],
+            targeted_failure_modes=[
+                "task1_accuracy_plateau",
+                "early_window_rel_mse",
+                "middle_window_rel_mse",
+                "late_window_rmse",
+                "timing_sensitive_postprocess",
+            ],
+            hypothesis=(
+                "A strong retrieval-derived Task 1 trajectory can still contain "
+                "small high-frequency errors across early, middle, and late "
+                "segments; an adaptive cumulative spectral_smooth search can "
+                "increase segment score while keeping runtime overhead bounded."
+            ),
+            mechanism=(
+                "Run Hermes postprocess search with strategy=spectral_smooth in "
+                "adaptive mode, carry the best candidate forward as the next base, "
+                "and stop when accuracy gains no longer cover inference-time cost."
+            ),
+            implementation_hooks=[
+                "run-hermes-batch-optimization-loop",
+                "postprocess",
+                "spectral_smooth",
+                "build-hermes-iteration-memory",
+                "build-hermes-exploration-schedule",
+            ],
+            expected_observables=[
+                "early, middle, and late segment scores improve together",
+                "positive_signals records a spectral_smooth candidate",
+                "continuation run identifies the local smoothing plateau",
+            ],
+            known_risks=[
+                "cumulative smoothing can over-damp shocks after the local optimum",
+                "small accuracy gains can be erased by inference-time scoring",
+                "validation-specific smoothing depth may overfit local public windows",
+            ],
+            acceptance_criteria=[
+                "local Task 1 judge improves over current best after timing penalty",
+                "submission audit confirms exact context preservation",
+                "iteration memory records positive_signal and local plateau evidence",
+            ],
+            priority=2,
         ),
         _entry(
             strategy_id="task1_retrieval_prior_v0",

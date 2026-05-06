@@ -107,6 +107,7 @@ def run_hermes_adaptive_heartbeat(
     min_score_improvement: float = 1.0,
     submit_score_threshold: float = 120.0,
     learning_objective: str = "score",
+    learning_objective_schedule: list[str] | None = None,
     patience: int = 10,
     task1_test_path: str | Path | None = None,
     task1_target_path: str | Path | None = None,
@@ -116,11 +117,17 @@ def run_hermes_adaptive_heartbeat(
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
     initial_candidate_generator: str = "postprocess",
+    candidate_generator_schedule: list[str] | None = None,
+    hypothesis_reference_path: str | Path | None = None,
+    hypothesis_reference_sample_limit: int | None = None,
+    hypothesis_reference_sample_limits: list[int] | None = None,
     postprocess_search_mode: str = "adaptive",
     postprocess_strategies: list[str] | None = None,
     postprocess_blend_weights: list[float] | None = None,
     postprocess_adaptive_step: float = 0.125,
     submission_id: str = "team_hermes",
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     heartbeat_runner: HeartbeatRunner | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -153,6 +160,7 @@ def run_hermes_adaptive_heartbeat(
             min_score_improvement=min_score_improvement,
             submit_score_threshold=submit_score_threshold,
             learning_objective=learning_objective,
+            learning_objective_schedule=learning_objective_schedule,
             patience=patience,
             task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
             task1_target_path=Path(task1_target_path)
@@ -168,12 +176,20 @@ def run_hermes_adaptive_heartbeat(
             dataset_key=dataset_key,
             prediction_dataset_key=prediction_dataset_key,
             candidate_generator=current_generator,
+            candidate_generator_schedule=candidate_generator_schedule,
             hypothesis_blueprint_path=current_blueprint,
+            hypothesis_reference_path=Path(hypothesis_reference_path)
+            if hypothesis_reference_path is not None
+            else None,
+            hypothesis_reference_sample_limit=hypothesis_reference_sample_limit,
+            hypothesis_reference_sample_limits=hypothesis_reference_sample_limits,
             postprocess_search_mode=postprocess_search_mode,
             postprocess_strategies=postprocess_strategies or [],
             postprocess_blend_weights=postprocess_blend_weights or [],
             postprocess_adaptive_step=postprocess_adaptive_step,
             submission_id=submission_id,
+            timing_profile=timing_profile,
+            timing_factor=timing_factor,
             force=True,
         )
         stage_reports.append(_stage_record(stage_index, heartbeat))
@@ -226,6 +242,18 @@ def run_hermes_adaptive_heartbeat(
         "policy_events": policy_events,
         "best_candidate": best,
         "best_score": _score(best),
+        "parameters": {
+            "hypothesis_reference_path": str(hypothesis_reference_path)
+            if hypothesis_reference_path is not None
+            else None,
+            "hypothesis_reference_sample_limit": hypothesis_reference_sample_limit,
+            "hypothesis_reference_sample_limits": hypothesis_reference_sample_limits
+            or [],
+            "timing_profile": timing_profile,
+            "timing_factor": timing_factor,
+            "learning_objective_schedule": learning_objective_schedule or [],
+            "candidate_generator_schedule": candidate_generator_schedule or [],
+        },
         "decision": "continue_next_adaptive_heartbeat",
         "next_command": next_command,
     }

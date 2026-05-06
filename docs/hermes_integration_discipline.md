@@ -4,6 +4,11 @@ This project uses GPT-5.5/Codex as the builder, but Hermes/Kimi is part of the
 target runtime. Any behavior meant to be executed by Hermes must be validated
 with real Hermes before it is treated as stable.
 
+For the current Hypothesis Lab to Hermes runtime path, follow the standard gate
+sequence in [Hermes Hypothesis Lab Runbook](hermes_hypothesis_lab_runbook.md).
+Long Hermes optimization runs should keep the acceptance-smoke preflight gate
+enabled instead of relying on manual log review.
+
 ## Core Rule
 
 Do not let GPT-5.5's correction ability stand in for Hermes integration tests.
@@ -243,3 +248,37 @@ Latest validated canary:
 - Result: passed
 - Decision: `request_evidence_sweep`
 - Reason code: `single_window_improvement_needs_validation`
+
+## Current Hypothesis Lab Infrastructure Canary
+
+This canary checks whether Hermes can operate the Hypothesis Lab infrastructure
+gate itself rather than relying on Codex to interpret the reports. Hermes must
+read the fixture contract, execute exactly one deterministic audit command, and
+emit `HERMES_HYPOTHESIS_LAB_INFRASTRUCTURE_AUDITED`.
+
+Run and audit Hermes:
+
+```bash
+uv run --frozen python scripts/run_hermes_hypothesis_lab_infrastructure.py \
+  --timeout-seconds 300
+```
+
+Audit the latest saved session without rerunning Hermes:
+
+```bash
+uv run --frozen python scripts/run_hermes_hypothesis_lab_infrastructure.py \
+  --audit-only
+```
+
+Latest validated canary:
+
+- Session: `20260504_121519_9bc312`
+- Audit: `integration_tests/hermes_hypothesis_lab_infrastructure/reports/audit_20260504_121519_9bc312.json`
+- Result: passed
+- Infrastructure audit decision: `passed`
+- Checks: `13`, failed checks: `0`
+
+Long `run-hermes-runtime-audit-chain` invocations should pass this audit report
+as `--preflight-infrastructure-audit-path` together with the acceptance smoke
+report. The chain rejects failed infrastructure canaries before starting
+heartbeat work.

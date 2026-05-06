@@ -21,7 +21,9 @@ def run_competition_task_pipeline_command(
     submission_id: str,
     target_path: str | None,
     dataset_key: str,
-    force: bool,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
+    force: bool = False,
     local_strategy_schedule_path: str | None = None,
     local_strategy_experiment_id: str | None = None,
     local_strategy_leaderboard_path: str | None = None,
@@ -36,6 +38,8 @@ def run_competition_task_pipeline_command(
         submission_id=submission_id,
         target_path=Path(target_path) if target_path is not None else None,
         dataset_key=dataset_key,
+        timing_profile=timing_profile,
+        timing_factor=timing_factor,
         force=force,
     )
     materialized = report["materialized"]

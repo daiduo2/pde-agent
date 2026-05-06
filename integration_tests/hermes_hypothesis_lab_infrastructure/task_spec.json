@@ -1,0 +1,9 @@
+{
+  "problem_id": "PDE_Burgers",
+  "task": "Audit whether Hypothesis Lab is wired as Hermes infrastructure.",
+  "agent_scope": "single_command_infrastructure_audit",
+  "required_output": [
+    "hypothesis_lab_infrastructure_audit.json"
+  ],
+  "success_state_hint": "HERMES_HYPOTHESIS_LAB_INFRASTRUCTURE_AUDITED"
+}

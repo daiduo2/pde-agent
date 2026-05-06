@@ -125,6 +125,8 @@ def _load_competition_hdf5(*, path: Path, dataset_key: str) -> np.ndarray:
         )
     if data.shape[1] == 1000:
         data = data[:, ::5, :]
+    if data.shape[1] > PREDICTION_STEPS:
+        data = data[:, :PREDICTION_STEPS, :]
     if data.shape[2] == 1024:
         data = data[:, :, ::4]
     if data.shape[1:] != (PREDICTION_STEPS, SPACE_POINTS):

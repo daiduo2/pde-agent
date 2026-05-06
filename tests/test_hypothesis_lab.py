@@ -1988,6 +1988,79 @@ def test_hypothesis_lab_sandbox_verifies_blueprint_with_submission(tmp_path: Pat
     assert Path(sandbox["artifacts"]["best_submission_dir"]).exists()
 
 
+def test_hypothesis_lab_sandbox_audits_external_retrieval_reference(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    context = np.zeros((2, 10, 256), dtype=np.float32)
+    context[1, :, :] = 1.0
+    target = np.concatenate(
+        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
+        axis=1,
+    )
+    reference = np.zeros((4, 200, 256), dtype=np.float32)
+    for index in range(reference.shape[0]):
+        reference[index, :, :] = np.float32(index)
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    reference_path = _write_hdf5(tmp_path / "task1_train_reference.hdf5", reference)
+    blueprint = {
+        "blueprint_id": "bp_task1_retrieval_prior_001",
+        "candidate_family": "task1_retrieval_prior",
+        "parameter_grid": {"k": [1], "mode": ["raw"]},
+        "sandbox": {
+            "promotion_min_score_delta": -100.0,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        reference_path=reference_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    audit = sandbox["reference_audit"]
+    assert audit["reference_path"] == str(reference_path)
+    assert audit["target_path"] == str(target_path)
+    assert audit["uses_target_as_reference"] is False
+    assert audit["reference_count"] == 4
+    assert audit["submission_validity"] == "submission_plausible_reference"
+    assert sandbox["best_candidate"]["metadata"]["leave_one_out"] is False
+    assert sandbox["best_candidate"]["metadata"]["reference_count"] == 4
+
+
+def test_hypothesis_lab_composite_retrieval_base_uses_external_reference() -> None:
+    from pde_agent.core.hypothesis_lab import (
+        _base_prediction_for_physics_residual_refinement,
+    )
+
+    context = np.zeros((1, 10, 256), dtype=np.float32)
+    target = np.zeros((1, 200, 256), dtype=np.float32)
+    target[:, 10:, :] = 1.0
+    reference = np.zeros((2, 200, 256), dtype=np.float32)
+    reference[:, 10:, :] = 2.0
+    params = {
+        "base_family": "task1_retrieval_prior",
+        "k": 1,
+        "mode": "raw",
+    }
+
+    prediction = _base_prediction_for_physics_residual_refinement(
+        context=context,
+        target=target,
+        reference=reference,
+        params=params,
+    )
+
+    assert np.allclose(prediction[:, 10:, :], 2.0)
+
+
 def test_hypothesis_lab_sandbox_executes_late_spectral_ramp_params(
     tmp_path: Path,
 ) -> None:
@@ -2404,6 +2477,322 @@ def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
     assert sandbox["verifier"]["early_segment_diagnosis"]["objective_recommendation"][
         "next_candidate_family"
     ] == "task1_early_refinement"
+
+
+def test_hypothesis_lab_sandbox_executes_task1_early_transition_expert_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    reference = np.empty((8, 200, 256), dtype=np.float32)
+    for sample in range(target.shape[0]):
+        phase = np.float32(0.01 + 0.07 * sample)
+        base = np.sin(x + phase).astype(np.float32)
+        velocity = (
+            np.float32(0.006 + 0.001 * sample) * np.cos(x + phase)
+            + np.float32(0.002)
+        ).astype(np.float32)
+        for step in range(200):
+            target[sample, step, :] = base + np.float32(step) * velocity
+    for sample in range(reference.shape[0]):
+        phase = np.float32(0.07 * sample)
+        base = np.sin(x + phase).astype(np.float32)
+        velocity = (
+            np.float32(0.006 + 0.001 * sample) * np.cos(x + phase)
+            + np.float32(0.002)
+        ).astype(np.float32)
+        for step in range(200):
+            reference[sample, step, :] = base + np.float32(step) * velocity
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    reference_path = _write_hdf5(tmp_path / "task1_reference.hdf5", reference)
+    blueprint = {
+        "blueprint_id": "bp_task1_early_transition_expert_001",
+        "candidate_family": "task1_early_transition_expert",
+        "search_mode": "early_segment_transition_expert_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 4,
+                    "mode": "affine",
+                    "early_blend_steps": 0,
+                    "persistence_weight_start": 0.0,
+                    "spectral_strength": 0.0,
+                    "horizon_steps": 47,
+                    "ridge_alpha": 1e-8,
+                    "correction_weight": 1.0,
+                    "transition_mode": "velocity_ridge",
+                }
+            ]
+        },
+        "sandbox": {
+            "allowed_executor": "controlled_numpy_task1_early_transition_expert",
+            "primary_metric": "task1_early_rel_mse_guarded_score",
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        reference_path=reference_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["candidate_family"] == "task1_early_transition_expert"
+    assert sandbox["best_candidate"]["candidate_id"].startswith(
+        "task1_early_transition_expert"
+    )
+    assert sandbox["best_candidate"]["metadata"]["transition_mode"] == (
+        "velocity_ridge"
+    )
+    assert sandbox["best_candidate"]["metadata"]["early_objective"] == "early_rel_mse"
+    assert sandbox["verifier"]["selection_objective"]["primary"] == "early_rel_mse"
+    assert sandbox["best_candidate"]["segments"]["early"]["rel_mse"] < 1e-4
+
+
+def test_hypothesis_lab_sandbox_accepts_reduced_time_reference_for_transition_expert(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    reference = np.empty((8, 41, 256), dtype=np.float32)
+    for sample in range(target.shape[0]):
+        phase = np.float32(0.01 + 0.07 * sample)
+        base = np.sin(x + phase).astype(np.float32)
+        velocity = (
+            np.float32(0.006 + 0.001 * sample) * np.cos(x + phase)
+            + np.float32(0.002)
+        ).astype(np.float32)
+        for step in range(200):
+            target[sample, step, :] = base + np.float32(step) * velocity
+    for sample in range(reference.shape[0]):
+        phase = np.float32(0.07 * sample)
+        base = np.sin(x + phase).astype(np.float32)
+        velocity = (
+            np.float32(0.006 + 0.001 * sample) * np.cos(x + phase)
+            + np.float32(0.002)
+        ).astype(np.float32)
+        for step in range(41):
+            reference[sample, step, :] = base + np.float32(step) * velocity
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    reference_path = _write_hdf5(tmp_path / "task1_reference.hdf5", reference)
+    blueprint = {
+        "blueprint_id": "bp_task1_early_transition_expert_reduced_ref_001",
+        "candidate_family": "task1_early_transition_expert",
+        "search_mode": "early_segment_transition_expert_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 4,
+                    "mode": "affine",
+                    "early_blend_steps": 0,
+                    "persistence_weight_start": 0.0,
+                    "spectral_strength": 0.0,
+                    "horizon_steps": 47,
+                    "ridge_alpha": 1e-8,
+                    "correction_weight": 1.0,
+                    "transition_mode": "velocity_ridge",
+                }
+            ]
+        },
+        "sandbox": {
+            "allowed_executor": "controlled_numpy_task1_early_transition_expert",
+            "primary_metric": "task1_early_rel_mse_guarded_score",
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        reference_path=reference_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["reference_audit"]["reference_time_steps"] == 41
+    assert sandbox["best_candidate"]["metadata"]["reference_time_steps"] == 41
+    assert sandbox["best_candidate"]["metadata"]["horizon_steps"] == 31
+    assert sandbox["best_candidate"]["segments"]["early"]["rel_mse"] < 0.5
+
+
+def test_hypothesis_lab_sandbox_executes_task1_front25_dynamics_family(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    reference = np.empty((8, 200, 256), dtype=np.float32)
+    for sample in range(target.shape[0]):
+        phase = np.float32(0.02 + 0.04 * sample)
+        velocity = np.float32(0.003 + 0.001 * sample) * np.cos(x + phase)
+        for step in range(200):
+            target[sample, step, :] = np.sin(x + phase) + step * velocity
+    for sample in range(reference.shape[0]):
+        phase = np.float32(0.04 * sample)
+        velocity = np.float32(0.003 + 0.001 * sample) * np.cos(x + phase)
+        for step in range(200):
+            reference[sample, step, :] = np.sin(x + phase) + step * velocity
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    reference_path = _write_hdf5(tmp_path / "task1_reference.hdf5", reference)
+    blueprint = {
+        "blueprint_id": "bp_task1_front25_dynamics_001",
+        "candidate_family": "task1_front25_dynamics",
+        "search_mode": "front25_short_dynamics_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 4,
+                    "horizon_steps": 25,
+                    "ridge_alpha": 1e-8,
+                    "correction_weight": 1.0,
+                    "dynamics_mode": "velocity_feature_ridge",
+                    "feature_mode": "last_velocity_gradient",
+                }
+            ]
+        },
+        "sandbox": {
+            "allowed_executor": "controlled_numpy_task1_front25_dynamics",
+            "primary_metric": "task1_early_rel_mse_guarded_score",
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        reference_path=reference_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["candidate_family"] == "task1_front25_dynamics"
+    assert sandbox["best_candidate"]["candidate_id"].startswith("task1_front25_dynamics")
+    assert sandbox["best_candidate"]["metadata"]["early_objective"] == "early_rel_mse"
+    assert sandbox["best_candidate"]["metadata"]["horizon_steps"] == 25
+    assert sandbox["verifier"]["selection_objective"]["primary"] == "early_rel_mse"
+
+
+def test_hypothesis_lab_sandbox_accepts_reduced_time_reference_for_front25_dynamics(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
+
+    x = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False, dtype=np.float32)
+    target = np.empty((3, 200, 256), dtype=np.float32)
+    reference = np.empty((8, 41, 256), dtype=np.float32)
+    for sample in range(target.shape[0]):
+        phase = np.float32(0.02 + 0.04 * sample)
+        velocity = np.float32(0.003 + 0.001 * sample) * np.cos(x + phase)
+        for step in range(200):
+            target[sample, step, :] = np.sin(x + phase) + step * velocity
+    for sample in range(reference.shape[0]):
+        phase = np.float32(0.04 * sample)
+        velocity = np.float32(0.003 + 0.001 * sample) * np.cos(x + phase)
+        for step in range(41):
+            reference[sample, step, :] = np.sin(x + phase) + step * velocity
+    context_path = _write_hdf5(tmp_path / "task1_test.hdf5", target[:, :10, :])
+    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
+    reference_path = _write_hdf5(tmp_path / "task1_reference.hdf5", reference)
+    blueprint = {
+        "blueprint_id": "bp_task1_front25_dynamics_reduced_ref_001",
+        "candidate_family": "task1_front25_dynamics",
+        "search_mode": "front25_short_dynamics_search",
+        "parameter_grid": {
+            "candidate_params": [
+                {
+                    "k": 4,
+                    "horizon_steps": 25,
+                    "ridge_alpha": 1e-8,
+                    "correction_weight": 1.0,
+                    "dynamics_mode": "velocity_feature_ridge",
+                    "feature_mode": "last_velocity_gradient",
+                }
+            ]
+        },
+        "sandbox": {
+            "allowed_executor": "controlled_numpy_task1_front25_dynamics",
+            "primary_metric": "task1_early_rel_mse_guarded_score",
+            "promotion_min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+        },
+    }
+
+    sandbox = run_blueprint_sandbox(
+        blueprint=blueprint,
+        context_path=context_path,
+        target_path=target_path,
+        reference_path=reference_path,
+        output_dir=tmp_path / "sandbox",
+        submission_id="team_hermes",
+        force=False,
+    )
+
+    assert sandbox["reference_audit"]["reference_time_steps"] == 41
+    assert sandbox["best_candidate"]["metadata"]["reference_time_steps"] == 41
+    assert sandbox["best_candidate"]["metadata"]["horizon_steps"] == 25
+
+
+def test_hypothesis_lab_middle_late_selection_objective_prioritizes_late_segments() -> None:
+    from pde_agent.core.hypothesis_lab import (
+        _candidate_selection_key,
+        _selection_objective,
+    )
+
+    early_good_late_weak = {
+        "elapsed_seconds": 0.1,
+        "segment_score": 20.0,
+        "task1_total_score_proxy": 90.0,
+        "segments": {
+            "early": {"rel_mse": 0.01, "score": 80.0},
+            "middle": {"score": 1.0},
+            "late": {"score": 1.0, "rmse": 0.9},
+        },
+    }
+    early_bad_late_strong = {
+        "elapsed_seconds": 0.1,
+        "segment_score": 40.0,
+        "task1_total_score_proxy": 105.0,
+        "segments": {
+            "early": {"rel_mse": 0.3, "score": 0.2},
+            "middle": {"score": 25.0},
+            "late": {"score": 74.0, "rmse": 0.03},
+        },
+    }
+
+    objective = _selection_objective(
+        "task1_retrieval_refinement_local_search",
+        selection_objective="middle_late_score",
+    )
+
+    assert objective["primary"] == "middle_late_score"
+    assert _candidate_selection_key(
+        early_bad_late_strong,
+        family="task1_retrieval_refinement_local_search",
+        selection_objective="middle_late_score",
+    ) > _candidate_selection_key(
+        early_good_late_weak,
+        family="task1_retrieval_refinement_local_search",
+        selection_objective="middle_late_score",
+    )
 
 
 def test_hypothesis_lab_sandbox_executes_derivative_aware_early_anchors(

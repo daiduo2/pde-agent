@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from pde_agent.core.competition_submission import build_competition_submission
+from pde_agent.core.competition_timing import normalize_timing
 from pde_agent.core.fno_competition_prediction import predict_fno_competition
 from pde_agent.core.fno_finetune_candidate import execute_fno_finetune_candidate
 from pde_agent.core.hermes_local_judge import judge_hermes_submission
@@ -37,6 +38,8 @@ def run_checkpoint_family_sandbox(
     prediction_dataset_key: str = "tensor",
     calibration_weights: list[float] | None = None,
     fno_finetune_steps: int = 0,
+    timing_profile: str | None = None,
+    timing_factor: float | None = None,
     fno_runner: CheckpointRunner | None = None,
     unet_runner: CheckpointRunner | None = None,
     fno_finetune_runner: CheckpointRunner | None = None,
@@ -85,6 +88,8 @@ def run_checkpoint_family_sandbox(
                 dataset_key=dataset_key,
                 prediction_dataset_key=prediction_dataset_key,
                 weights=weights,
+                timing_profile=timing_profile,
+                timing_factor=timing_factor,
                 force=force,
             )
         )
@@ -123,6 +128,8 @@ def run_checkpoint_family_sandbox(
                     dataset_key=dataset_key,
                     prediction_dataset_key=prediction_dataset_key,
                     weights=weights,
+                    timing_profile=timing_profile,
+                    timing_factor=timing_factor,
                     force=force,
                 )
             )
@@ -187,6 +194,8 @@ def _materialize_calibrated_rows(
     dataset_key: str,
     prediction_dataset_key: str,
     weights: list[float],
+    timing_profile: str | None,
+    timing_factor: float | None,
     force: bool,
 ) -> list[dict[str, Any]]:
     candidate_prediction = _load_candidate_prediction(candidate_report)
@@ -208,6 +217,12 @@ def _materialize_calibrated_rows(
             time.perf_counter() - start
         )
         train_seconds = _candidate_train_seconds(candidate_report)
+        timing = normalize_timing(
+            raw_train_time=train_seconds,
+            raw_inference_time=inference_seconds,
+            timing_profile=timing_profile,
+            timing_factor=timing_factor,
+        )
         submission = build_competition_submission(
             task_id=task_id,
             test_path=test_path,
@@ -220,6 +235,8 @@ def _materialize_calibrated_rows(
             source_prediction_key="prediction",
             train_time=train_seconds,
             inference_time=inference_seconds,
+            timing_profile=timing_profile,
+            timing_factor=timing_factor,
             force=force,
         )
         judge_path = output_dir / candidate_id / "judge_report.json"
@@ -250,8 +267,14 @@ def _materialize_calibrated_rows(
                 "candidate_execution_report_path": _candidate_report_path(
                     candidate_report
                 ),
-                "train_time": train_seconds,
-                "inference_time": inference_seconds,
+                "raw_train_time": train_seconds,
+                "raw_inference_time": inference_seconds,
+                "train_time": float(timing["train_time"]),
+                "inference_time": float(timing["inference_time"]),
+                "timing_profile": timing["timing_profile"],
+                "timing_factor": timing["timing_factor"],
+                "timing_valid_for_submission": timing["timing_valid_for_submission"],
+                "timeout_zeroed": bool(task["score"]["timeout_zeroed"]),
             }
         )
     return rows

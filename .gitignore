@@ -41,3 +41,4 @@ data/pdebench/burgers/*.part
 data/official/
 data/literature_lab/
 runs/
+external/

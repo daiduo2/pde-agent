@@ -216,6 +216,38 @@ def test_lookup_local_strategies_exposes_task1_physics_residual_refinement(
     ]
 
 
+def test_lookup_local_strategies_exposes_task1_early_subsegment_patch(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="1D Burgers",
+        model_family="DataInference",
+        failure_modes=["early_window_rel_mse", "task1_accuracy_plateau"],
+        max_results=4,
+        output_path=None,
+    )
+
+    patch = next(
+        item
+        for item in result["matches"]
+        if item["strategy_id"] == "task1_early_subsegment_patch_v0"
+    )
+    assert "run-hermes-batch-optimization-loop" in patch["implementation_hooks"]
+    assert "hypothesis_lab_early_subsegment_patch_search" in patch[
+        "implementation_hooks"
+    ]
+    assert "local_validation_window_selection" in patch["known_risks"][0]
+
+
 def test_lookup_local_strategies_exposes_task1_pi_deeponet_correction_head(
     tmp_path: Path,
 ) -> None:
@@ -244,6 +276,38 @@ def test_lookup_local_strategies_exposes_task1_pi_deeponet_correction_head(
     assert "run-hypothesis-lab" in correction["implementation_hooks"]
     assert "task1_pi_deeponet_correction_head" in correction["implementation_hooks"]
     assert "controlled_numpy_pi_deeponet_correction_head" in correction[
+        "implementation_hooks"
+    ]
+
+
+def test_lookup_local_strategies_exposes_task1_early_transition_expert(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.local_strategy_library import (
+        build_local_strategy_library,
+        lookup_local_strategies,
+    )
+
+    library_path = tmp_path / "library.json"
+    build_local_strategy_library(output_path=library_path, force=False)
+
+    result = lookup_local_strategies(
+        library_path=library_path,
+        applicable_pde="1D Burgers",
+        model_family="DataInference",
+        failure_modes=["early_window_rel_mse", "transport_lag"],
+        max_results=4,
+        output_path=None,
+    )
+
+    transition = next(
+        item
+        for item in result["matches"]
+        if item["strategy_id"] == "task1_early_transition_expert_v0"
+    )
+    assert "run-hypothesis-lab" in transition["implementation_hooks"]
+    assert "task1_early_transition_expert" in transition["implementation_hooks"]
+    assert "controlled_numpy_task1_early_transition_expert" in transition[
         "implementation_hooks"
     ]
 
