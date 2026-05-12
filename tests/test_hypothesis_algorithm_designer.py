@@ -1193,8 +1193,10 @@ def test_run_hypothesis_algorithm_sandbox_command_invokes_controlled_sandbox(
             },
         }
 
+    import pde_agent.commands.hypothesis_lab_runtime_algorithm as _algo_mod
+
     monkeypatch.setattr(
-        command_module,
+        _algo_mod,
         "run_blueprint_sandbox",
         fake_run_blueprint_sandbox,
     )
