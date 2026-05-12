@@ -1,6 +1,5 @@
 """Audit generated competition submission directories."""
 
-from __future__ import annotations
 
 import csv
 import json

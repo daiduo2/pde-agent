@@ -1,6 +1,5 @@
 """Run official-style FNO checkpoints on competition test inputs."""
 
-from __future__ import annotations
 
 import json
 import time

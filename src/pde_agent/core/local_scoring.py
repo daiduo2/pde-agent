@@ -1,6 +1,5 @@
 """Short-horizon local scoring utilities for PDE rollout predictions."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

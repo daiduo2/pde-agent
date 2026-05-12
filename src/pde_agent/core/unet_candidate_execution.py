@@ -1,6 +1,5 @@
 """Execute a minimal trainable 1D UNet candidate on local window data."""
 
-from __future__ import annotations
 
 import json
 import re

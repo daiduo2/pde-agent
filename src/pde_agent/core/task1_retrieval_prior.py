@@ -1,6 +1,5 @@
 """Task-1 trajectory retrieval prior for Burgers rollouts."""
 
-from __future__ import annotations
 
 import json
 import time

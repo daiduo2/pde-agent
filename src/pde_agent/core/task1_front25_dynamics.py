@@ -1,6 +1,5 @@
 """Controlled front-25 dynamics source for Task 1 Burgers early windows."""
 
-from __future__ import annotations
 
 from typing import Any
 

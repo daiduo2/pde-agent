@@ -1,6 +1,5 @@
 """Task 2 context-based Nu/domain-shift diagnostics."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -117,7 +116,7 @@ def _trace_outcome(decision: str) -> str:
         "accepted",
     }:
         return "promoted"
-    if decision in {"reject", "rejected", "failed"}:
+    if decision in {"reject", "rejected", "failed", "reject_or_revise"}:
         return "failed"
     if decision in {"blocked", "needs_executor"}:
         return "blocked"

@@ -128,7 +128,7 @@ def test_hypothesis_candidate_planner_consumes_repair_policy_summary(
     repair_policy_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_REPAIR_POLICY_SUMMARY_BUILT",
+                "state_hint": "REPAIR_POLICY_SUMMARY_BUILT",
                 "converged_repair_errors": ["learning_constraint_smoke_gate"],
                 "nonconverged_repair_errors": [
                     "repair_convergence_consistency"
@@ -332,7 +332,7 @@ def test_hypothesis_candidate_planner_falls_back_to_safe_unblocked_family(
         "physics_residual_nudge",
         "sem_window_gate_blend_multi_early_smoke",
     ]
-    assert report["next_command"] == "run-hermes-heartbeat"
+    assert report["next_command"] == "run-claude-agent-sdk-runtime"
 
 
 def test_hypothesis_candidate_planner_marks_candidate_space_exhausted(
@@ -374,7 +374,7 @@ def test_hypothesis_candidate_planner_marks_candidate_space_exhausted(
     assert report["candidate_generator_schedule"] == ["fast_baseline_family"]
     assert report["decision"] == "candidate_space_exhausted"
     assert report["expansion_required"] is True
-    assert report["next_command"] == "run-hermes-literature-strategy-expansion"
+    assert report["next_command"] == "run-candidate-expansion-handoff"
     assert report["exhaustion_reason"] == "eligible_candidate_count_below_minimum"
     assert report["expansion_handoff"] == {
         "reason": "candidate_space_exhausted",
@@ -392,7 +392,7 @@ def test_hypothesis_candidate_planner_marks_candidate_space_exhausted(
             ],
             "max_strategy_candidates": 5,
         },
-        "follow_up_command": "run-hermes-literature-strategy-expansion",
+        "follow_up_command": "run-candidate-expansion-handoff",
     }
 
 
@@ -588,7 +588,7 @@ def test_hypothesis_candidate_planner_carries_expansion_axis_exhaustion(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+                "state_hint": "CANDIDATE_EXPANSION_HANDOFF_RAN",
                 "expansion_exhaustion": {
                     "exhausted": True,
                     "reason": "local_strategy_mutation_axes_exhausted",
@@ -653,7 +653,7 @@ def test_hypothesis_candidate_planner_does_not_family_block_node_level_exhaustio
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+                "state_hint": "CANDIDATE_EXPANSION_HANDOFF_RAN",
                 "expansion_exhaustion": {
                     "exhausted": True,
                     "reason": "local_strategy_mutation_axes_exhausted",
@@ -725,7 +725,7 @@ def test_hypothesis_candidate_planner_exhausted_node_overrides_mutation_required
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+                "state_hint": "CANDIDATE_EXPANSION_HANDOFF_RAN",
                 "expansion_exhaustion": {
                     "exhausted": True,
                     "reason": "local_strategy_mutation_axes_exhausted",
@@ -789,7 +789,7 @@ def test_hypothesis_candidate_planner_marks_local_strategy_cluster_saturation(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+                "state_hint": "CANDIDATE_EXPANSION_HANDOFF_RAN",
                 "expansion_exhaustion": {
                     "exhausted": True,
                     "reason": "local_strategy_mutation_axes_exhausted",
@@ -956,13 +956,13 @@ def test_hypothesis_candidate_planner_consumes_audit_repair_tasks(
         "recommended_action": (
             "rebuild_candidate_plan_or_adjust_heartbeat_schedule_to_respect_learning_constraints"
         ),
-        "next_command": "run-hermes-runtime-closed-loop",
+        "next_command": "run-claude-agent-sdk-runtime",
     }
     repair_path = tmp_path / "audit_repair_tasks.json"
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [repair_task],
                 "metrics": {"repair_task_count": 1},
             }
@@ -1003,7 +1003,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_saturation(
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": "repair_heartbeat_saturation_policy",
@@ -1013,7 +1013,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_saturation(
                         "recommended_action": (
                             "switch_blocked_generator_to_registry_allowed_fallback_or_mark_valid_probe"
                         ),
-                        "next_command": "run-hermes-runtime-closed-loop",
+                        "next_command": "run-claude-agent-sdk-runtime",
                     }
                 ],
             }
@@ -1061,7 +1061,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_guidance_drif
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": "repair_persistent_search_guidance_consistency",
@@ -1071,7 +1071,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_guidance_drif
                         "recommended_action": (
                             "rebuild_kpi_candidate_plan_and_heartbeat_trace_with_consistent_persistent_search_guidance"
                         ),
-                        "next_command": "run-hermes-runtime-closed-loop",
+                        "next_command": "run-claude-agent-sdk-runtime",
                     }
                 ],
             }
@@ -1109,7 +1109,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_cluster_satur
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": "repair_cluster_saturation_consistency",
@@ -1119,7 +1119,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_cluster_satur
                         "recommended_action": (
                             "rebuild_candidate_plan_from_latest_expansion_handoff_and_kpi_saturation_signals"
                         ),
-                        "next_command": "run-hermes-runtime-closed-loop",
+                        "next_command": "run-claude-agent-sdk-runtime",
                     }
                 ],
             }
@@ -1420,7 +1420,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_memory_bridge
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": "repair_memory_bridge_inputs",
@@ -1430,7 +1430,7 @@ def test_hypothesis_candidate_planner_uses_audit_repair_policy_for_memory_bridge
                         "recommended_action": (
                             "reload_input_expansion_handoff_and_registry_summary_before_candidate_planning"
                         ),
-                        "next_command": "run-hermes-runtime-closed-loop",
+                        "next_command": "run-claude-agent-sdk-runtime",
                     }
                 ],
             }
@@ -1469,7 +1469,7 @@ def test_hypothesis_candidate_planner_marks_learning_smoke_repair_policy(
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": "repair_learning_constraint_smoke_gate",
@@ -1574,7 +1574,7 @@ def test_hypothesis_candidate_planner_covers_runtime_audit_repair_errors(
     repair_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+                "state_hint": "RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
                 "repair_tasks": [
                     {
                         "task_id": f"repair_{error}",
@@ -1582,7 +1582,7 @@ def test_hypothesis_candidate_planner_covers_runtime_audit_repair_errors(
                         "priority": "high",
                         "repair_scope": "runtime_repair",
                         "recommended_action": "repair_failed_runtime_audit_gate",
-                        "next_command": "run-hermes-runtime-closed-loop",
+                        "next_command": "run-claude-agent-sdk-runtime",
                     }
                     for error in repair_errors
                 ],
@@ -1795,6 +1795,75 @@ def test_plan_hypothesis_candidates_cli_returns_json_payload(
     assert payload["metrics"]["candidate_plan_length"] > 0
 
 
+def test_plan_hypothesis_candidates_cli_accepts_hypothesis_lab_next_policy(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    policy_path = tmp_path / "next_policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "HYPOTHESIS_LAB_NEXT_POLICY_BUILT",
+                "policy": {
+                    "next_action": "retry_with_policy_constraints",
+                    "next_command": "plan-hypothesis-candidates",
+                    "candidate_generator": "hypothesis_lab_front25_dynamics_smoke",
+                    "learning_objective": "early_segment",
+                    "preferred_error_modes": [
+                        "initial_derivative_mismatch",
+                        "early_segment",
+                    ],
+                    "required_constraints": {
+                        "avoid_algorithm_candidate_ids": [
+                            "candidate_task1_front25_dynamics_v0"
+                        ],
+                    },
+                    "hypothesis_candidate_options": {
+                        "candidate_pool_axis": "dynamics_mode",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "plan.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan-hypothesis-candidates",
+            "--output-path",
+            str(output_path),
+            "--hypothesis-lab-next-policy-path",
+            str(policy_path),
+            "--min-viable-candidate-count",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    plan = json.loads(output_path.read_text(encoding="utf-8"))
+    assert plan["candidate_generator"] == "hypothesis_lab_front25_dynamics_smoke"
+    assert plan["candidate_generator_schedule"][0] == (
+        "hypothesis_lab_front25_dynamics_smoke"
+    )
+    assert plan["preferred_error_modes"] == [
+        "initial_derivative_mismatch",
+        "early_segment",
+    ]
+    constraints = plan["hypothesis_lab_policy_constraints"]
+    assert constraints["learning_objective"] == "early_segment"
+    assert constraints["guard_override_candidate_generator"] == (
+        "hypothesis_lab_front25_dynamics_smoke"
+    )
+    assert payload["artifacts"]["hypothesis_lab_policy_constraints"] == constraints
+
+
 def test_plan_hypothesis_candidates_cli_accepts_expansion_handoff_report(
     tmp_path: Path,
 ) -> None:
@@ -1806,7 +1875,7 @@ def test_plan_hypothesis_candidates_cli_accepts_expansion_handoff_report(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+                "state_hint": "CANDIDATE_EXPANSION_HANDOFF_RAN",
                 "expansion_exhaustion": {
                     "exhausted": True,
                     "reason": "local_strategy_mutation_axes_exhausted",
@@ -1849,4 +1918,119 @@ def test_plan_hypothesis_candidates_cli_accepts_expansion_handoff_report(
     assert plan["prior_expansion_exhaustion"]["exhausted"] is True
     assert plan["learning_constraints"]["avoid_candidate_families"] == [
         "local_strategy_skill"
+    ]
+
+
+def test_plan_hypothesis_candidates_cli_accepts_direct_expansion_report(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.cli import app
+    from typer.testing import CliRunner
+
+    expansion_path = tmp_path / "literature_strategy_expansion.json"
+    expansion_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_STRATEGY_EXPANSION_RAN",
+                "expansion_exhaustion": {
+                    "exhausted": True,
+                    "reason": "local_strategy_mutation_axes_exhausted",
+                    "exhausted_algorithm_candidate_ids": [
+                        "candidate_local_strategy_task1_early_transition_expert_v0"
+                    ],
+                    "attempted_mutation_types": [
+                        "robust_reference_ablation_retry",
+                        "source_stability_ablation_retry",
+                        "handoff_smoothing_ablation_retry",
+                    ],
+                    "recommended_next_command": "plan-hypothesis-candidates",
+                    "recommended_learning_objective": (
+                        "switch_candidate_family_after_axis_exhaustion"
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "plan.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan-hypothesis-candidates",
+            "--output-path",
+            str(output_path),
+            "--candidate-generator",
+            "postprocess",
+            "--expansion-report-path",
+            str(expansion_path),
+            "--preferred-error-mode",
+            "early_segment",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    plan = json.loads(output_path.read_text(encoding="utf-8"))
+    assert plan["prior_expansion_exhaustion"]["exhausted"] is True
+    assert plan["learning_constraints"]["avoid_algorithm_candidate_ids"] == [
+        "candidate_local_strategy_task1_early_transition_expert_v0"
+    ]
+
+
+def test_plan_hypothesis_candidates_prefers_factory_dynamics_after_axis_exhaustion(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_candidate_planner import (
+        build_hypothesis_candidate_plan,
+    )
+
+    expansion_path = tmp_path / "literature_strategy_expansion.json"
+    expansion_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "LITERATURE_STRATEGY_EXPANSION_RAN",
+                "expansion_exhaustion": {
+                    "exhausted": True,
+                    "reason": "local_strategy_mutation_axes_exhausted",
+                    "exhausted_algorithm_candidate_ids": [
+                        "candidate_local_strategy_task1_early_transition_expert_v0"
+                    ],
+                    "attempted_mutation_types": [
+                        "robust_reference_ablation_retry",
+                        "source_stability_ablation_retry",
+                        "handoff_smoothing_ablation_retry",
+                    ],
+                    "recommended_next_command": "plan-hypothesis-candidates",
+                    "recommended_learning_objective": (
+                        "switch_candidate_family_after_axis_exhaustion"
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_hypothesis_candidate_plan(
+        output_path=tmp_path / "plan.json",
+        candidate_generator="postprocess",
+        doom_loop_report_path=None,
+        hypothesis_kpi_report_path=None,
+        expansion_report_path=expansion_path,
+        preferred_error_modes=["early_segment", "transition_window"],
+        max_schedule_length=2,
+        min_viable_candidate_count=1,
+        force=False,
+    )
+
+    assert report["candidate_generator_schedule"] == [
+        "hypothesis_lab_front25_dynamics_smoke",
+        "hypothesis_lab_early_subsegment_patch_search",
+    ]
+    assert report["learning_constraints"]["prefer_candidate_generators"] == [
+        "hypothesis_lab_front25_dynamics_smoke",
+        "hypothesis_lab_early_subsegment_patch_search",
     ]

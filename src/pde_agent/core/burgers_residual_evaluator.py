@@ -1,6 +1,5 @@
 """Target-free Burgers residual diagnostics for PI/PINN-style evidence."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

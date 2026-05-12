@@ -120,7 +120,7 @@ def test_compare_hypothesis_lab_memory_runs_two_arms_and_scores_delta(
         context_path=tmp_path / "context.hdf5",
         target_path=tmp_path / "target.hdf5",
         output_dir=tmp_path / "ab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
         runner=fake_runner,
     )
@@ -178,7 +178,7 @@ def test_compare_hypothesis_lab_memory_prefers_absolute_best_score_for_decision(
         context_path=tmp_path / "context.hdf5",
         target_path=tmp_path / "target.hdf5",
         output_dir=tmp_path / "ab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
         runner=fake_runner,
     )
@@ -230,7 +230,7 @@ def test_compare_hypothesis_lab_memory_cli_returns_payload(
             "--output-dir",
             str(tmp_path / "ab"),
             "--submission-id",
-            "team_hermes",
+            "team_default",
         ],
     )
 

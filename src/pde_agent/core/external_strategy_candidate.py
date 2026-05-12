@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -6,7 +5,7 @@ from typing import Any
 
 
 STATE_HINT = "EXTERNAL_STRATEGY_CANDIDATE_FORMALIZED"
-DECISION_STATE_HINT = "STRATEGY_NEXT_ACTION_RECOMMENDED"
+from pde_agent.core.state_hint_registry import STRATEGY_NEXT_ACTION_RECOMMENDED as DECISION_STATE_HINT
 
 
 class ExternalStrategyCandidateError(ValueError):

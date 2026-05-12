@@ -1,6 +1,5 @@
 """Multi-start evidence sweep for the spectral residual baseline."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -17,7 +16,7 @@ from pde_agent.core.spectral_residual_baseline import (
 )
 
 
-STATE_HINT = "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+from pde_agent.core.state_hint_registry import STRATEGY_EVIDENCE_SUMMARY_BUILT as STATE_HINT
 SOURCE_STATE_HINT = "SPECTRAL_RESIDUAL_EVIDENCE_SWEEP_COMPLETED"
 MODEL_FAMILY = "SpectralResidual"
 

@@ -1,6 +1,5 @@
 """Plan the next intervention from spectral residual grid variance."""
 
-from __future__ import annotations
 
 import json
 from collections import defaultdict
@@ -9,7 +8,7 @@ from statistics import mean
 from typing import Any
 
 
-STATE_HINT = "NEXT_EXPERIMENT_PLANNED"
+from pde_agent.core.state_hint_registry import NEXT_EXPERIMENT_PLANNED as STATE_HINT
 SELECTED_INTERVENTION = "stratify_spectral_residual_window_evidence"
 PRIMARY_FAILURE_MODE = "start_window_variance_dominates_parameter_sweep"
 

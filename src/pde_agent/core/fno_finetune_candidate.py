@@ -1,6 +1,5 @@
 """Execute a minimal scheduled-sampling finetune for prepared FNO candidates."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

@@ -70,24 +70,23 @@ Verification:
 uv run --frozen pytest -q tests/test_task1_short_window_training.py tests/test_hypothesis_algorithm_designer.py tests/test_hypothesis_algorithm_designer_stability.py tests/test_hypothesis_candidate_planner.py tests/test_task1_candidate_factory.py
 ```
 
-### 3. Hermes Compatibility And Memory Layer
+### 3. Archived Hermes Compatibility And Memory Layer
 
-Purpose: keep Hermes available as the historical backend and comparison loop
-while Claude SDK becomes primary.
+Purpose: historical staging note only. Hermes-specific modules and tests have
+since been archived or removed from the active tree while Claude SDK becomes
+primary.
 
 Files:
 
-- `src/pde_agent/core/hermes_*.py`
-- `src/pde_agent/commands/hermes_*.py`
-- `tests/test_hermes_*.py`
+- archived or deleted `src/pde_agent/core/hermes_*.py`
+- archived or deleted `src/pde_agent/commands/hermes_*.py`
+- archived or deleted `tests/test_hermes_*.py`
 - `docs/hermes_hypothesis_lab_runbook.md`
 - `docs/hermes_integration_discipline.md`
 
 Verification:
 
-```bash
-uv run --frozen pytest -q tests/test_hermes_heartbeat.py tests/test_hermes_literature_expansion.py tests/test_hermes_batch_optimization_loop.py tests/test_hermes_iteration_memory.py
-```
+Do not use the old Hermes verification commands for active development.
 
 ### 4. Competition Timing And Submission Support
 

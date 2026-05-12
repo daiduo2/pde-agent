@@ -1,6 +1,5 @@
 """Orchestrate local FNO rollout diagnostics into one artifact bundle."""
 
-from __future__ import annotations
 
 import json
 from contextlib import suppress

@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 import math
@@ -7,7 +6,7 @@ from typing import Any
 
 
 STATE_HINT = "STRATEGY_NEXT_ACTION_RECOMMENDED"
-EVIDENCE_STATE_HINT = "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+from pde_agent.core.state_hint_registry import STRATEGY_EVIDENCE_SUMMARY_BUILT as EVIDENCE_STATE_HINT
 
 
 class StrategyDecisionError(ValueError):

@@ -1,8 +1,0 @@
-{
-  "config_hash": "diagnostic-smoke-001",
-  "agent_constraints": {
-    "patch_code": false,
-    "run_training": false,
-    "inspect_help": false
-  }
-}

@@ -1,6 +1,5 @@
 """Unified local strategy result memory and leaderboard."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

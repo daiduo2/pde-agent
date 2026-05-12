@@ -1,6 +1,5 @@
 """Append-only trace events for Hypothesis Lab and Hermes research loops."""
 
-from __future__ import annotations
 
 import hashlib
 import json

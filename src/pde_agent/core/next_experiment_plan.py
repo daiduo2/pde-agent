@@ -1,6 +1,5 @@
 """Deterministic next-experiment planning from PDE diagnostic artifacts."""
 
-from __future__ import annotations
 
 import json
 import math

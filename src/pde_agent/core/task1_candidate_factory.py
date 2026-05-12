@@ -1,6 +1,5 @@
-"""Bounded Task1 candidate-family factory for Hermes."""
+"""Bounded Task1 candidate-family factory for the Claude SDK agent."""
 
-from __future__ import annotations
 
 import json
 import re
@@ -12,6 +11,7 @@ CARD_STATE_HINT = "TASK1_CANDIDATE_FAMILY_CARD_V1"
 FAMILY_REPORT_STATE_HINT = "TASK1_CANDIDATE_FAMILIES_GENERATED"
 SANDBOX_STATE_HINT = "TASK1_CANDIDATE_FAMILY_SANDBOX_PLANNED"
 FACTORY_BENCHMARK_STATE_HINT = "TASK1_CANDIDATE_FACTORY_CAPABILITY_EVALUATED"
+MATERIALIZED_CANDIDATES_STATE_HINT = "ALGORITHM_CANDIDATES_COMPILED"
 
 VALID_TARGET_SEGMENTS = {"early", "middle", "late", "full", "transition"}
 VALID_MECHANISMS = {
@@ -37,13 +37,11 @@ VALID_STATUSES = {
     "rejected",
 }
 SUPPORTED_HOOK_COMMANDS = {
-    "hypothesis_lab_front25_dynamics_smoke": "run-hermes-batch-optimization-loop",
-    "hypothesis_lab_early_subsegment_patch_search": (
-        "run-hermes-batch-optimization-loop"
-    ),
+    "hypothesis_lab_front25_dynamics_smoke": "run-hypothesis-lab",
+    "hypothesis_lab_early_subsegment_patch_search": "run-hypothesis-lab",
     "official_checkpoint_family": "run-checkpoint-family-sandbox",
-    "sem_window_gate_blend": "run-hermes-batch-optimization-loop",
-    "sem_window_blend": "run-hermes-batch-optimization-loop",
+    "sem_window_gate_blend": "run-hypothesis-lab",
+    "sem_window_blend": "run-hypothesis-lab",
     "task1_physics_residual_refinement": "run-hypothesis-lab",
     "task1_pi_deeponet_correction_head": "run-hypothesis-lab",
     "validate_executable_blueprints": "validate-executable-blueprints",
@@ -265,9 +263,10 @@ def evaluate_candidate_factory_capability(
             "family_report_path": str(family_file),
             "sandbox_report_path": str(sandbox_file),
         },
-        "heartbeat_handoff": {
+        "agent_runtime_handoff": {
             "ready": decision == "passed",
-            "next_command": "run-hermes-runtime-audit-chain",
+            "next_command": "run-claude-agent-sdk-runtime",
+            "active_substrate": "claude_agent_sdk",
             "candidate_generator_fallback": "auto",
             "sandbox_report_path": str(sandbox_file),
             "planned_candidate_family_ids": [
@@ -277,9 +276,51 @@ def evaluate_candidate_factory_capability(
                 and isinstance(item.get("candidate_family_id"), str)
             ],
         },
-        "next_command": "run-hermes-runtime-audit-chain"
+        "next_command": "run-claude-agent-sdk-runtime"
         if decision == "passed"
         else "generate-task1-candidate-families",
+    }
+    _write_json(output_file, report)
+    return report
+
+
+def materialize_candidate_family_item(
+    *,
+    sandbox_report_path: str | Path,
+    output_path: str | Path,
+    candidate_family_id: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    output_file = Path(output_path)
+    _ensure_can_write(output_file, force=force)
+    sandbox_file = _require_file(Path(sandbox_report_path), "candidate family sandbox")
+    sandbox_report = _read_json(sandbox_file)
+    if sandbox_report.get("state_hint") != SANDBOX_STATE_HINT:
+        raise CandidateFactoryError("candidate family sandbox has invalid state_hint")
+    item = _select_sandbox_item(
+        sandbox_report=sandbox_report,
+        candidate_family_id=candidate_family_id,
+    )
+    if item.get("status") != "planned":
+        raise CandidateFactoryError("selected candidate family item is not planned")
+    candidate = _algorithm_candidate_from_sandbox_item(
+        item=item,
+        sandbox_file=sandbox_file,
+    )
+    report = {
+        "schema_version": 1,
+        "state_hint": MATERIALIZED_CANDIDATES_STATE_HINT,
+        "source_state_hint": SANDBOX_STATE_HINT,
+        "algorithm_candidates_path": str(output_file),
+        "algorithm_candidate_count": 1,
+        "algorithm_candidates": [candidate],
+        "selected_candidate_family_id": item["candidate_family_id"],
+        "selected_hook": item["selected_hook"],
+        "inputs": {
+            "sandbox_report_path": str(sandbox_file),
+            "candidate_family_id": candidate_family_id,
+        },
+        "next_command": str(item["next_command"]),
     }
     _write_json(output_file, report)
     return report
@@ -596,6 +637,117 @@ def _sandbox_item(card: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _select_sandbox_item(
+    *,
+    sandbox_report: dict[str, Any],
+    candidate_family_id: str | None,
+) -> dict[str, Any]:
+    items = [
+        item
+        for item in sandbox_report.get("sandbox_items", [])
+        if isinstance(item, dict)
+    ]
+    if candidate_family_id is not None:
+        matches = [
+            item
+            for item in items
+            if item.get("candidate_family_id") == candidate_family_id
+        ]
+        if not matches:
+            raise CandidateFactoryError(
+                f"candidate family item not found: {candidate_family_id}"
+            )
+        return matches[0]
+    for item in items:
+        if item.get("status") == "planned":
+            return item
+    raise CandidateFactoryError("candidate family sandbox has no planned items")
+
+
+def _algorithm_candidate_from_sandbox_item(
+    *,
+    item: dict[str, Any],
+    sandbox_file: Path,
+) -> dict[str, Any]:
+    family_id = str(item["candidate_family_id"])
+    mechanism = str(item.get("mechanism") or "candidate_family")
+    selected_hook = str(item["selected_hook"])
+    next_command = str(item["next_command"])
+    candidate_options = (
+        item.get("candidate_options") if isinstance(item.get("candidate_options"), dict)
+        else {}
+    )
+    return {
+        "algorithm_candidate_id": f"candidate_{family_id}",
+        "candidate_family": "factory_candidate_family",
+        "target_problem": "PDE_Burgers",
+        "target_task": "task1",
+        "model_family": _model_family_from_mechanism(mechanism),
+        "hypothesis": (
+            f"Evaluate candidate-family mechanism `{mechanism}` from the "
+            "Task1 candidate factory under a bounded sandbox before promotion."
+        ),
+        "mechanism": (
+            "Materialized from a planned candidate-family sandbox item. "
+            f"Selected hook `{selected_hook}` with bounded parameter space."
+        ),
+        "executor_spec": {
+            "cli_command": next_command,
+            "implementation_hooks": [next_command, selected_hook],
+            "candidate_options": candidate_options,
+            "evaluation_chain": item.get("evaluation_chain", []),
+        },
+        "expected_observables": _expected_observables_from_mechanism(mechanism),
+        "risk_controls": _risk_controls_from_mechanism(mechanism),
+        "promotion_criteria": {
+            "min_score_delta": 0.01,
+            "max_inference_seconds": 120.0,
+            "requires_ablation": False,
+        },
+        "source_grounding": {
+            "algorithm_card_id": family_id,
+            "source_ids": [family_id],
+            "source_artifacts": [str(sandbox_file)],
+        },
+    }
+
+
+def _model_family_from_mechanism(mechanism: str) -> str:
+    if mechanism.startswith("fno_"):
+        return "FNO"
+    if mechanism == "front25_dynamics":
+        return "Task1Front25Dynamics"
+    if mechanism in {"pinn_physics_residual_judge", "pi_deeponet_correction_signal"}:
+        return "PhysicsInformedCorrection"
+    return "Task1CandidateFactory"
+
+
+def _expected_observables_from_mechanism(mechanism: str) -> list[str]:
+    observables = ["sandbox_result_recorded", "context_prefix_exact"]
+    if mechanism in {"front25_dynamics", "residual_corrector"}:
+        observables.append("early_rel_mse_down")
+    elif mechanism.startswith("fno_") or mechanism == "checkpoint_adapter":
+        observables.append("score_delta_positive")
+    elif "physics" in mechanism or "deeponet" in mechanism:
+        observables.append("physical_residual_or_transition_score_improves")
+    else:
+        observables.append("task1_total_score_proxy_improves")
+    return observables
+
+
+def _risk_controls_from_mechanism(mechanism: str) -> list[str]:
+    risks = ["do_not_promote_without_sandbox_evidence"]
+    if mechanism in {"front25_dynamics", "residual_corrector"}:
+        risks.extend(["early_oversmoothing", "middle_late_regression"])
+    elif mechanism.startswith("fno_") or mechanism == "checkpoint_adapter":
+        risks.extend(["checkpoint_shape_mismatch", "runtime_over_budget"])
+    elif "physics" in mechanism or "deeponet" in mechanism:
+        risks.extend(["residual_proxy_misaligned", "validation_overfit"])
+    else:
+        risks.append("candidate_family_overfit")
+    return risks
+
+
 def _evaluation_chain(hook: str) -> list[dict[str, str]]:
     if hook in HOOK_EVALUATION_CHAINS:
         return [dict(step) for step in HOOK_EVALUATION_CHAINS[hook]]
@@ -615,9 +767,17 @@ def _generation_context(
     chain_report_path: Path,
 ) -> dict[str, Any]:
     score = benchmark.get("score_progress") if isinstance(benchmark, dict) else {}
+    if not isinstance(score, dict):
+        score = {}
     chain_metrics = chain.get("metrics") if isinstance(chain, dict) else {}
+    if not isinstance(chain_metrics, dict):
+        chain_metrics = {}
     sandbox = benchmark.get("sandbox_validation") if isinstance(benchmark, dict) else {}
+    if not isinstance(sandbox, dict):
+        sandbox = {}
     outcomes = sandbox.get("outcome_counts") if isinstance(sandbox, dict) else {}
+    if not isinstance(outcomes, dict):
+        outcomes = {}
     return {
         "benchmark_path": str(benchmark_path),
         "chain_report_path": str(chain_report_path),

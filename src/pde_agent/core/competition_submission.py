@@ -1,6 +1,5 @@
 """Build competition-shaped PDE Burgers submission artifacts."""
 
-from __future__ import annotations
 
 import csv
 import json

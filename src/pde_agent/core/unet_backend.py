@@ -1,6 +1,5 @@
 """Optional official UNet backend helpers for local PDE agent loops."""
 
-from __future__ import annotations
 
 import json
 import tarfile

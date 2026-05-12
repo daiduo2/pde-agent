@@ -1,8 +1,0 @@
-{
-  "problem_id": "PDE_Burgers",
-  "task_type": "protocol_smoke_test",
-  "model_family": "fno",
-  "input_window": 10,
-  "prediction_mode": "one_step",
-  "notes": "This file is for Hermes protocol compliance testing only."
-}

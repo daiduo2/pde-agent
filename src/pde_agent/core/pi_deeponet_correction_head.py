@@ -1,6 +1,5 @@
 """Numpy PI-DeepONet-style correction head for bounded Task 1 sandboxing."""
 
-from __future__ import annotations
 
 from typing import Any
 

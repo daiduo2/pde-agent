@@ -1,6 +1,5 @@
 """Controlled short-window dynamics source for Task 1 Burgers candidates."""
 
-from __future__ import annotations
 
 from typing import Any
 

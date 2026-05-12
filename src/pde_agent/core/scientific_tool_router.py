@@ -1,6 +1,5 @@
-"""Curated scientific tool catalog for Hermes and Hypothesis Lab agents."""
+"""Curated scientific tool catalog for Claude SDK and Hypothesis Lab agents."""
 
-from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
@@ -32,6 +31,7 @@ class ScientificToolSpec:
     produced_artifacts: list[str]
     state_hints: list[str]
     agent_guidance: str
+    runtime_status: str = "active"
 
     def to_dict(self) -> dict[str, Any]:
         if self.risk_level not in VALID_RISK_LEVELS:
@@ -41,8 +41,11 @@ class ScientificToolSpec:
         return asdict(self)
 
 
-def default_scientific_tool_specs() -> list[ScientificToolSpec]:
-    return [
+def default_scientific_tool_specs(
+    *,
+    include_compatibility_tools: bool = False,
+) -> list[ScientificToolSpec]:
+    specs = [
         ScientificToolSpec(
             name="summarize-hypothesis-lab-trace",
             command="summarize-hypothesis-lab-trace",
@@ -94,18 +97,20 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "improving, regressing, or over-exploring failed families. Inspect "
                 "active_audit_repair_errors, repair_nonconvergence_errors, and "
                 "repair_convergence_errors before planning candidates so repair "
-                "state is not lost between audit and heartbeat. Preserve "
+                "state is not lost between audit and the next Claude SDK agent "
+                "iteration. Preserve "
                 "persistent_search_guidance, "
                 "cluster_saturation_signals, and saturated_candidate_families when "
                 "calling plan-hypothesis-candidates."
             ),
         ),
         ScientificToolSpec(
-            name="evaluate-hermes-task1-agent-capability",
-            command="evaluate-hermes-task1-agent-capability",
+            name="evaluate-task1-agent-capability",
+            command="evaluate-task1-agent-capability",
             description=(
-                "Evaluate whether an audited Hermes Task1 loop improved score "
-                "through reusable agent capability rather than score-only tuning."
+                "Evaluate whether an audited Task1 agent loop improved score "
+                "through reusable Claude SDK agent capability rather than "
+                "score-only tuning."
             ),
             risk_level="read_only",
             required_inputs=[
@@ -122,41 +127,15 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "promotion_quality",
                 "capability_checks",
             ],
-            state_hints=["HERMES_TASK1_AGENT_CAPABILITY_BENCHMARKED"],
+            state_hints=["TASK1_AGENT_CAPABILITY_BENCHMARKED"],
             agent_guidance=(
                 "Run after each audited Task1 optimization chain. Treat "
                 "score_only as a warning that Task1 improved without enough "
                 "evidence-backed candidate diversity. Treat infrastructure_only "
                 "as a signal to expand candidate families or validation slices. "
                 "Use passed as the gate before starting a longer autonomous "
-                "Task1 capability goal."
-            ),
-        ),
-        ScientificToolSpec(
-            name="build-hermes-exploration-schedule",
-            command="build-hermes-exploration-schedule",
-            description=(
-                "Convert Hermes iteration memory into a bounded next-experiment "
-                "schedule, including blocked candidate families and refinement "
-                "targets for positive or near-miss signals."
-            ),
-            risk_level="artifact_write",
-            required_inputs=[
-                "memory_json_path",
-                "output_path",
-            ],
-            produced_artifacts=[
-                "hermes_exploration_schedule_json",
-                "blocked_candidate_families",
-                "candidate_generator",
-                "promotion_gate",
-            ],
-            state_hints=["HERMES_EXPLORATION_SCHEDULE_BUILT"],
-            agent_guidance=(
-                "Run after build-hermes-iteration-memory. Use the resulting "
-                "schedule to decide whether to refine a positive signal, reprobe "
-                "a near miss, or expand candidate space. Do not repeat blocked "
-                "candidate families unless a smoke test supplies new evidence."
+                "Task1 capability goal. This evaluates the current Claude SDK "
+                "agent substrate."
             ),
         ),
         ScientificToolSpec(
@@ -164,7 +143,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             command="generate-task1-candidate-families",
             description=(
                 "Generate bounded Task1 CandidateFamilyCard artifacts from a "
-                "Hermes Task1 capability benchmark and runtime audit-chain report."
+                "Task1 capability benchmark and runtime audit-chain report."
             ),
             risk_level="artifact_write",
             required_inputs=[
@@ -181,7 +160,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             agent_guidance=(
                 "Use when Task1 capability benchmark returns infrastructure_only "
                 "or stagnated. Treat generated cards as bounded candidate-family "
-                "hypotheses that must be sandboxed before heartbeat promotion."
+                "hypotheses that must be sandboxed before promotion."
             ),
         ),
         ScientificToolSpec(
@@ -202,8 +181,86 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             state_hints=["TASK1_CANDIDATE_FAMILY_SANDBOX_PLANNED"],
             agent_guidance=(
                 "Run immediately after candidate-family generation. Planned "
-                "items can be fed into bounded Hermes batch candidates; blocked "
+                "items can be fed into bounded Claude SDK agent iterations; blocked "
                 "items should be revised or routed to executor authoring."
+            ),
+        ),
+        ScientificToolSpec(
+            name="materialize-candidate-family-item",
+            command="materialize-candidate-family-item",
+            description=(
+                "Convert one planned Task1 candidate-family sandbox item into "
+                "an ALGORITHM_CANDIDATES_COMPILED artifact consumable by "
+                "run-hypothesis-lab."
+            ),
+            risk_level="artifact_write",
+            required_inputs=[
+                "sandbox_report_path",
+                "output_path",
+            ],
+            produced_artifacts=[
+                "algorithm_candidates_json",
+                "selected_candidate_family_id",
+                "agent_runtime_handoff",
+            ],
+            state_hints=["ALGORITHM_CANDIDATES_COMPILED"],
+            agent_guidance=(
+                "Use after run-candidate-family-sandbox and before "
+                "run-hypothesis-lab. This is the bounded bridge from generated "
+                "candidate-family plans into executable Hypothesis Lab candidates."
+            ),
+        ),
+        ScientificToolSpec(
+            name="build-hypothesis-lab-next-policy",
+            command="build-hypothesis-lab-next-policy",
+            description=(
+                "Convert Hypothesis Lab failure memory or run reports into a "
+                "next-step policy for the Claude SDK agent loop."
+            ),
+            risk_level="artifact_write",
+            required_inputs=[
+                "output_path",
+                "failure_memory_path_or_hypothesis_lab_report_path",
+            ],
+            produced_artifacts=[
+                "hypothesis_lab_next_policy_json",
+                "next_action",
+                "next_command",
+                "learning_objective",
+            ],
+            state_hints=["HYPOTHESIS_LAB_NEXT_POLICY_BUILT"],
+            agent_guidance=(
+                "Run after each Hypothesis Lab sandbox result so negative and "
+                "positive evidence changes the next agent policy instead of "
+                "being left for a human supervisor to interpret."
+            ),
+        ),
+        ScientificToolSpec(
+            name="record-agent-runtime-issue",
+            command="record-agent-runtime-issue",
+            description=(
+                "Record a structured Claude SDK runtime issue through the "
+                "controlled pde-agent CLI instead of letting the agent write "
+                "free-form files."
+            ),
+            risk_level="artifact_write",
+            required_inputs=[
+                "output_path",
+                "failed_command",
+                "stderr_summary",
+                "next_action",
+            ],
+            produced_artifacts=[
+                "runtime_issue_json",
+                "failed_command",
+                "likely_schema_gap",
+                "next_action",
+            ],
+            state_hints=["AGENT_RUNTIME_ISSUE_RECORDED"],
+            agent_guidance=(
+                "Use exactly once when an allowed closure-loop command fails. "
+                "After recording the issue, stop instead of probing help commands "
+                "or trying alternate shell diagnostics."
             ),
         ),
         ScientificToolSpec(
@@ -211,7 +268,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             command="evaluate-candidate-factory-capability",
             description=(
                 "Evaluate whether generated Task1 candidate families added "
-                "diverse executable search surface for Hermes."
+                "diverse executable search surface for the Claude SDK agent."
             ),
             risk_level="read_only",
             required_inputs=[
@@ -227,17 +284,17 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ],
             state_hints=["TASK1_CANDIDATE_FACTORY_CAPABILITY_EVALUATED"],
             agent_guidance=(
-                "Use before restarting heartbeat after candidate-space exhaustion. "
+                "Use before restarting agent iteration after candidate-space exhaustion. "
                 "A passed report means the next long run has new bounded candidate "
                 "surface; a failed report means generate or revise families first."
             ),
         ),
         ScientificToolSpec(
-            name="build-hermes-research-directive",
-            command="build-hermes-research-directive",
+            name="build-agent-research-directive",
+            command="build-agent-research-directive",
             description=(
-                "Build a higher-level Hermes research directive from Task1 "
-                "capability and candidate-factory evidence."
+                "Build a higher-level Claude SDK agent research directive from "
+                "Task1 capability and candidate-factory evidence."
             ),
             risk_level="read_only",
             required_inputs=[
@@ -252,18 +309,18 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "learning_objective",
                 "hypothesis_candidate_options",
             ],
-            state_hints=["HERMES_RESEARCH_DIRECTIVE_BUILT"],
+            state_hints=["AGENT_RESEARCH_DIRECTIVE_BUILT"],
             agent_guidance=(
                 "Use after capability or candidate-factory evaluation. The "
-                "directive should guide the next Hermes run at the research-plan "
-                "level, not bypass sandbox or promotion gates."
+                "directive should guide the next Claude SDK agent run at the "
+                "research-plan level, not bypass sandbox or promotion gates."
             ),
         ),
         ScientificToolSpec(
             name="evaluate-research-directive-followthrough",
             command="evaluate-research-directive-followthrough",
             description=(
-                "Evaluate whether a runtime audit-chain followed a Hermes "
+                "Evaluate whether a runtime audit-chain followed a legacy "
                 "research directive and preserved audit cleanliness."
             ),
             risk_level="read_only",
@@ -279,19 +336,19 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "audit_clean",
             ],
             state_hints=[
-                "HERMES_RESEARCH_DIRECTIVE_FOLLOWTHROUGH_EVALUATED"
+                "AGENT_RESEARCH_DIRECTIVE_FOLLOWTHROUGH_EVALUATED"
             ],
             agent_guidance=(
-                "Run after a directive-driven Hermes chain. If followthrough "
+                "Run after a directive-driven compatibility chain. If followthrough "
                 "fails, revise directive routing before running more parameter "
                 "search."
             ),
         ),
         ScientificToolSpec(
-            name="build-hermes-meta-research-directive",
-            command="build-hermes-meta-research-directive",
+            name="build-agent-meta-research-directive",
+            command="build-agent-meta-research-directive",
             description=(
-                "Route Hermes from experiment execution toward research "
+                "Route the Claude SDK agent from experiment execution toward research "
                 "organization by turning followthrough, chain, Task1, and "
                 "candidate-factory evidence into the next bounded directive."
             ),
@@ -309,18 +366,19 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "research_focus",
                 "candidate_generator",
             ],
-            state_hints=["HERMES_META_RESEARCH_DIRECTIVE_BUILT"],
+            state_hints=["AGENT_META_RESEARCH_DIRECTIVE_BUILT"],
             agent_guidance=(
                 "Use after evaluating directive followthrough. It chooses "
-                "whether Hermes should continue, resolve guard conflict, or "
-                "expand candidate space before launching the next runtime chain."
+                "whether the Claude SDK agent should continue, resolve guard "
+                "conflict, or expand candidate space before launching the next "
+                "runtime chain."
             ),
         ),
         ScientificToolSpec(
             name="build-repair-policy-summary",
             command="build-repair-policy-summary",
             description=(
-                "Summarize converged and nonconverged Hermes audit repairs into "
+                "Summarize converged and nonconverged audit repairs into "
                 "a compact policy artifact for the next planning round."
             ),
             risk_level="read_only",
@@ -332,12 +390,12 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "repair_error_stats",
                 "recommended_actions",
             ],
-            state_hints=["HERMES_REPAIR_POLICY_SUMMARY_BUILT"],
+            state_hints=["AGENT_REPAIR_POLICY_SUMMARY_BUILT"],
             agent_guidance=(
                 "Run after runtime audit-chain or auto-repair events and before "
                 "candidate planning. Use recommended_actions to avoid repeating "
                 "nonconverged repairs, and keep converged repair paths as positive "
-                "memory for the next Hermes heartbeat."
+                "memory for the next Claude Agent SDK runtime pass."
             ),
         ),
         ScientificToolSpec(
@@ -345,13 +403,14 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             command="plan-hypothesis-candidates",
             description=(
                 "Convert doom-loop guard, KPI memory, and candidate registry "
-                "metadata into an auditable Hermes candidate-family schedule."
+                "metadata into an auditable candidate-family schedule."
             ),
             risk_level="read_only",
             required_inputs=["candidate_generator", "doom_loop_report_path"],
             produced_artifacts=[
                 "candidate_plan_json",
                 "candidate_generator_schedule",
+                "hypothesis_lab_policy_constraints",
                 "audit_repair_tasks",
                 "audit_repair_policies",
                 "repair_policy_recommended_actions",
@@ -362,24 +421,27 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ],
             state_hints=["HYPOTHESIS_CANDIDATE_PLAN_BUILT"],
             agent_guidance=(
-                "Use between KPI/doom-loop checks and heartbeat execution. If "
+                "Use between KPI/doom-loop checks and Claude SDK execution. If "
                 "expansion_required is true, route to strategy or literature "
                 "expansion instead of repeatedly sampling depleted local families. "
                 "Inspect candidate_generator_schedule, audit_repair_policies, and "
                 "repair_nonconvergence_errors directly from the command payload "
-                "before launching heartbeat. If a repair_policy_summary_path is "
+                "before launching the next SDK run. If a repair_policy_summary_path is "
                 "available, pass it in so recommended_actions and converged repair "
                 "memory are preserved. Preserve repair_convergence_errors so proven "
                 "audit-repair paths remain available as positive memory. If a prior "
                 "research_chronicle_path exists, pass it so the Repair Policy Memory "
-                "section can constrain the next candidate plan."
+                "section can constrain the next candidate plan. After "
+                "build-hypothesis-lab-next-policy, pass "
+                "--hypothesis-lab-next-policy-path so the next candidate plan "
+                "uses the sandbox evidence rather than restarting from defaults."
             ),
         ),
         ScientificToolSpec(
             name="build-fno-training-harness-contract",
             command="build-fno-training-harness-contract",
             description=(
-                "Build a Hermes-facing FNO training action contract with explicit "
+                "Build a Claude SDK agent-facing FNO training action contract with explicit "
                 "data paths, budget parameters, output paths, and optional next "
                 "actions. This command does not run training."
             ),
@@ -399,7 +461,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ],
             state_hints=["FNO_TRAINING_HARNESS_CONTRACT_BUILT"],
             agent_guidance=(
-                "Use before FNO training optimization when Hermes needs to choose "
+                "Use before FNO training optimization when the agent needs to choose "
                 "actions itself. The contract is not a fixed pipeline: inspect "
                 "available_actions, execute only the selected action command, then "
                 "choose the next action from next_action_options. Do not create "
@@ -462,33 +524,6 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ),
         ),
         ScientificToolSpec(
-            name="audit-hermes-availability",
-            command="audit-hermes-availability",
-            description=(
-                "Build a Hermes availability matrix from CLI exposure, scientific "
-                "tool catalog exposure, required commands, and real canary reports."
-            ),
-            risk_level="read_only",
-            required_inputs=[
-                "tool_catalog_path",
-                "canary_report_paths",
-                "cli_commands",
-                "required_commands",
-            ],
-            produced_artifacts=[
-                "availability_audit_path",
-                "availability_matrix",
-                "missing_required_commands",
-                "canary_evidence",
-            ],
-            state_hints=["AGENT_RUNTIME_AVAILABILITY_AUDITED"],
-            agent_guidance=(
-                "Compatibility alias for Hermes availability checks. Prefer "
-                "audit-agent-runtime-availability for the Claude Agent SDK-first "
-                "runtime path."
-            ),
-        ),
-        ScientificToolSpec(
             name="audit-agent-runtime-availability",
             command="audit-agent-runtime-availability",
             description=(
@@ -543,8 +578,9 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             state_hints=["AGENT_RUNTIME_CONTRACT_BUILT"],
             agent_guidance=(
                 "Use this before starting a claude_agent_sdk run. The contract "
-                "makes Claude Agent SDK the primary runtime while keeping Hermes "
-                "as a compatibility backend. Keep Bash restricted to "
+                "makes Claude Agent SDK the active agent substrate. Legacy "
+                "runtime commands are compatibility only and must not be used "
+                "for current Task1 training iterations. Keep Bash restricted to "
                 "uv run --frozen pde-agent commands."
             ),
         ),
@@ -636,6 +672,75 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ),
         ),
         ScientificToolSpec(
+            name="build-claude-hypothesis-lab-closure-task",
+            command="build-claude-hypothesis-lab-closure-task",
+            description=(
+                "Build a Claude Agent SDK task prompt and expected-artifact "
+                "checklist for closing one candidate-family -> Hypothesis Lab "
+                "sandbox -> next-policy loop."
+            ),
+            risk_level="artifact_write",
+            required_inputs=[
+                "output_dir",
+                "workspace_dir",
+                "runtime_contract_path",
+                "tool_catalog_path",
+                "candidate_family_sandbox_path",
+                "context_path",
+                "target_path",
+            ],
+            produced_artifacts=[
+                "claude_agent_prompt_md",
+                "expected_artifacts_json",
+                "required_command_flow",
+            ],
+            state_hints=["CLAUDE_HYPOTHESIS_LAB_CLOSURE_TASK_BUILT"],
+            agent_guidance=(
+                "Use this to hand the closure loop to Claude SDK itself. The "
+                "generated prompt should be executed by run-claude-agent-sdk-runtime; "
+                "Codex should not manually replace the agent for this loop."
+            ),
+        ),
+        ScientificToolSpec(
+            name="build-claude-literature-candidate-closure-task",
+            command="build-claude-literature-candidate-closure-task",
+            description=(
+                "Build a Claude Agent SDK task prompt and expected-artifact "
+                "checklist for turning a parsed literature artifact into "
+                "agent-authored AlgorithmCard v2 candidates, validating them, "
+                "compiling candidates, and routing them through the literature "
+                "algorithm v2 registry pipeline."
+            ),
+            risk_level="artifact_write",
+            required_inputs=[
+                "output_dir",
+                "workspace_dir",
+                "runtime_contract_path",
+                "tool_catalog_path",
+                "paper_parse_path",
+                "operator_family",
+                "registry_path",
+                "current_best_score",
+            ],
+            produced_artifacts=[
+                "claude_agent_prompt_md",
+                "expected_artifacts_json",
+                "agent_algorithm_cards_json",
+                "algorithm_card_v2_audit_json",
+                "algorithm_candidates_json",
+                "literature_registry_json",
+            ],
+            state_hints=["CLAUDE_LITERATURE_CANDIDATE_CLOSURE_TASK_BUILT"],
+            agent_guidance=(
+                "Use this after MinerU parsing when candidate space is narrow. "
+                "The generated task lets Claude SDK author grounded AlgorithmCard "
+                "JSON but still forces validation, compilation, and registry "
+                "gates before any strategy can be internalized. Treat output_dir "
+                "as a reusable agent workspace; do not create new timestamped "
+                "directories for each retry unless the supervisor explicitly asks."
+            ),
+        ),
+        ScientificToolSpec(
             name="build-hypothesis-algorithm-design",
             command="build-hypothesis-algorithm-design",
             description=(
@@ -656,7 +761,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "Use when candidate-family search is saturated or failure memory "
                 "shows repeated local parameter replacement. The output must be "
                 "validated before sandbox execution; inspect diversity_audit so "
-                "Hermes does not produce many variants of the same mechanism. Pass "
+                "the agent does not produce many variants of the same mechanism. Pass "
                 "FNO/training evidence with --evidence-path; do not disguise "
                 "training evidence as a literature card."
             ),
@@ -680,7 +785,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             agent_guidance=(
                 "Run immediately after build-hypothesis-algorithm-design. Only "
                 "route accepted designs to sandbox planning; rejected designs need "
-                "repair rather than heartbeat execution."
+                "repair rather than runtime execution."
             ),
         ),
         ScientificToolSpec(
@@ -707,7 +812,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             state_hints=["HYPOTHESIS_ALGORITHM_EVIDENCE_RECORDED"],
             agent_guidance=(
                 "Run after any sandboxed algorithm blueprint. Feed rejected "
-                "mechanism families back into the next designer run so Hermes "
+                "mechanism families back into the next designer run so the agent "
                 "does not repeat non-improving algorithm mechanisms."
             ),
         ),
@@ -831,108 +936,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             agent_guidance=(
                 "Use after changing Hypothesis Lab memory, KPI, planner, or "
                 "handoff logic. It should prove deprioritized trace events alter "
-                "candidate generation before running expensive Hermes batches."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-hermes-runtime-memory-bridge-smoke",
-            command="run-hermes-runtime-memory-bridge-smoke",
-            description=(
-                "Run a tiny runtime plus audit acceptance smoke proving repair "
-                "policy memory reaches heartbeat batch diagnostics."
-            ),
-            risk_level="sandbox",
-            required_inputs=[
-                "trace_path",
-                "output_dir",
-                "initial_submission_dir",
-                "task1_test_path",
-                "task1_target_path",
-                "audit_repair_tasks_path",
-            ],
-            produced_artifacts=[
-                "runtime_memory_bridge_smoke_json",
-                "runtime_loop_report_json",
-                "runtime_closed_loop_audit_json",
-                "heartbeat_report_json",
-            ],
-            state_hints=["HERMES_RUNTIME_MEMORY_BRIDGE_SMOKE_RAN"],
-            agent_guidance=(
-                "Use after changing KPI, repair policy, runtime, heartbeat, or "
-                "batch memory plumbing. The smoke should pass only when repair "
-                "policy recommended_actions appear in heartbeat batch "
-                "candidate_diagnostics.memory_constraints."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-hermes-auto-repair-memory-acceptance-smoke",
-            command="run-hermes-auto-repair-memory-acceptance-smoke",
-            description=(
-                "Run an end-to-end acceptance smoke proving a memory-bridge audit "
-                "failure auto-repairs and is internalized through KPI, repair "
-                "policy, research chronicle, and candidate planner memory."
-            ),
-            risk_level="sandbox",
-            required_inputs=[
-                "trace_path",
-                "output_dir",
-                "initial_submission_dir",
-                "task1_test_path",
-                "task1_target_path",
-            ],
-            produced_artifacts=[
-                "auto_repair_memory_acceptance_smoke_json",
-                "runtime_audit_chain_report_json",
-                "hypothesis_kpi_report_json",
-                "repair_policy_summary_json",
-                "research_chronicle_path",
-                "candidate_plan_json",
-                "planner_internalized",
-                "strict_audit_passed",
-            ],
-            state_hints=["HERMES_AUTO_REPAIR_MEMORY_ACCEPTANCE_SMOKE_RAN"],
-            agent_guidance=(
-                "Use after changing auto-repair, KPI, repair policy, chronicle, "
-                "or planner memory. The smoke should pass only when an injected "
-                "runtime_memory_bridge_smoke_gate is auto-repaired and then "
-                "visible to downstream planning constraints."
-            ),
-        ),
-        ScientificToolSpec(
-            name="audit-hermes-hypothesis-lab-infrastructure",
-            command="audit-hermes-hypothesis-lab-infrastructure",
-            description=(
-                "Audit whether Hypothesis Lab memory, auto-repair acceptance, "
-                "preflight audit-chain gating, and runbook documentation are "
-                "present enough to treat the path as Hermes infrastructure."
-            ),
-            risk_level="read_only",
-            required_inputs=[
-                "acceptance_smoke_path",
-                "preflight_chain_report_path",
-                "runbook_path",
-                "output_path",
-            ],
-            produced_artifacts=[
-                "infrastructure_audit_json",
-                "stability_chain_report_path",
-                "candidate_pressure_chain_report_path",
-                "checks",
-                "errors",
-                "failed_check_count",
-            ],
-            state_hints=["HERMES_HYPOTHESIS_LAB_INFRASTRUCTURE_AUDITED"],
-            agent_guidance=(
-                "Use after run-hermes-auto-repair-memory-acceptance-smoke and "
-                "a run-hermes-runtime-audit-chain invocation with "
-                "preflight_acceptance_smoke_path. The audit checks that the "
-                "acceptance report passed, the audit-chain gate consumed it, "
-                "the run completed enough iterations, and the runbook documents "
-                "the required gate sequence. When available, also pass "
-                "stability_chain_report_path and candidate_pressure_chain_report_path "
-                "from dual-preflight repeated runs; the audit then verifies that "
-                "the gate survived repeated iterations and that a non-postprocess "
-                "candidate family was actually attempted under pressure."
+                "candidate generation before running expensive agent batches."
             ),
         ),
         ScientificToolSpec(
@@ -950,6 +954,24 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             agent_guidance=(
                 "Use after minerU parsing. The output constrains the agent to "
                 "extract AlgorithmCard v2 candidates with source-unit grounding."
+            ),
+        ),
+        ScientificToolSpec(
+            name="record-agent-algorithm-cards",
+            command="record-agent-algorithm-cards",
+            description=(
+                "Persist agent-authored AlgorithmCard JSON through the controlled "
+                "pde-agent CLI instead of direct file writes."
+            ),
+            risk_level="artifact_write",
+            required_inputs=["cards_json", "output_path"],
+            produced_artifacts=["algorithm_cards_json"],
+            state_hints=["ALGORITHM_CARDS_EXTRACTED"],
+            agent_guidance=(
+                "Use when the agent has constructed grounded AlgorithmCard v2 "
+                "JSON and needs to persist it without free-form Write access. "
+                "Treat it as the only supported persistence path for agent-authored "
+                "algorithm cards."
             ),
         ),
         ScientificToolSpec(
@@ -971,232 +993,11 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             ),
         ),
         ScientificToolSpec(
-            name="run-hermes-heartbeat",
-            command="run-hermes-heartbeat",
-            description="Run guarded multi-batch Hermes candidate optimization.",
-            risk_level="long_running",
-            required_inputs=["initial_submission_dir", "output_dir"],
-            produced_artifacts=["heartbeat_report_json", "iteration_memory_json"],
-            state_hints=["HERMES_HEARTBEAT_RAN"],
-            agent_guidance=(
-                "Use only after checking the trace guard and choosing a learning "
-                "objective. Prefer short batches when testing a new candidate family."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-hermes-runtime-closed-loop",
-            command="run-hermes-runtime-closed-loop",
-            description=(
-                "Run the runtime bridge: trace summary, KPI, doom guard, then "
-                "a guard-aware Hermes heartbeat."
-            ),
-            risk_level="long_running",
-            required_inputs=["trace_path", "initial_submission_dir", "output_dir"],
-            produced_artifacts=[
-                "trace_summary_json",
-                "hypothesis_kpi_report_json",
-                "doom_loop_report_json",
-                "candidate_plan_json",
-                "heartbeat_report_json",
-                "audit_command",
-                "repair_nonconvergence_errors",
-                "audit_repair_policies",
-            ],
-            state_hints=["HERMES_RUNTIME_CLOSED_LOOP_RAN"],
-            agent_guidance=(
-                "Use as the default pre-heartbeat path so Hermes sees recent "
-                "scientific failures before selecting the next candidate family. "
-                "Leave candidate_generator_fallback as auto unless a specific "
-                "fallback family is required by the experiment plan. Pass "
-                "task1_reference_path when legal-reference retesting may be "
-                "needed for target-leakage refinement signals. When a prior "
-                "run returns an evidence_accumulation_plan_path, pass it back "
-                "as evidence_accumulation_plan_path so the next run merges "
-                "previous promotion evidence instead of restarting the strategy "
-                "growth chain. When a runtime audit chain returns "
-                "audit_repair_tasks_path, pass it back as audit_repair_tasks_path "
-                "so the candidate plan repairs the failed audit gate before "
-                "another heartbeat. Inspect audit_repair_policies and "
-                "repair_nonconvergence_errors; if a second-order repair policy "
-                "is active, preserve those signals in the next audit chain. "
-                "Follow the returned audit_command before treating the run as valid."
-            ),
-        ),
-        ScientificToolSpec(
-            name="audit-hermes-runtime-closed-loop",
-            command="audit-hermes-runtime-closed-loop",
-            description=(
-                "Audit a Hermes runtime closed-loop report and verify required "
-                "trace, KPI, doom-loop, and heartbeat artifacts."
-            ),
-            risk_level="read_only",
-            required_inputs=["runtime_report_path", "output_path"],
-            produced_artifacts=[
-                "runtime_closed_loop_audit_json",
-                "audit_errors",
-                "failed_checks",
-            ],
-            state_hints=["HERMES_RUNTIME_CLOSED_LOOP_AUDITED"],
-            agent_guidance=(
-                "Use after every runtime closed-loop smoke or batch run before "
-                "treating the closed loop as valid infrastructure. For long "
-                "heartbeat batches, require a passed learning-constraint smoke "
-                "so trace memory is known to affect candidate generation. The "
-                "audit also enforces learning_constraint_enforcement so avoided "
-                "families are not scheduled or executed. When repair policy "
-                "memory must be trusted, also require runtime_memory_bridge_smoke "
-                "so recommended_actions are known to reach heartbeat batch "
-                "memory_constraints. Inspect audit_errors and failed_checks "
-                "directly from the command payload before choosing the next "
-                "repair path."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-hermes-runtime-audit-chain",
-            command="run-hermes-runtime-audit-chain",
-            description=(
-                "Run repeated Hermes runtime closed-loop iterations with an audit "
-                "gate after every iteration; stop on the first failed audit."
-            ),
-            risk_level="long_running",
-            required_inputs=["trace_path", "initial_submission_dir", "output_dir"],
-            produced_artifacts=[
-                "runtime_audit_chain_report_json",
-                "hypothesis_lab_trace_event",
-                "audit_repair_tasks_json",
-                "repair_convergence",
-                "auto_repair_report_path",
-                "auto_repair_memory_bridge_passed",
-                "auto_repair_repair_policy_recommended_action_count",
-                "auto_repair_batch_memory_constraint_action_count",
-                "preflight_acceptance_smoke_path",
-                "preflight_infrastructure_audit_path",
-            ],
-            state_hints=["HERMES_RUNTIME_AUDIT_CHAIN_RAN"],
-            agent_guidance=(
-                "Use for longer autonomous batches after learning-constraint smoke "
-                "passes. The chain follows each runtime audit_command, carries the "
-                "best submission into the next iteration, and stops if audit fails. "
-                "Pass task1_reference_path so refinement candidates can be retested "
-                "against a legal reference instead of the target data. If the chain "
-                "returns audit_repair_tasks_json, read it before rerunning and pass "
-                "it back as audit_repair_tasks_path so Hermes repairs the failed "
-                "gate instead of repeating the same invalid loop. If repair tasks "
-                "include suggested_command_args, reuse those known arguments and "
-                "resolve any missing_inputs before invoking the next command. "
-                "Inspect repair_convergence; if it is nonconverged, switch repair "
-                "strategy or reload the missing evidence instead of rerunning the "
-                "same repair unchanged. Set auto_repair only when you want the "
-                "chain to immediately execute a supported resolved repair task and "
-                "re-audit in the same run. When auto_repair handles a runtime "
-                "memory-bridge smoke gate, inspect auto_repair_memory_bridge_passed "
-                "and the auto_repair_* action counts before trusting the repair. "
-                "For long autonomous runs, pass preflight_acceptance_smoke_path "
-                "from a passed run-hermes-auto-repair-memory-acceptance-smoke "
-                "report so the chain refuses to start if auto-repair memory "
-                "internalization is stale or broken. After Hermes-facing "
-                "Hypothesis Lab protocol changes, also pass "
-                "preflight_infrastructure_audit_path from a passed real Hermes "
-                "Hypothesis Lab infrastructure canary so long runs cannot begin "
-                "until Hermes itself has executed the infrastructure gate."
-            ),
-        ),
-        ScientificToolSpec(
-            name="resolve-audit-repair-task",
-            command="resolve-audit-repair-task",
-            description=(
-                "Resolve one audit repair task into a runnable CLI argv and "
-                "missing-input report."
-            ),
-            risk_level="read_only",
-            required_inputs=["audit_repair_tasks_path", "output_path"],
-            produced_artifacts=[
-                "repair_task_resolution_json",
-                "argv",
-                "command_string",
-                "missing_inputs",
-                "next_command",
-            ],
-            state_hints=["HERMES_AUDIT_REPAIR_TASK_RESOLVED"],
-            agent_guidance=(
-                "Use after run-hermes-runtime-audit-chain returns "
-                "audit_repair_tasks_json. The resolver reads suggested_command_args, "
-                "builds a uv run --frozen pde-agent argv, and reports missing_inputs. "
-                "Pass --provided-input key=value to fill missing inputs without "
-                "editing the repair task artifact. "
-                "Only run the argv when ready_to_run is true."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-resolved-audit-repair-task",
-            command="run-resolved-audit-repair-task",
-            description=(
-                "Resolve one audit repair task and execute the supported runtime "
-                "closed-loop repair path followed by re-audit."
-            ),
-            risk_level="sandbox",
-            required_inputs=["audit_repair_tasks_path", "output_dir"],
-            produced_artifacts=[
-                "repair_task_run_report_json",
-                "repair_task_resolution_json",
-                "runtime_loop_report_json",
-                "audit_report_json",
-                "runtime_memory_bridge_smoke_json",
-                "smoke_executed",
-                "memory_bridge_passed",
-                "repair_policy_recommended_action_count",
-                "batch_memory_constraint_action_count",
-                "decision",
-            ],
-            state_hints=["HERMES_AUDIT_REPAIR_TASK_RAN"],
-            agent_guidance=(
-                "Use when audit_repair_tasks_json has next_command "
-                "run-hermes-runtime-closed-loop or "
-                "run-hermes-runtime-memory-bridge-smoke and you want Hermes to "
-                "repair without manually executing resolver argv. Runtime closed-loop "
-                "tasks are followed by re-audit; memory-bridge smoke tasks produce "
-                "runtime_memory_bridge_smoke_json for later audited runtime reuse. "
-                "Provide missing inputs with --provided-input key=value. Unsupported "
-                "next_command values are reported without arbitrary command execution."
-            ),
-        ),
-        ScientificToolSpec(
-            name="refine-algorithm-candidate",
-            command="refine-algorithm-candidate",
-            description=(
-                "Prepare a constrained refinement handoff for candidates that "
-                "showed promising diagnostic score but failed the promotion gate."
-            ),
-            risk_level="artifact_write",
-            required_inputs=["registry_summary_path", "output_path"],
-            produced_artifacts=["candidate_refinement_json"],
-            state_hints=["HERMES_ALGORITHM_CANDIDATE_REFINEMENT_PREPARED"],
-            agent_guidance=(
-                "Use when a registry summary returns refine_with_legal_reference. "
-                "The artifact tells Hermes to rerun the candidate with a legal "
-                "reference split and reject target_as_reference/local_validation_only "
-                "evidence before promotion."
-            ),
-        ),
-        ScientificToolSpec(
-            name="run-hermes-literature-strategy-expansion",
-            command="run-hermes-literature-strategy-expansion",
-            description="Route literature algorithm candidates into sandbox or strategy growth.",
-            risk_level="artifact_write",
-            required_inputs=["algorithm_candidates_path", "workspace_dir"],
-            produced_artifacts=["expansion_report_json", "sandbox_queue"],
-            state_hints=["HERMES_LITERATURE_STRATEGY_EXPANSION_RAN"],
-            agent_guidance=(
-                "Use after AlgorithmCard extraction. Do not promote external ideas "
-                "without sandbox evidence."
-            ),
-        ),
-        ScientificToolSpec(
             name="run-candidate-expansion-handoff",
             command="run-candidate-expansion-handoff",
             description=(
                 "Execute an exhausted candidate-plan handoff by building local "
-                "asset algorithm candidates and running Hermes literature "
+                "asset algorithm candidates and running literature "
                 "strategy expansion."
             ),
             risk_level="artifact_write",
@@ -1206,7 +1007,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "algorithm_candidates_json",
                 "expansion_report_json",
             ],
-            state_hints=["HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN"],
+            state_hints=["AGENT_CANDIDATE_EXPANSION_HANDOFF_RAN"],
             agent_guidance=(
                 "Use when plan-hypothesis-candidates reports "
                 "expansion_required. This turns the handoff into concrete "
@@ -1217,7 +1018,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             name="run-expansion-sandbox-queue",
             command="run-expansion-sandbox-queue",
             description=(
-                "Advance a Hermes literature expansion sandbox queue through "
+                "Advance a literature expansion sandbox queue through "
                 "short, controlled Hypothesis Lab sandboxes or record explicit "
                 "skip outcomes."
             ),
@@ -1233,16 +1034,16 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "hypothesis_lab_sandbox_reports",
                 "failure_memory_json",
             ],
-            state_hints=["HERMES_EXPANSION_SANDBOX_QUEUE_RAN"],
+            state_hints=["AGENT_EXPANSION_SANDBOX_QUEUE_RAN"],
             agent_guidance=(
                 "Use after run-candidate-expansion-handoff or "
-                "run-hermes-literature-strategy-expansion. Only short "
+                "the compatibility literature-strategy-expansion path. Only short "
                 "Hypothesis Lab compatible plans are executed automatically; "
                 "checkpoint and custom executor plans must be skipped with "
                 "recorded reason codes unless a separate bounded executor path "
                 "has been prepared. For legal-reference refinement retests, pass "
                 "selected_algorithm_candidate_id from the candidate refinement "
-                "artifact so Hermes retests the exact candidate that triggered "
+                "artifact so the agent retests the exact candidate that triggered "
                 "the refinement gate."
             ),
         ),
@@ -1267,7 +1068,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "literature_registry_event_json",
                 "literature_registry_json",
             ],
-            state_hints=["HERMES_EXPANSION_SANDBOX_QUEUE_EVALUATED"],
+            state_hints=["AGENT_EXPANSION_SANDBOX_QUEUE_EVALUATED"],
             agent_guidance=(
                 "Use after run-expansion-sandbox-queue. This is the gate that "
                 "prevents local sandbox wins from being internalized unless they "
@@ -1279,7 +1080,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             command="record-promoted-algorithm-strategy-proposal",
             description=(
                 "Convert a promoted AlgorithmCard candidate promotion artifact "
-                "into the standard strategy-growth proposal artifact that Hermes "
+                "into the standard strategy-growth proposal artifact that the agent "
                 "can rubric, ledger, and skill-promote."
             ),
             risk_level="artifact_write",
@@ -1287,10 +1088,10 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             produced_artifacts=["strategy_proposal_json"],
             state_hints=["STRATEGY_PROPOSAL_RECORDED"],
             agent_guidance=(
-                "Use when summarize-literature-registry-for-hermes reports a "
+                "Use when a literature registry summary reports a "
                 "promoted candidate with candidate_promotion_path. This preserves "
                 "the candidate grounding, sandbox evidence paths, and promotion "
-                "metrics instead of asking Hermes to hand-author proposal fields."
+                "metrics instead of asking the agent to hand-author proposal fields."
             ),
         ),
         ScientificToolSpec(
@@ -1307,7 +1108,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
             state_hints=["STRATEGY_EVIDENCE_SUMMARY_BUILT"],
             agent_guidance=(
                 "Use after record-promoted-algorithm-strategy-proposal when "
-                "Hermes needs a rubric-compatible evidence summary. This keeps "
+                "the agent needs a rubric-compatible evidence summary. This keeps "
                 "the candidate promotion evidence count intact; if only one "
                 "window was tested, the downstream rubric must decide whether "
                 "that is sufficient. Pass repeated "
@@ -1359,7 +1160,7 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "bounded_executor_template_json",
                 "bounded_executor_authoring_task_json",
             ],
-            state_hints=["HERMES_EXPANSION_BLOCKED_EXECUTOR_TASKS_PREPARED"],
+            state_hints=["AGENT_EXPANSION_BLOCKED_EXECUTOR_TASKS_PREPARED"],
             agent_guidance=(
                 "Use when a registry summary reports executor_gap_blocks_algorithm_family. "
                 "This prepares a constrained edit task; it does not authorize "
@@ -1470,24 +1271,44 @@ def default_scientific_tool_specs() -> list[ScientificToolSpec]:
                 "allowed executor.py. This command does not author code; it "
                 "audits, measures, applies promotion rubric, and writes failure "
                 "or promotion evidence back to the registry. Pass trace_path "
-                "when available so Hermes can learn from the completion "
+                "when available so the agent can learn from the completion "
                 "decision in later iterations."
             ),
         ),
     ]
+    if include_compatibility_tools:
+        return specs
+    return [spec for spec in specs if not _is_legacy_tool(spec)]
 
 
 def build_scientific_tool_catalog(
     *,
     output_path: str | Path | None,
     force: bool,
+    include_compatibility_tools: bool = False,
 ) -> dict[str, Any]:
     output_file = Path(output_path) if output_path is not None else None
     _guard_output(output_file, force=force)
-    tools = [spec.to_dict() for spec in default_scientific_tool_specs()]
+    tools = [
+        spec.to_dict()
+        for spec in default_scientific_tool_specs(
+            include_compatibility_tools=include_compatibility_tools
+        )
+    ]
     catalog = {
         "schema_version": 1,
         "state_hint": STATE_HINT,
+        "primary_agent_runtime": "claude_agent_sdk",
+        "legacy_agent_runtimes": ["legacy"] if include_compatibility_tools else [],
+        "runtime_policy": {
+            "active_substrate": "claude_agent_sdk",
+            "legacy_substrates": ["legacy"] if include_compatibility_tools else [],
+            "legacy_tool_visibility": (
+                "hidden unless include_compatibility_tools is explicitly enabled"
+            ),
+            "active_task1_training_entrypoint": "run-claude-agent-sdk-runtime",
+        },
+        "compatibility_tools_included": include_compatibility_tools,
         "tool_count": len(tools),
         "tools": tools,
         "risk_levels": sorted(VALID_RISK_LEVELS),
@@ -1495,6 +1316,12 @@ def build_scientific_tool_catalog(
     }
     _write_optional_json(output_file, catalog)
     return catalog
+
+
+def _is_legacy_tool(spec: ScientificToolSpec) -> bool:
+    if spec.runtime_status == "deprecated_compatibility":
+        return True
+    return "legacy" in spec.name.lower() or "legacy" in spec.command.lower()
 
 
 def _guard_output(path: Path | None, *, force: bool) -> None:

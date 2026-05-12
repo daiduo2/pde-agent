@@ -1,6 +1,5 @@
 """Plan the next spectral residual sweep from promotion feedback."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

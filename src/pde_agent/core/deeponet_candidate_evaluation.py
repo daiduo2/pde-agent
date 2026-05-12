@@ -1,6 +1,5 @@
 """Evaluate DeepONet candidate predictions with local diagnostics."""
 
-from __future__ import annotations
 
 import json
 from contextlib import suppress

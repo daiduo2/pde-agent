@@ -1,6 +1,5 @@
 """Local strategy-skill registry for Hermes strategy reuse."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

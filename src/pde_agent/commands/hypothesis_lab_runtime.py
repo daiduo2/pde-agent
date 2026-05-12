@@ -7,6 +7,10 @@ from typing import Any
 from pde_agent.core.hypothesis_doom_loop import (
     STATE_HINT as DOOM_LOOP_STATE_HINT,
 )
+from pde_agent.core.availability_audit import (
+    STATE_HINT as AGENT_RUNTIME_AVAILABILITY_STATE_HINT,
+)
+from pde_agent.core.availability_audit import audit_agent_runtime_availability
 from pde_agent.core.hypothesis_doom_loop import check_hypothesis_doom_loop
 from pde_agent.core.hypothesis_candidate_planner import (
     STATE_HINT as CANDIDATE_PLAN_STATE_HINT,
@@ -33,37 +37,6 @@ from pde_agent.core.hypothesis_algorithm_designer_stability import (
 )
 from pde_agent.core.hypothesis_kpi import STATE_HINT as KPI_STATE_HINT
 from pde_agent.core.hypothesis_kpi import build_hypothesis_kpi_report
-from pde_agent.core.hermes_learning_constraint_smoke import (
-    STATE_HINT as LEARNING_CONSTRAINT_SMOKE_STATE_HINT,
-)
-from pde_agent.core.hermes_learning_constraint_smoke import (
-    run_hypothesis_learning_constraint_smoke,
-)
-from pde_agent.core.hermes_runtime_memory_bridge_smoke import (
-    STATE_HINT as HERMES_RUNTIME_MEMORY_BRIDGE_SMOKE_STATE_HINT,
-)
-from pde_agent.core.hermes_runtime_memory_bridge_smoke import (
-    run_hermes_runtime_memory_bridge_smoke,
-)
-from pde_agent.core.hermes_auto_repair_memory_acceptance_smoke import (
-    STATE_HINT as HERMES_AUTO_REPAIR_MEMORY_ACCEPTANCE_SMOKE_STATE_HINT,
-)
-from pde_agent.core.hermes_auto_repair_memory_acceptance_smoke import (
-    run_hermes_auto_repair_memory_acceptance_smoke,
-)
-from pde_agent.core.hermes_hypothesis_lab_infrastructure_audit import (
-    STATE_HINT as HERMES_HYPOTHESIS_LAB_INFRASTRUCTURE_AUDIT_STATE_HINT,
-)
-from pde_agent.core.hermes_hypothesis_lab_infrastructure_audit import (
-    audit_hermes_hypothesis_lab_infrastructure,
-)
-from pde_agent.core.hermes_availability_audit import (
-    STATE_HINT as HERMES_AVAILABILITY_AUDIT_STATE_HINT,
-)
-from pde_agent.core.hermes_availability_audit import (
-    audit_agent_runtime_availability,
-    audit_hermes_availability,
-)
 from pde_agent.core.hypothesis_lab_trace import (
     HypothesisLabTraceStore,
     SUMMARY_STATE_HINT,
@@ -71,38 +44,6 @@ from pde_agent.core.hypothesis_lab_trace import (
 )
 from pde_agent.core.hypothesis_lab import run_blueprint_sandbox
 from pde_agent.core.json_output import success_payload
-from pde_agent.core.hermes_runtime_closed_loop import (
-    STATE_HINT as HERMES_RUNTIME_CLOSED_LOOP_STATE_HINT,
-)
-from pde_agent.core.hermes_runtime_closed_loop import run_hermes_runtime_closed_loop
-from pde_agent.core.hermes_runtime_closed_loop_audit import (
-    STATE_HINT as HERMES_RUNTIME_CLOSED_LOOP_AUDIT_STATE_HINT,
-)
-from pde_agent.core.hermes_runtime_closed_loop_audit import (
-    audit_hermes_runtime_closed_loop,
-)
-from pde_agent.core.hermes_runtime_audit_chain import (
-    REPAIR_TASK_RESOLUTION_STATE_HINT,
-    REPAIR_TASK_RUN_STATE_HINT,
-    STATE_HINT as HERMES_RUNTIME_AUDIT_CHAIN_STATE_HINT,
-)
-from pde_agent.core.hermes_runtime_audit_chain import (
-    resolve_audit_repair_task,
-    run_resolved_audit_repair_task,
-    run_hermes_runtime_audit_chain,
-)
-from pde_agent.core.hermes_repair_policy_summary import (
-    STATE_HINT as HERMES_REPAIR_POLICY_SUMMARY_STATE_HINT,
-)
-from pde_agent.core.hermes_repair_policy_summary import (
-    build_repair_policy_summary,
-)
-from pde_agent.core.hermes_task1_agent_capability_benchmark import (
-    STATE_HINT as HERMES_TASK1_AGENT_CAPABILITY_BENCHMARK_STATE_HINT,
-)
-from pde_agent.core.hermes_task1_agent_capability_benchmark import (
-    evaluate_hermes_task1_agent_capability,
-)
 from pde_agent.core.pde_literature_extraction_skill import (
     STATE_HINT as PDE_LITERATURE_EXTRACTION_SKILL_STATE_HINT,
 )
@@ -135,6 +76,9 @@ def build_fno_training_harness_contract_command(
     output_path: str,
     workspace_dir: str,
     source_path: str,
+    baseline_prediction_path: str | None = None,
+    task1_test_path: str | None = None,
+    task1_target_path: str | None = None,
     previous_evidence_paths: list[str],
     dataset_key: str,
     train_sample_limit: int,
@@ -150,6 +94,7 @@ def build_fno_training_harness_contract_command(
     widths: list[int],
     depths: list[int],
     loss_types: list[str],
+    normalizations: list[str] | None = None,
     forecast_steps_values: list[int],
     train_steps_values: list[int],
     force: bool,
@@ -158,6 +103,9 @@ def build_fno_training_harness_contract_command(
         output_path=Path(output_path),
         workspace_dir=Path(workspace_dir),
         source_path=Path(source_path),
+        baseline_prediction_path=Path(baseline_prediction_path) if baseline_prediction_path else None,
+        task1_test_path=Path(task1_test_path) if task1_test_path else None,
+        task1_target_path=Path(task1_target_path) if task1_target_path else None,
         previous_evidence_paths=[Path(path) for path in previous_evidence_paths],
         dataset_key=dataset_key,
         train_sample_limit=train_sample_limit,
@@ -173,6 +121,7 @@ def build_fno_training_harness_contract_command(
         widths=widths,
         depths=depths,
         loss_types=loss_types,
+        normalizations=normalizations,
         forecast_steps_values=forecast_steps_values,
         train_steps_values=train_steps_values,
         force=force,
@@ -206,10 +155,16 @@ def plan_fno_training_candidates_command(
     widths: list[int],
     depths: list[int],
     loss_types: list[str],
+    normalizations: list[str] | None = None,
     forecast_steps_values: list[int],
     train_steps_values: list[int],
+    search_guidance: list[str] | None = None,
     force: bool,
 ) -> dict[str, object]:
+    parsed_search_guidance = _parse_json_objects(
+        values=search_guidance or [],
+        label="search_guidance",
+    )
     report = plan_fno_training_candidates(
         evidence_paths=[Path(path) for path in evidence_paths],
         output_path=Path(output_path),
@@ -218,8 +173,10 @@ def plan_fno_training_candidates_command(
         widths=widths,
         depths=depths,
         loss_types=loss_types,
+        normalizations=normalizations,
         forecast_steps_values=forecast_steps_values,
         train_steps_values=train_steps_values,
+        search_guidance=parsed_search_guidance,
         force=force,
     )
     return success_payload(
@@ -233,6 +190,19 @@ def plan_fno_training_candidates_command(
         },
         next_hint=report["next_command"],
     )
+
+
+def _parse_json_objects(*, values: list[str], label: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for value in values:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{label} must be valid JSON object: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{label} must be valid JSON object")
+        rows.append(parsed)
+    return rows
 
 
 def run_fno_training_optimization_loop_command(
@@ -289,11 +259,13 @@ def record_fno_training_optimization_evidence_command(
     *,
     optimization_report_path: str,
     output_path: str,
+    graft_report_path: str | None = None,
     force: bool,
 ) -> dict[str, object]:
     evidence = record_fno_training_optimization_evidence(
         optimization_report_path=Path(optimization_report_path),
         output_path=Path(output_path),
+        graft_report_path=Path(graft_report_path) if graft_report_path else None,
         force=force,
     )
     return success_payload(
@@ -321,6 +293,7 @@ def run_task1_short_window_training_loop_command(
     time_reduction: int,
     space_reduction: int,
     model_family: str,
+    normalization: str = "none",
     train_steps: int,
     batch_size: int,
     learning_rate: float,
@@ -338,6 +311,7 @@ def run_task1_short_window_training_loop_command(
         time_reduction=time_reduction,
         space_reduction=space_reduction,
         model_family=model_family,
+        normalization=normalization,
         train_steps=train_steps,
         batch_size=batch_size,
         learning_rate=learning_rate,
@@ -532,10 +506,12 @@ def detect_hypothesis_doom_loop_command(
 def build_scientific_tool_catalog_command(
     *,
     output_path: str,
+    include_compatibility_tools: bool = False,
     force: bool,
 ) -> dict[str, object]:
     catalog = build_scientific_tool_catalog(
         output_path=Path(output_path),
+        include_compatibility_tools=include_compatibility_tools,
         force=force,
     )
     return success_payload(
@@ -548,40 +524,6 @@ def build_scientific_tool_catalog_command(
             "risk_levels": catalog["risk_levels"],
         },
         next_hint=catalog["next_command"],
-    )
-
-
-def audit_hermes_availability_command(
-    *,
-    output_path: str,
-    tool_catalog_path: str,
-    canary_report_paths: list[str],
-    cli_commands: list[str],
-    required_commands: list[str],
-    force: bool,
-) -> dict[str, object]:
-    report = audit_hermes_availability(
-        output_path=Path(output_path),
-        tool_catalog_path=Path(tool_catalog_path),
-        canary_report_paths=[Path(path) for path in canary_report_paths],
-        cli_commands=cli_commands,
-        required_commands=required_commands,
-        force=force,
-    )
-    return success_payload(
-        run_id=Path(output_path).stem or "local",
-        command="audit-hermes-availability",
-        state_hint=HERMES_AVAILABILITY_AUDIT_STATE_HINT,
-        artifacts={
-            "availability_audit_path": output_path,
-            "tool_catalog_path": tool_catalog_path,
-            "canary_report_paths": canary_report_paths,
-            "missing_required_commands": report["gaps"][
-                "missing_required_commands"
-            ],
-        },
-        metrics=report["metrics"],
-        next_hint=report["next_command"],
     )
 
 
@@ -607,20 +549,12 @@ def audit_agent_runtime_availability_command(
     return success_payload(
         run_id=Path(output_path).stem or "local",
         command="audit-agent-runtime-availability",
-        state_hint=HERMES_AVAILABILITY_AUDIT_STATE_HINT,
+        state_hint=AGENT_RUNTIME_AVAILABILITY_STATE_HINT,
         artifacts={
             "availability_audit_path": output_path,
-            "runtime_name": runtime_name,
             "tool_catalog_path": tool_catalog_path,
-            "canary_report_paths": canary_report_paths,
-            "missing_required_commands": report["gaps"][
-                "missing_required_commands"
-            ],
         },
-        metrics={
-            **report["metrics"],
-            "runtime_primary": report["runtime"]["primary"],
-        },
+        metrics=report["metrics"],
         next_hint=report["next_command"],
     )
 
@@ -688,115 +622,37 @@ def build_hypothesis_kpi_report_command(
     )
 
 
-def evaluate_hermes_task1_agent_capability_command(
-    *,
-    chain_report_path: str,
-    trace_path: str,
-    output_path: str,
-    baseline_score: float | None,
-    min_score_delta: float,
-    min_unique_candidate_families: int,
-    min_sandbox_evidence_events: int,
-    require_independent_slice_evidence: bool,
-    memory_json_path: str | None,
-    exploration_schedule_path: str | None,
-    require_control_layer_evidence: bool,
-    force: bool,
-) -> dict[str, object]:
-    report = evaluate_hermes_task1_agent_capability(
-        chain_report_path=Path(chain_report_path),
-        trace_path=Path(trace_path),
-        output_path=Path(output_path),
-        baseline_score=baseline_score,
-        min_score_delta=min_score_delta,
-        min_unique_candidate_families=min_unique_candidate_families,
-        min_sandbox_evidence_events=min_sandbox_evidence_events,
-        require_independent_slice_evidence=require_independent_slice_evidence,
-        memory_json_path=Path(memory_json_path) if memory_json_path else None,
-        exploration_schedule_path=(
-            Path(exploration_schedule_path) if exploration_schedule_path else None
-        ),
-        require_control_layer_evidence=require_control_layer_evidence,
-        force=force,
-    )
-    return success_payload(
-        run_id="local",
-        command="evaluate-hermes-task1-agent-capability",
-        state_hint=HERMES_TASK1_AGENT_CAPABILITY_BENCHMARK_STATE_HINT,
-        artifacts={
-            "task1_agent_capability_benchmark_json": output_path,
-            "task1_agent_capability_benchmark_path": output_path,
-        },
-        metrics={
-            "decision": report["decision"],
-            "score_delta": report["score_progress"]["score_delta"],
-            "best_score": report["score_progress"]["best_score"],
-            "unique_candidate_family_count": report["candidate_generation"][
-                "unique_candidate_family_count"
-            ],
-            "evidence_event_count": report["sandbox_validation"][
-                "evidence_event_count"
-            ],
-            "invalid_promotion_count": report["promotion_quality"][
-                "invalid_promotion_count"
-            ],
-            "control_layer_memory_loaded": report["control_layer"]["memory_loaded"],
-            "control_layer_schedule_loaded": report["control_layer"][
-                "schedule_loaded"
-            ],
-        },
-        next_hint=report["next_command"],
-    )
-
-
-def build_repair_policy_summary_command(
-    *,
-    trace_path: str,
-    output_path: str,
-    recent_window: int,
-    force: bool,
-) -> dict[str, object]:
-    report = build_repair_policy_summary(
-        trace_path=Path(trace_path),
-        output_path=Path(output_path),
-        recent_window=recent_window,
-        force=force,
-    )
-    return success_payload(
-        run_id="local",
-        command="build-repair-policy-summary",
-        state_hint=HERMES_REPAIR_POLICY_SUMMARY_STATE_HINT,
-        artifacts={
-            "repair_policy_summary_json": output_path,
-            "repair_policy_summary_path": output_path,
-            "converged_repair_errors": report.get("converged_repair_errors", []),
-            "nonconverged_repair_errors": report.get(
-                "nonconverged_repair_errors",
-                [],
-            ),
-            "repair_error_stats": report.get("repair_error_stats", {}),
-            "recommended_actions": report.get("recommended_actions", []),
-        },
-        metrics=report["metrics"],
-        next_hint=report["next_command"],
-    )
-
-
 def plan_hypothesis_candidates_command(
     *,
     output_path: str,
     candidate_generator: str,
+    hypothesis_lab_next_policy_path: str | None = None,
     doom_loop_report_path: str | None,
     hypothesis_kpi_report_path: str | None,
     repair_policy_summary_path: str | None = None,
     research_chronicle_path: str | None = None,
     expansion_handoff_report_path: str | None = None,
+    expansion_report_path: str | None = None,
     audit_repair_tasks_path: str | None = None,
     preferred_error_modes: list[str] | None = None,
     max_schedule_length: int = 5,
     min_viable_candidate_count: int = 1,
     force: bool = False,
 ) -> dict[str, object]:
+    policy_constraints = _hypothesis_lab_policy_constraints(
+        hypothesis_lab_next_policy_path
+    )
+    if policy_constraints.get("candidate_generator"):
+        candidate_generator = str(policy_constraints["candidate_generator"])
+    merged_preferred_error_modes = _dedupe_strings(
+        [
+            *(preferred_error_modes or []),
+            *policy_constraints.get("preferred_error_modes", []),
+        ]
+    )
+    guard_overrides = []
+    if policy_constraints.get("guard_override_candidate_generator"):
+        guard_overrides.append(str(policy_constraints["guard_override_candidate_generator"]))
     report = build_hypothesis_candidate_plan(
         output_path=Path(output_path),
         candidate_generator=candidate_generator,
@@ -815,14 +671,25 @@ def plan_hypothesis_candidates_command(
         expansion_handoff_report_path=Path(expansion_handoff_report_path)
         if expansion_handoff_report_path is not None
         else None,
+        expansion_report_path=Path(expansion_report_path)
+        if expansion_report_path is not None
+        else None,
         audit_repair_tasks_path=Path(audit_repair_tasks_path)
         if audit_repair_tasks_path is not None
         else None,
-        preferred_error_modes=preferred_error_modes or [],
+        preferred_error_modes=merged_preferred_error_modes,
+        guard_override_candidate_generators=guard_overrides,
         max_schedule_length=max_schedule_length,
         min_viable_candidate_count=min_viable_candidate_count,
         force=force,
     )
+    if policy_constraints:
+        report["hypothesis_lab_policy_constraints"] = policy_constraints
+        if Path(output_path).exists():
+            Path(output_path).write_text(
+                json.dumps(report, allow_nan=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
     return success_payload(
         run_id="local",
         command="plan-hypothesis-candidates",
@@ -833,6 +700,10 @@ def plan_hypothesis_candidates_command(
             "candidate_generator_schedule": report.get(
                 "candidate_generator_schedule",
                 [],
+            ),
+            "hypothesis_lab_policy_constraints": report.get(
+                "hypothesis_lab_policy_constraints",
+                {},
             ),
             "audit_repair_tasks": report.get("audit_repair_tasks", []),
             "audit_repair_policies": report.get("audit_repair_policies", []),
@@ -885,6 +756,50 @@ def plan_hypothesis_candidates_command(
         },
         next_hint=report["next_command"],
     )
+
+
+def _hypothesis_lab_policy_constraints(path: str | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("state_hint") != "HYPOTHESIS_LAB_NEXT_POLICY_BUILT":
+        raise ValueError(
+            "hypothesis_lab_next_policy_path must point to "
+            "HYPOTHESIS_LAB_NEXT_POLICY_BUILT"
+        )
+    policy = payload.get("policy")
+    if not isinstance(policy, dict):
+        return {}
+    candidate_generator = policy.get("candidate_generator")
+    preferred_error_modes = policy.get("preferred_error_modes")
+    constraints: dict[str, Any] = {
+        "source_policy_path": path,
+        "next_action": policy.get("next_action"),
+        "learning_objective": policy.get("learning_objective"),
+    }
+    if isinstance(candidate_generator, str) and candidate_generator:
+        constraints["candidate_generator"] = candidate_generator
+        if policy.get("next_action") == "retry_with_policy_constraints":
+            constraints["guard_override_candidate_generator"] = candidate_generator
+    if isinstance(preferred_error_modes, list):
+        constraints["preferred_error_modes"] = [
+            item for item in preferred_error_modes if isinstance(item, str) and item
+        ]
+    required = policy.get("required_constraints")
+    if isinstance(required, dict):
+        constraints["required_constraints"] = required
+    options = policy.get("hypothesis_candidate_options")
+    if isinstance(options, dict):
+        constraints["hypothesis_candidate_options"] = options
+    return constraints
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result = []
+    for value in values:
+        if isinstance(value, str) and value and value not in result:
+            result.append(value)
+    return result
 
 
 def build_hypothesis_algorithm_design_command(
@@ -1257,591 +1172,127 @@ def prepare_pde_literature_extraction_skill_command(
     )
 
 
-def run_hypothesis_learning_constraint_smoke_command(
+def build_fno_training_iteration_contract_command(
     *,
-    trace_path: str,
+    previous_evidence_path: str,
+    previous_evidence_paths: list[str] | None = None,
     output_dir: str,
-    local_strategy_library_path: str,
-    checkpoint_paths: list[str],
-    candidate_generator: str,
-    min_viable_candidate_count: int,
-    force: bool,
-) -> dict[str, object]:
-    report = run_hypothesis_learning_constraint_smoke(
-        trace_path=Path(trace_path),
-        output_dir=Path(output_dir),
-        local_strategy_library_path=Path(local_strategy_library_path),
-        checkpoint_paths=[Path(path) for path in checkpoint_paths],
-        candidate_generator=candidate_generator,
-        min_viable_candidate_count=min_viable_candidate_count,
-        force=force,
-    )
-    return success_payload(
-        run_id="local",
-        command="run-hypothesis-learning-constraint-smoke",
-        state_hint=LEARNING_CONSTRAINT_SMOKE_STATE_HINT,
-        artifacts={
-            **_artifact_json_aliases(
-                dict(report["artifacts"])
-                if isinstance(report.get("artifacts"), dict)
-                else {},
-                {
-                    "learning_constraint_smoke_json": "smoke_report_path",
-                    "hypothesis_kpi_report_json": "hypothesis_kpi_report_path",
-                    "candidate_plan_json": "candidate_plan_path",
-                    "expansion_handoff_report_json": (
-                        "expansion_handoff_report_path"
-                    ),
-                },
-            ),
-            **(
-                report.get("artifacts")
-                if isinstance(report.get("artifacts"), dict)
-                else {}
-            ),
-        },
-        metrics={
-            **report["metrics"],
-            "decision": report["decision"],
-        },
-        next_hint=report["next_command"],
-    )
-
-
-def run_hermes_runtime_memory_bridge_smoke_command(
-    *,
-    trace_path: str,
-    output_dir: str,
-    initial_submission_dir: str,
-    task1_test_path: str,
-    task1_target_path: str,
-    audit_repair_tasks_path: str,
-    candidate_generator: str,
-    force: bool,
-) -> dict[str, object]:
-    report = run_hermes_runtime_memory_bridge_smoke(
-        trace_path=Path(trace_path),
-        output_dir=Path(output_dir),
-        initial_submission_dir=Path(initial_submission_dir),
-        task1_test_path=Path(task1_test_path),
-        task1_target_path=Path(task1_target_path),
-        audit_repair_tasks_path=Path(audit_repair_tasks_path),
-        candidate_generator=candidate_generator,
-        force=force,
-    )
-    artifacts = report.get("artifacts") if isinstance(report.get("artifacts"), dict) else {}
-    return success_payload(
-        run_id="local",
-        command="run-hermes-runtime-memory-bridge-smoke",
-        state_hint=HERMES_RUNTIME_MEMORY_BRIDGE_SMOKE_STATE_HINT,
-        artifacts={
-            **_artifact_json_aliases(
-                dict(artifacts),
-                {
-                    "runtime_memory_bridge_smoke_json": "smoke_report_path",
-                    "runtime_loop_report_json": "runtime_loop_report_path",
-                    "runtime_closed_loop_audit_json": (
-                        "runtime_closed_loop_audit_path"
-                    ),
-                    "heartbeat_report_json": "heartbeat_report_path",
-                },
-            ),
-            **artifacts,
-            "memory_bridge": report.get("memory_bridge", {}),
-        },
-        metrics={
-            **(
-                report.get("metrics")
-                if isinstance(report.get("metrics"), dict)
-                else {}
-            ),
-            "decision": report.get("decision"),
-        },
-        next_hint=str(report.get("next_command") or "use-hermes-runtime-closed-loop"),
-    )
-
-
-def run_hermes_auto_repair_memory_acceptance_smoke_command(
-    *,
-    output_dir: str,
-    trace_path: str,
-    initial_submission_dir: str,
-    task1_test_path: str,
-    task1_target_path: str,
-    candidate_generator: str,
-    force: bool,
-) -> dict[str, object]:
-    report = run_hermes_auto_repair_memory_acceptance_smoke(
-        output_dir=Path(output_dir),
-        trace_path=Path(trace_path),
-        initial_submission_dir=Path(initial_submission_dir),
-        task1_test_path=Path(task1_test_path),
-        task1_target_path=Path(task1_target_path),
-        candidate_generator=candidate_generator,
-        force=force,
-    )
-    artifacts = report.get("artifacts") if isinstance(report.get("artifacts"), dict) else {}
-    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
-    return success_payload(
-        run_id="local",
-        command="run-hermes-auto-repair-memory-acceptance-smoke",
-        state_hint=HERMES_AUTO_REPAIR_MEMORY_ACCEPTANCE_SMOKE_STATE_HINT,
-        artifacts={
-            **_artifact_json_aliases(
-                dict(artifacts),
-                {
-                    "auto_repair_memory_acceptance_smoke_json": (
-                        "smoke_report_path"
-                    ),
-                    "runtime_audit_chain_report_json": "chain_report_path",
-                    "candidate_plan_json": "candidate_plan_path",
-                },
-            ),
-            **artifacts,
-            **checks,
-        },
-        metrics=report.get("metrics", {}),
-        next_hint=str(report.get("next_command") or "run-hermes-runtime-audit-chain"),
-    )
-
-
-def audit_hermes_hypothesis_lab_infrastructure_command(
-    *,
-    acceptance_smoke_path: str,
-    preflight_chain_report_path: str,
-    runbook_path: str,
-    output_path: str,
-    min_completed_iterations: int,
-    force: bool,
-    stability_chain_report_path: str | None = None,
-    candidate_pressure_chain_report_path: str | None = None,
-) -> dict[str, object]:
-    report = audit_hermes_hypothesis_lab_infrastructure(
-        acceptance_smoke_path=Path(acceptance_smoke_path),
-        preflight_chain_report_path=Path(preflight_chain_report_path),
-        runbook_path=Path(runbook_path),
-        output_path=Path(output_path),
-        min_completed_iterations=min_completed_iterations,
-        stability_chain_report_path=Path(stability_chain_report_path)
-        if stability_chain_report_path is not None
-        else None,
-        candidate_pressure_chain_report_path=Path(candidate_pressure_chain_report_path)
-        if candidate_pressure_chain_report_path is not None
-        else None,
-        force=force,
-    )
-    return success_payload(
-        run_id="local",
-        command="audit-hermes-hypothesis-lab-infrastructure",
-        state_hint=HERMES_HYPOTHESIS_LAB_INFRASTRUCTURE_AUDIT_STATE_HINT,
-        artifacts={
-            "infrastructure_audit_json": report["audit_report_path"],
-            "infrastructure_audit_path": report["audit_report_path"],
-            **report["artifacts"],
-            "checks": report["checks"],
-            "errors": report["errors"],
-        },
-        metrics={
-            "decision": report["decision"],
-            "check_count": report["summary"]["check_count"],
-            "failed_check_count": report["summary"]["failed_check_count"],
-        },
-        next_hint=report["next_command"],
-    )
-
-
-def resolve_audit_repair_task_command(
-    *,
-    audit_repair_tasks_path: str,
-    output_path: str,
-    task_id: str | None,
-    provided_inputs: list[str] | None = None,
-    force: bool,
-) -> dict[str, object]:
-    report = resolve_audit_repair_task(
-        audit_repair_tasks_path=Path(audit_repair_tasks_path),
-        output_path=Path(output_path),
-        task_id=task_id,
-        provided_inputs=_parse_key_value_inputs(provided_inputs or []),
-        force=force,
-    )
-    return success_payload(
-        run_id="local",
-        command="resolve-audit-repair-task",
-        state_hint=REPAIR_TASK_RESOLUTION_STATE_HINT,
-        artifacts={
-            "repair_task_resolution_json": report["repair_task_resolution_path"],
-            "audit_repair_tasks_path": report["audit_repair_tasks_path"],
-            "task_id": report.get("task_id"),
-            "audit_error": report.get("audit_error"),
-            "next_command": report["next_command"],
-            "argv": report["argv"],
-            "command_string": report["command_string"],
-            "missing_inputs": report["missing_inputs"],
-            "provided_inputs": report["provided_inputs"],
-        },
-        metrics={
-            "ready_to_run": report["ready_to_run"],
-            "missing_input_count": len(report["missing_inputs"]),
-            "argument_count": len(report["argv"]),
-        },
-        next_hint=report["next_hint"],
-    )
-
-
-def run_resolved_audit_repair_task_command(
-    *,
-    audit_repair_tasks_path: str,
-    output_dir: str,
-    task_id: str | None,
-    provided_inputs: list[str] | None = None,
-    force: bool,
-) -> dict[str, object]:
-    report = run_resolved_audit_repair_task(
-        audit_repair_tasks_path=Path(audit_repair_tasks_path),
-        output_dir=Path(output_dir),
-        task_id=task_id,
-        provided_inputs=_parse_key_value_inputs(provided_inputs or []),
-        force=force,
-    )
-    artifacts = report.get("artifacts") if isinstance(report.get("artifacts"), dict) else {}
-    return success_payload(
-        run_id="local",
-        command="run-resolved-audit-repair-task",
-        state_hint=REPAIR_TASK_RUN_STATE_HINT,
-        artifacts={
-            "repair_task_run_report_json": artifacts.get(
-                "repair_task_run_report_path",
-            ),
-            "repair_task_run_report_path": artifacts.get(
-                "repair_task_run_report_path",
-            ),
-            "repair_task_resolution_json": artifacts.get(
-                "repair_task_resolution_path",
-            ),
-            "repair_task_resolution_path": artifacts.get(
-                "repair_task_resolution_path",
-            ),
-            "runtime_loop_report_json": artifacts.get("runtime_loop_report_path"),
-            "runtime_loop_report_path": artifacts.get("runtime_loop_report_path"),
-            "audit_report_json": artifacts.get("audit_report_path"),
-            "audit_report_path": artifacts.get("audit_report_path"),
-            "runtime_memory_bridge_smoke_json": artifacts.get("smoke_report_path"),
-            "runtime_memory_bridge_smoke_path": artifacts.get("smoke_report_path"),
-            "decision": report.get("decision"),
-            "repair_task_resolution": report.get("repair_task_resolution", {}),
-        },
-        metrics=report.get("metrics", {}),
-        next_hint=str(report.get("next_command") or "run-hermes-runtime-audit-chain"),
-    )
-
-
-def run_hermes_runtime_closed_loop_command(
-    *,
-    output_dir: str,
-    trace_path: str,
-    initial_submission_dir: str,
-    candidate_generator: str,
-    candidate_generator_fallback: str,
-    max_batches: int,
-    recent_window: int = 50,
-    repeated_family_threshold: int = 3,
-    failed_family_threshold: int = 2,
-    min_score_delta: float = 0.1,
-    max_rounds_per_batch: int = 1,
-    batch_deadline_seconds: float = 300.0,
-    submit_score_threshold: float = 120.0,
-    learning_objective: str = "score",
+    workspace_dir: str,
+    source_path: str,
+    baseline_prediction_path: str | None = None,
     task1_test_path: str | None = None,
     task1_target_path: str | None = None,
-    task1_reference_path: str | None = None,
-    task2_test_path: str | None = None,
-    task2_target_path: str | None = None,
-    timing_profile: str | None = None,
-    timing_factor: float | None = None,
-    evidence_accumulation_plan_path: str | None = None,
-    expansion_registry_summary_path: str | None = None,
-    expansion_handoff_report_path: str | None = None,
-    audit_repair_tasks_path: str | None = None,
-    input_research_chronicle_path: str | None = None,
+    dataset_key: str,
+    train_sample_limit: int,
+    val_sample_limit: int,
+    context_steps: int,
+    time_reduction: int,
+    space_reduction: int,
+    batch_size: int,
+    learning_rate: float,
+    seed: int,
+    max_candidates: int,
     force: bool,
 ) -> dict[str, object]:
-    report = run_hermes_runtime_closed_loop(
+    from pde_agent.core.task1_short_window_training import (
+        build_fno_training_iteration_contract_from_evidence,
+    )
+
+    report = build_fno_training_iteration_contract_from_evidence(
+        previous_evidence_path=Path(previous_evidence_path),
+        previous_evidence_paths=[Path(path) for path in previous_evidence_paths or []],
         output_dir=Path(output_dir),
-        trace_path=Path(trace_path),
-        initial_submission_dir=Path(initial_submission_dir),
-        candidate_generator=candidate_generator,
-        candidate_generator_fallback=candidate_generator_fallback,
-        max_batches=max_batches,
-        recent_window=recent_window,
-        repeated_family_threshold=repeated_family_threshold,
-        failed_family_threshold=failed_family_threshold,
-        min_score_delta=min_score_delta,
-        max_rounds_per_batch=max_rounds_per_batch,
-        batch_deadline_seconds=batch_deadline_seconds,
-        submit_score_threshold=submit_score_threshold,
-        learning_objective=learning_objective,
-        task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
-        task1_target_path=Path(task1_target_path)
-        if task1_target_path is not None
-        else None,
-        task1_reference_path=Path(task1_reference_path)
-        if task1_reference_path is not None
-        else None,
-        task2_test_path=Path(task2_test_path) if task2_test_path is not None else None,
-        task2_target_path=Path(task2_target_path)
-        if task2_target_path is not None
-        else None,
-        timing_profile=timing_profile,
-        timing_factor=timing_factor,
-        evidence_accumulation_plan_path=Path(evidence_accumulation_plan_path)
-        if evidence_accumulation_plan_path is not None
-        else None,
-        expansion_registry_summary_path=Path(expansion_registry_summary_path)
-        if expansion_registry_summary_path is not None
-        else None,
-        expansion_handoff_report_path=Path(expansion_handoff_report_path)
-        if expansion_handoff_report_path is not None
-        else None,
-        audit_repair_tasks_path=Path(audit_repair_tasks_path)
-        if audit_repair_tasks_path is not None
-        else None,
-        input_research_chronicle_path=Path(input_research_chronicle_path)
-        if input_research_chronicle_path is not None
-        else None,
-        force=force,
-    )
-    candidate_plan = (
-        report.get("candidate_plan") if isinstance(report.get("candidate_plan"), dict) else {}
-    )
-    report_artifacts = (
-        dict(report["artifacts"]) if isinstance(report.get("artifacts"), dict) else {}
-    )
-    return success_payload(
-        run_id="local",
-        command="run-hermes-runtime-closed-loop",
-        state_hint=HERMES_RUNTIME_CLOSED_LOOP_STATE_HINT,
-        artifacts={
-            **_artifact_json_aliases(
-                report_artifacts,
-                {
-                    "trace_summary_json": "trace_summary_path",
-                    "hypothesis_kpi_report_json": "hypothesis_kpi_report_path",
-                    "repair_policy_summary_json": "repair_policy_summary_path",
-                    "doom_loop_report_json": "doom_loop_report_path",
-                    "candidate_plan_json": "candidate_plan_path",
-                    "heartbeat_report_json": "heartbeat_report_path",
-                },
-            ),
-            **report_artifacts,
-            "audit_command": report.get("audit_command", {}),
-            "repair_nonconvergence_errors": candidate_plan.get(
-                "repair_nonconvergence_errors",
-                [],
-            ),
-            "repair_convergence_errors": candidate_plan.get(
-                "repair_convergence_errors",
-                [],
-            ),
-            "audit_repair_converged_error_counts": (
-                candidate_plan.get("audit_repair_converged_error_counts", {})
-                or (
-                    candidate_plan.get("learning_constraints", {}).get(
-                        "audit_repair_converged_error_counts",
-                        {},
-                    )
-                    if isinstance(candidate_plan.get("learning_constraints"), dict)
-                    else {}
-                )
-            ),
-            "audit_repair_policies": candidate_plan.get(
-                "audit_repair_policies",
-                [],
-            ),
-            "repair_policy_recommended_actions": (
-                candidate_plan.get("learning_constraints", {}).get(
-                    "repair_policy_recommended_actions",
-                    [],
-                )
-                if isinstance(candidate_plan.get("learning_constraints"), dict)
-                else []
-            ),
-        },
-        metrics=report["metrics"],
-        next_hint=report["next_command"],
-    )
-
-
-def audit_hermes_runtime_closed_loop_command(
-    *,
-    runtime_report_path: str,
-    output_path: str,
-    require_guard_effect: bool,
-    require_learning_constraint_smoke: bool,
-    require_runtime_memory_bridge_smoke: bool,
-    force: bool,
-) -> dict[str, object]:
-    report = audit_hermes_runtime_closed_loop(
-        runtime_report_path=Path(runtime_report_path),
-        output_path=Path(output_path),
-        require_guard_effect=require_guard_effect,
-        require_learning_constraint_smoke=require_learning_constraint_smoke,
-        require_runtime_memory_bridge_smoke=require_runtime_memory_bridge_smoke,
+        workspace_dir=Path(workspace_dir),
+        source_path=Path(source_path),
+        baseline_prediction_path=Path(baseline_prediction_path) if baseline_prediction_path else None,
+        task1_test_path=Path(task1_test_path) if task1_test_path else None,
+        task1_target_path=Path(task1_target_path) if task1_target_path else None,
+        dataset_key=dataset_key,
+        train_sample_limit=train_sample_limit,
+        val_sample_limit=val_sample_limit,
+        context_steps=context_steps,
+        time_reduction=time_reduction,
+        space_reduction=space_reduction,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        seed=seed,
+        max_candidates=max_candidates,
         force=force,
     )
     return success_payload(
-        run_id="local",
-        command="audit-hermes-runtime-closed-loop",
-        state_hint=HERMES_RUNTIME_CLOSED_LOOP_AUDIT_STATE_HINT,
+        run_id=Path(output_dir).name or "local",
+        command="build-fno-training-iteration-contract",
+        state_hint="FNO_TRAINING_ITERATION_CONTRACT_BUILT",
         artifacts={
-            "runtime_closed_loop_audit_json": report["audit_report_path"],
-            "runtime_closed_loop_audit_path": report["audit_report_path"],
-            "audit_errors": report.get("errors", []),
-            "errors": report.get("errors", []),
-            "failed_checks": [
-                check
-                for check in report.get("checks", [])
-                if isinstance(check, dict) and check.get("passed") is False
-            ],
+            "iteration_contract_path": report["artifacts"]["iteration_contract_path"],
+            "prompt_path": report["artifacts"]["prompt_path"],
+            "harness_contract_path": report["artifacts"]["harness_contract_path"],
         },
         metrics={
-            "decision": report["decision"],
-            "check_count": report["summary"]["check_count"],
-            "failed_check_count": report["summary"]["failed_check_count"],
+            "candidate_count": len(report.get("agent_contract", {}).get("required_agent_behaviors", [])),
+            "max_candidates": report["agent_contract"].get("previous_selected_candidate", {}).get("max_candidates", max_candidates)
+            if isinstance(report.get("agent_contract", {}).get("previous_selected_candidate"), dict)
+            else max_candidates,
         },
         next_hint=report["next_command"],
     )
 
 
-def run_hermes_runtime_audit_chain_command(
+def materialize_training_windows_for_hypothesis_sandbox_command(
     *,
+    windows_path: str,
     output_dir: str,
-    trace_path: str,
-    initial_submission_dir: str,
-    candidate_generator: str,
-    candidate_generator_fallback: str,
-    iterations: int,
-    max_batches: int,
-    recent_window: int,
-    repeated_family_threshold: int,
-    failed_family_threshold: int,
-    min_score_delta: float,
-    max_rounds_per_batch: int,
-    batch_deadline_seconds: float,
-    submit_score_threshold: float,
-    learning_objective: str,
-    task1_test_path: str | None,
-    task1_target_path: str | None,
-    task1_reference_path: str | None,
-    task2_test_path: str | None,
-    task2_target_path: str | None,
-    timing_profile: str | None,
-    timing_factor: float | None,
-    audit_repair_tasks_path: str | None,
-    hypothesis_candidate_options_json: str | None = None,
-    research_directive_path: str | None = None,
-    auto_repair: bool = False,
-    force: bool = False,
-    preflight_acceptance_smoke_path: str | None = None,
-    preflight_infrastructure_audit_path: str | None = None,
+    force: bool,
 ) -> dict[str, object]:
-    hypothesis_candidate_options = (
-        _parse_json_object(
-            hypothesis_candidate_options_json,
-            "hypothesis_candidate_options_json",
-        )
-        if hypothesis_candidate_options_json is not None
-        else None
+    from pde_agent.core.task1_short_window_training import (
+        materialize_training_windows_for_hypothesis_sandbox,
     )
-    report = run_hermes_runtime_audit_chain(
+
+    report = materialize_training_windows_for_hypothesis_sandbox(
+        windows_path=Path(windows_path),
         output_dir=Path(output_dir),
-        trace_path=Path(trace_path),
-        initial_submission_dir=Path(initial_submission_dir),
-        candidate_generator=candidate_generator,
-        candidate_generator_fallback=candidate_generator_fallback,
-        iterations=iterations,
-        max_batches=max_batches,
-        recent_window=recent_window,
-        repeated_family_threshold=repeated_family_threshold,
-        failed_family_threshold=failed_family_threshold,
-        min_score_delta=min_score_delta,
-        max_rounds_per_batch=max_rounds_per_batch,
-        batch_deadline_seconds=batch_deadline_seconds,
-        submit_score_threshold=submit_score_threshold,
-        learning_objective=learning_objective,
-        task1_test_path=Path(task1_test_path) if task1_test_path is not None else None,
-        task1_target_path=Path(task1_target_path)
-        if task1_target_path is not None
-        else None,
-        task1_reference_path=Path(task1_reference_path)
-        if task1_reference_path is not None
-        else None,
-        task2_test_path=Path(task2_test_path) if task2_test_path is not None else None,
-        task2_target_path=Path(task2_target_path)
-        if task2_target_path is not None
-        else None,
-        timing_profile=timing_profile,
-        timing_factor=timing_factor,
-        hypothesis_candidate_options=hypothesis_candidate_options,
-        research_directive_path=Path(research_directive_path)
-        if research_directive_path is not None
-        else None,
-        audit_repair_tasks_path=Path(audit_repair_tasks_path)
-        if audit_repair_tasks_path is not None
-        else None,
-        preflight_acceptance_smoke_path=Path(preflight_acceptance_smoke_path)
-        if preflight_acceptance_smoke_path is not None
-        else None,
-        preflight_infrastructure_audit_path=Path(preflight_infrastructure_audit_path)
-        if preflight_infrastructure_audit_path is not None
-        else None,
-        auto_repair=auto_repair,
         force=force,
     )
     return success_payload(
-        run_id="local",
-        command="run-hermes-runtime-audit-chain",
-        state_hint=HERMES_RUNTIME_AUDIT_CHAIN_STATE_HINT,
+        run_id=Path(output_dir).name or "local",
+        command="materialize-training-windows-for-hypothesis-sandbox",
+        state_hint="HYPOTHESIS_SANDBOX_WINDOW_BUNDLE_MATERIALIZED",
         artifacts={
-            "runtime_audit_chain_report_json": report["chain_report_path"],
-            "chain_report_path": report["chain_report_path"],
-            "hypothesis_lab_trace_event": report.get("trace_event_id"),
-            "trace_event_id": report.get("trace_event_id"),
-            "repair_convergence": report.get("repair_convergence"),
-            "auto_repair": report.get("auto_repair", {}),
-            **(
-                {
-                    "auto_repair_report_path": report["artifacts"][
-                        "auto_repair_report_path"
-                    ],
-                    "auto_repair_report_json": report["artifacts"][
-                        "auto_repair_report_path"
-                    ],
-                }
-                if isinstance(report.get("artifacts"), dict)
-                and isinstance(report["artifacts"].get("auto_repair_report_path"), str)
-                else {}
-            ),
-            **(
-                {
-                    "audit_repair_tasks_json": report["artifacts"][
-                        "audit_repair_tasks_path"
-                    ]
-                }
-                if isinstance(report.get("artifacts"), dict)
-                and isinstance(
-                    report["artifacts"].get("audit_repair_tasks_path"),
-                    str,
-                )
-                else {}
-            ),
-            **(
-                report.get("artifacts")
-                if isinstance(report.get("artifacts"), dict)
-                else {}
-            ),
+            "context_path": report["artifacts"]["context_path"],
+            "target_path": report["artifacts"]["target_path"],
+            "reference_path": report["artifacts"]["reference_path"],
+            "manifest_path": report["artifacts"]["manifest_path"],
         },
-        metrics=report["metrics"],
+        metrics={},
+        next_hint=report["next_command"],
+    )
+
+
+def convert_hypothesis_algorithm_evidence_for_candidate_promotion_command(
+    *,
+    hypothesis_evidence_path: str,
+    output_dir: str,
+    force: bool,
+) -> dict[str, object]:
+    from pde_agent.core.task1_short_window_training import (
+        convert_hypothesis_algorithm_evidence_for_candidate_promotion,
+    )
+
+    report = convert_hypothesis_algorithm_evidence_for_candidate_promotion(
+        hypothesis_evidence_path=Path(hypothesis_evidence_path),
+        output_dir=Path(output_dir),
+        force=force,
+    )
+    return success_payload(
+        run_id=Path(output_dir).name or "local",
+        command="convert-hypothesis-algorithm-evidence-for-candidate-promotion",
+        state_hint="HYPOTHESIS_EVIDENCE_PROMOTION_BRIDGE_BUILT",
+        artifacts={
+            "algorithm_candidates_path": report["artifacts"]["algorithm_candidates_path"],
+            "sandbox_evidence_path": report["artifacts"]["sandbox_evidence_path"],
+            "manifest_path": report["artifacts"]["manifest_path"],
+        },
+        metrics={},
         next_hint=report["next_command"],
     )
 
@@ -1854,27 +1305,3 @@ def _parse_json_object(payload_json: str, label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON object")
     return payload
-
-
-def _parse_key_value_inputs(values: list[str]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for value in values:
-        if "=" not in value:
-            raise ValueError(f"provided input must use key=value syntax: {value}")
-        key, item = value.split("=", maxsplit=1)
-        key = key.strip()
-        if not key:
-            raise ValueError("provided input key must not be empty")
-        parsed[key] = item
-    return parsed
-
-
-def _artifact_json_aliases(
-    artifacts: dict[str, object],
-    aliases: dict[str, str],
-) -> dict[str, object]:
-    return {
-        alias: artifacts[source]
-        for alias, source in aliases.items()
-        if isinstance(artifacts.get(source), str) and artifacts[source]
-    }

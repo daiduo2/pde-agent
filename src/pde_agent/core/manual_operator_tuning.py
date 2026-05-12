@@ -1,6 +1,5 @@
 """Manual Burgers operator tuning utilities for validation-set diagnosis."""
 
-from __future__ import annotations
 
 import csv
 import json
@@ -12,6 +11,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from pde_agent.core.burgers_hdf5_io import load_hdf5_tensor
 from pde_agent.core.competition_submission import (
     CONTEXT_STEPS,
     PREDICTION_STEPS,
@@ -52,7 +52,7 @@ class CandidateResult:
         }
 
 
-def score_prediction_arrays(*, prediction: np.ndarray, target: np.ndarray) -> dict[str, Any]:
+def score_burgers_segments(*, prediction: np.ndarray, target: np.ndarray) -> dict[str, Any]:
     prediction = _as_prediction_array(prediction, "prediction")
     target = _as_prediction_array(target, "target")
     if prediction.shape != target.shape:
@@ -234,7 +234,7 @@ def evaluate_manual_candidate_grid(
         start = time.perf_counter()
         prediction = prediction_factory()
         elapsed = time.perf_counter() - start
-        score = score_prediction_arrays(prediction=prediction, target=target)
+        score = score_burgers_segments(prediction=prediction, target=target)
         results.append(
             CandidateResult(
                 candidate_id=candidate_id,
@@ -268,21 +268,6 @@ def evaluate_manual_candidate_grid(
             "replacement for a packaged submission timing audit."
         ),
     }
-
-
-def load_hdf5_tensor(path: str | Path, *, dataset_key: str = "tensor") -> np.ndarray:
-    h5py = __import__("h5py")
-    with h5py.File(path, "r") as handle:
-        if dataset_key not in handle:
-            raise ManualOperatorTuningError(f"dataset {dataset_key!r} not found in {path}")
-        data = np.asarray(handle[dataset_key][:], dtype=np.float32)
-    if data.ndim != 3:
-        raise ManualOperatorTuningError(f"expected rank-3 HDF5 tensor, got {data.shape}")
-    if data.shape[1] == 1000:
-        data = data[:, ::5, :]
-    if data.shape[2] == 1024:
-        data = data[:, :, ::4]
-    return data
 
 
 def write_report_artifacts(*, report: dict[str, Any], output_dir: str | Path) -> None:

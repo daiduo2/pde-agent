@@ -79,6 +79,36 @@ def test_generate_task1_candidate_families_from_stagnated_benchmark(
     assert report["generation_context"]["score_delta"] == 0.0
 
 
+def test_generate_task1_candidate_families_accepts_minimal_chain_report(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.task1_candidate_factory import (
+        generate_task1_candidate_families,
+    )
+
+    chain_path = tmp_path / "minimal_chain.json"
+    chain_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "RUNTIME_AUDIT_CHAIN_RAN",
+                "decision": "needs_new_dynamics_source",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = generate_task1_candidate_families(
+        benchmark_path=_write_benchmark(tmp_path / "benchmark.json"),
+        chain_report_path=chain_path,
+        output_path=tmp_path / "families.json",
+        max_families=2,
+        force=False,
+    )
+
+    assert report["decision"] == "generated"
+    assert report["generation_context"]["candidate_space_exhausted_count"] == 5
+
+
 def test_generate_task1_candidate_families_includes_fno_skill_candidates(
     tmp_path: Path,
 ) -> None:
@@ -242,7 +272,7 @@ def test_run_candidate_family_sandbox_plans_supported_and_blocked_hooks(
     by_id = {item["candidate_family_id"]: item for item in report["sandbox_items"]}
     assert by_id["task1_front25_dynamics_v0"]["status"] == "planned"
     assert by_id["task1_front25_dynamics_v0"]["next_command"] == (
-        "run-hermes-batch-optimization-loop"
+        "run-hypothesis-lab"
     )
     assert by_id["task1_unknown_v0"]["status"] == "blocked"
     assert by_id["task1_unknown_v0"]["blocked_reason"] == "no_supported_hook"
@@ -286,9 +316,11 @@ def test_evaluate_candidate_factory_capability_passes_on_diverse_executable_spac
     assert report["candidate_space"]["mechanism_count"] == 5
     assert report["sandbox_readiness"]["planned_count"] >= 3
     assert report["capability_checks"]["executable_families"]["passed"] is True
-    assert report["heartbeat_handoff"] == {
+    assert "heartbeat_handoff" not in report
+    assert report["agent_runtime_handoff"] == {
         "ready": True,
-        "next_command": "run-hermes-runtime-audit-chain",
+        "next_command": "run-claude-agent-sdk-runtime",
+        "active_substrate": "claude_agent_sdk",
         "candidate_generator_fallback": "auto",
         "sandbox_report_path": str(tmp_path / "sandbox.json"),
         "planned_candidate_family_ids": [
@@ -297,6 +329,57 @@ def test_evaluate_candidate_factory_capability_passes_on_diverse_executable_spac
             if item["status"] == "planned"
         ],
     }
+    assert report["next_command"] == "run-claude-agent-sdk-runtime"
+
+
+def test_materialize_candidate_family_item_outputs_algorithm_candidates(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.task1_candidate_factory import (
+        generate_task1_candidate_families,
+        materialize_candidate_family_item,
+        run_candidate_family_sandbox,
+    )
+    from pde_agent.core.hypothesis_lab import build_knowledge_cards, generate_hypotheses
+
+    family_report = generate_task1_candidate_families(
+        benchmark_path=_write_benchmark(tmp_path / "benchmark.json"),
+        chain_report_path=_write_chain_report(tmp_path / "chain.json"),
+        output_path=tmp_path / "families.json",
+        max_families=2,
+        force=False,
+    )
+    sandbox_report = run_candidate_family_sandbox(
+        family_report_path=family_report["family_report_path"],
+        output_path=tmp_path / "sandbox.json",
+        force=False,
+    )
+
+    materialized = materialize_candidate_family_item(
+        sandbox_report_path=sandbox_report["sandbox_report_path"],
+        output_path=tmp_path / "algorithm_candidates.json",
+        candidate_family_id="task1_front25_dynamics_v0",
+        force=False,
+    )
+
+    candidate = materialized["algorithm_candidates"][0]
+    assert materialized["state_hint"] == "ALGORITHM_CANDIDATES_COMPILED"
+    assert materialized["selected_hook"] == "hypothesis_lab_front25_dynamics_smoke"
+    assert candidate["algorithm_candidate_id"] == (
+        "candidate_task1_front25_dynamics_v0"
+    )
+    assert candidate["executor_spec"]["implementation_hooks"] == [
+        "run-hypothesis-lab",
+        "hypothesis_lab_front25_dynamics_smoke",
+    ]
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[materialized["algorithm_candidates_path"]],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    assert hypotheses["hypotheses"][0]["candidate_family"] == "task1_front25_dynamics"
 
 
 def test_task1_candidate_factory_cli_and_tool_catalog(tmp_path: Path) -> None:
@@ -381,6 +464,19 @@ def test_task1_candidate_factory_cli_and_tool_catalog(tmp_path: Path) -> None:
     assert tools["evaluate-candidate-factory-capability"]["risk_level"] == (
         "read_only"
     )
+    assert tools["build-claude-literature-candidate-closure-task"]["risk_level"] == (
+        "artifact_write"
+    )
+    assert "reusable agent workspace" in tools[
+        "build-claude-literature-candidate-closure-task"
+    ]["agent_guidance"]
+    assert tools["record-agent-algorithm-cards"]["risk_level"] == "artifact_write"
+    assert tools["record-agent-algorithm-cards"]["state_hints"] == [
+        "ALGORITHM_CARDS_EXTRACTED"
+    ]
+    assert "paper_parse_path" in tools[
+        "build-claude-literature-candidate-closure-task"
+    ]["required_inputs"]
 
 
 def _candidate_card(candidate_family_id: str) -> dict[str, object]:
@@ -417,7 +513,7 @@ def _write_benchmark(
     path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_TASK1_AGENT_CAPABILITY_BENCHMARKED",
+                "state_hint": "TASK1_AGENT_CAPABILITY_BENCHMARKED",
                 "decision": decision,
                 "score_progress": {
                     "best_score": 120.09092223481395,
@@ -447,7 +543,7 @@ def _write_chain_report(path: Path) -> Path:
     path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_RUNTIME_AUDIT_CHAIN_RAN",
+                "state_hint": "RUNTIME_AUDIT_CHAIN_RAN",
                 "decision": "passed",
                 "metrics": {
                     "candidate_space_exhausted_count": 5,

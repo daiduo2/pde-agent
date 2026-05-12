@@ -1,6 +1,5 @@
 """Route Hermes local strategy-loop artifacts to the next harness action."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

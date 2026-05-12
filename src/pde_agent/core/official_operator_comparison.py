@@ -1,6 +1,5 @@
 """Compare official PDEBench operator checkpoints on one Burgers local window."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

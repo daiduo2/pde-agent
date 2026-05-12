@@ -1,6 +1,5 @@
 """Convert official operator comparison reports into strategy evidence."""
 
-from __future__ import annotations
 
 import json
 import math
@@ -9,8 +8,8 @@ from statistics import mean, pstdev
 from typing import Any
 
 
-STATE_HINT = "STRATEGY_EVIDENCE_SUMMARY_BUILT"
-SOURCE_STATE_HINT = "OFFICIAL_OPERATOR_COMPARISON_COMPLETED"
+from pde_agent.core.state_hint_registry import STRATEGY_EVIDENCE_SUMMARY_BUILT as STATE_HINT
+from pde_agent.core.state_hint_registry import OFFICIAL_OPERATOR_COMPARISON_COMPLETED as SOURCE_STATE_HINT
 MODEL_FAMILY = "OfficialOperatorComparison"
 
 

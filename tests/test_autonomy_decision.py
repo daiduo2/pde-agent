@@ -21,7 +21,7 @@ def test_record_autonomy_decision_writes_valid_artifact(tmp_path: Path) -> None:
     assert output_path.exists()
     assert report == json.loads(output_path.read_text(encoding="utf-8"))
     assert report["schema_version"] == 1
-    assert report["state_hint"] == "HERMES_AUTONOMY_DECISION_RECORDED"
+    assert report["state_hint"] == "AUTONOMY_DECISION_RECORDED"
     assert report["decision"] == "request_evidence_sweep"
     assert report["reason_code"] == "single_window_improvement_needs_validation"
     assert report["evidence_source_path"] == str(evidence_path)
@@ -78,7 +78,7 @@ def test_record_autonomy_decision_cli_returns_protocol_payload(
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"
     assert payload["command"] == "record-autonomy-decision"
-    assert payload["state_hint"] == "HERMES_AUTONOMY_DECISION_RECORDED"
+    assert payload["state_hint"] == "AUTONOMY_DECISION_RECORDED"
     assert payload["artifacts"]["autonomy_decision_path"] == str(output_path)
     assert payload["artifacts"]["evidence_source_path"] == str(evidence_path)
     assert payload["metrics"]["decision"] == "accept_current_winner"

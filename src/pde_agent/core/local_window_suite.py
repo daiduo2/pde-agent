@@ -1,6 +1,5 @@
 """Build suites of local validation windows from one PDEBench HDF5 source."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

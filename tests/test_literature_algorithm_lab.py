@@ -414,6 +414,145 @@ def test_run_arxiv_mineru_parse_pipeline_materializes_markdown(
     assert "token-for-test" not in json.dumps(report)
 
 
+def test_run_arxiv_mineru_parse_pipeline_selects_relevant_source(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        run_arxiv_mineru_parse_pipeline,
+    )
+
+    arxiv_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/1901.00001v1</id>
+    <title>Stability of Solutions for PDEs</title>
+    <updated>2021-05-01T00:00:00Z</updated>
+    <published>2020-10-17T00:00:00Z</published>
+    <link href="https://arxiv.org/pdf/1901.00001v1" type="application/pdf" title="pdf"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2010.08895v3</id>
+    <title>Fourier Neural Operator for Parametric Partial Differential Equations</title>
+    <updated>2021-05-01T00:00:00Z</updated>
+    <published>2020-10-17T00:00:00Z</published>
+    <link href="https://arxiv.org/pdf/2010.08895v3" type="application/pdf" title="pdf"/>
+  </entry>
+</feed>
+""".encode()
+
+    class FakeMinerUClient:
+        def post_json(
+            self, endpoint: str, payload: dict[str, object], token: str | None
+        ) -> dict[str, object]:
+            assert payload["url"] == "https://arxiv.org/pdf/2010.08895v3"
+            return {"code": 0, "data": {"task_id": "task-fno"}}
+
+        def get_json(self, endpoint: str, token: str | None) -> dict[str, object]:
+            return {
+                "code": 0,
+                "data": {
+                    "state": "done",
+                    "full_zip_url": "https://mineru.example/result.zip",
+                },
+            }
+
+        def download_bytes(self, url: str) -> bytes:
+            buffer = BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr(
+                    "full.md",
+                    "# FNO\n\n## Abstract\nText\n\n## Method\nFourier Neural Operator text",
+                )
+            return buffer.getvalue()
+
+    def fake_downloader(url: str) -> bytes:
+        if "export.arxiv.org" in url:
+            return arxiv_xml
+        if url == "https://arxiv.org/pdf/2010.08895v3":
+            return b"%PDF fno"
+        raise AssertionError(f"unexpected download url: {url}")
+
+    report = run_arxiv_mineru_parse_pipeline(
+        query="Fourier Neural Operator Burgers",
+        output_dir=tmp_path / "run",
+        token="token-for-test",
+        mode="precise_url",
+        model_version="vlm",
+        max_results=2,
+        selected_index=-1,
+        max_polls=1,
+        poll_interval_seconds=0.0,
+        downloader=fake_downloader,
+        mineru_client=FakeMinerUClient(),
+        force=False,
+    )
+
+    assert report["effective_selected_index"] == 1
+    assert report["selection_policy"] == "query_relevance"
+    assert report["selected_source_id"].startswith("arxiv_paper_fourier")
+
+
+def test_record_agent_algorithm_cards_uses_controlled_cli_write_path(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        LiteratureAlgorithmLabError,
+        record_agent_algorithm_cards,
+    )
+
+    output_path = tmp_path / "agent_algorithm_cards.json"
+    payload = {
+        "schema_version": 1,
+        "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+        "algorithm_cards": [
+            {
+                "algorithm_card_id": "card_fno",
+                "source_ids": ["source_fno"],
+                "claim": "Fourier layers improve operator learning.",
+                "core_mechanism": "Learn spectral filters.",
+                "operation": "Run a small FNO sandbox.",
+                "implementation_hooks": ["spectral_rollout_stabilization"],
+                "expected_observables": ["early_rel_mse_down"],
+                "failure_modes": ["oversmoothing"],
+                "minimal_experiment": "Run a short FNO rollout.",
+                "evidence_spans": [{"unit_id": "section_001", "quote": "Fourier layer"}],
+                "evidence_status": "extracted",
+                "operator_target": "early_rollout",
+                "mechanism_type": "spectral_operator",
+                "mathematical_object": "kernel_integral_operator",
+                "implementation_requirements": {
+                    "requires_training": True,
+                    "requires_checkpoint": False,
+                    "requires_target_data": True,
+                    "requires_new_executor": False,
+                    "requires_external_code": False,
+                    "can_run_as_postprocess": False,
+                },
+            }
+        ],
+    }
+
+    report = record_agent_algorithm_cards(
+        cards_json=json.dumps(payload),
+        output_path=output_path,
+        force=False,
+    )
+
+    assert report["state_hint"] == "ALGORITHM_CARDS_EXTRACTED"
+    assert report["algorithm_card_count"] == 1
+    assert report["algorithm_cards_path"] == str(output_path)
+    assert output_path.exists()
+
+    with pytest.raises(LiteratureAlgorithmLabError):
+        record_agent_algorithm_cards(
+            cards_json=json.dumps(
+                {"state_hint": "WRONG", "algorithm_cards": []}
+            ),
+            output_path=tmp_path / "bad.json",
+            force=False,
+        )
+
+
 def test_prepare_literature_extraction_context_packs_sections(
     tmp_path: Path,
 ) -> None:
@@ -1594,13 +1733,95 @@ def test_run_literature_algorithm_v2_pipeline_chains_promotion_and_registry(
     assert report["artifacts"]["executable_blueprint_audit_path"]
     assert report["artifacts"]["candidate_promotion_path"]
     assert report["artifacts"]["literature_registry_event_path"]
-    assert report["artifacts"]["hermes_registry_summary_path"]
+    assert report["artifacts"]["literature_registry_summary_path"]
     assert report["metrics"]["candidate_count"] == 1
     assert report["metrics"]["blueprint_issue_count"] == 0
     assert report["next_command"] == "record-strategy-proposal"
 
     registry = json.loads((tmp_path / "literature_registry.json").read_text())
     assert registry["candidate_nodes"][0]["status"] == "promoted"
+
+
+def test_run_literature_algorithm_v2_pipeline_records_parsed_source_without_download_backlog(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.literature_algorithm_lab import (
+        run_literature_algorithm_v2_pipeline,
+    )
+
+    markdown = tmp_path / "paper.md"
+    markdown.write_text(
+        "# Fourier Neural Operator\n\n## Method\nFourier layers improve operator learning.",
+        encoding="utf-8",
+    )
+    parse = tmp_path / "paper_parse.json"
+    parse.write_text(
+        json.dumps(
+            {
+                "state_hint": "MINERU_PARSE_INGESTED",
+                "source_id": "source_fno",
+                "markdown_path": str(markdown),
+                "parse_quality": {"quality": "usable"},
+                "section_index": {"method": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cards = tmp_path / "algorithm_cards.json"
+    cards.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state_hint": "ALGORITHM_CARDS_EXTRACTED",
+                "algorithm_cards": [
+                    {
+                        "algorithm_card_id": "card_fno",
+                        "source_ids": ["source_fno"],
+                        "claim": "Fourier layers improve operator learning.",
+                        "core_mechanism": "Learn spectral filters.",
+                        "operation": "Run a small FNO sandbox.",
+                        "implementation_hooks": ["spectral_rollout_stabilization"],
+                        "expected_observables": ["early_rel_mse_down"],
+                        "failure_modes": ["oversmoothing"],
+                        "minimal_experiment": "Run a short FNO rollout.",
+                        "evidence_spans": [{"unit_id": "section_001", "quote": "Fourier layer"}],
+                        "evidence_status": "extracted",
+                        "operator_target": "early_rollout",
+                        "mechanism_type": "spectral_operator",
+                        "mathematical_object": "kernel_integral_operator",
+                        "implementation_requirements": {
+                            "requires_training": True,
+                            "requires_checkpoint": False,
+                            "requires_target_data": True,
+                            "requires_new_executor": False,
+                            "requires_external_code": False,
+                            "can_run_as_postprocess": False,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_literature_algorithm_v2_pipeline(
+        algorithm_cards_path=cards,
+        workspace_dir=tmp_path / "workspace",
+        registry_path=tmp_path / "literature_registry.json",
+        current_best_score=120.0,
+        paper_parse_paths=[parse],
+        force=False,
+    )
+
+    assert report["state_hint"] == "LITERATURE_ALGORITHM_V2_PIPELINE_RAN"
+    summary = json.loads(
+        (tmp_path / "workspace" / "literature_registry_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    backlog_statuses = {item["status"] for item in summary["source_backlog"]}
+    assert "downloaded_not_parsed" not in backlog_statuses
+    assert "parsed_without_algorithm_cards" not in backlog_statuses
 
 
 def test_run_literature_algorithm_v2_pipeline_cli_returns_payload(
@@ -2194,7 +2415,7 @@ def test_evaluate_algorithm_candidate_promotion_refines_target_reference_signal(
                         "algorithm_candidate_id": candidate_id,
                         "candidate_family": "local_strategy_skill",
                         "executor_spec": {
-                            "cli_command": "run-hermes-batch-optimization-loop"
+                            "cli_command": "run-batch-optimization-loop"
                         },
                         "promotion_criteria": {
                             "min_score_delta": 0.01,
@@ -3330,7 +3551,7 @@ def test_literature_residual_candidate_runs_in_hypothesis_lab_sandbox(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes_literature_sandbox",
+        submission_id="team_default_literature_sandbox",
         force=False,
     )
 
@@ -3429,7 +3650,7 @@ def test_literature_spectral_candidate_maps_to_bounded_hypothesis_sandbox(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes_literature_spectral_sandbox",
+        submission_id="team_default_literature_spectral_sandbox",
         force=False,
     )
 
@@ -3508,7 +3729,7 @@ def test_literature_candidate_promotion_preserves_external_grounding(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes_literature_grounding",
+        submission_id="team_default_literature_grounding",
         force=False,
     )
 
@@ -4208,7 +4429,7 @@ def test_complete_bounded_executor_authoring_task_records_promotion_and_registry
                         "algorithm_candidate_id": candidate_id,
                         "candidate_family": "local_strategy_skill",
                         "executor_spec": {
-                            "cli_command": "run-hermes-batch-optimization-loop"
+                            "cli_command": "run-batch-optimization-loop"
                         },
                         "promotion_criteria": {
                             "min_score_delta": 0.01,

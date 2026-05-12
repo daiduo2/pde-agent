@@ -1,6 +1,5 @@
 """Run bounded FNO evidence sweeps across windows and train-step budgets."""
 
-from __future__ import annotations
 
 import csv
 import json

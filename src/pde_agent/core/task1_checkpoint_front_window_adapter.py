@@ -1,6 +1,5 @@
 """Checkpoint front-window source adapters for Task 1 Hermes exploration."""
 
-from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any

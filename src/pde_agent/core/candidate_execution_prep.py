@@ -1,6 +1,5 @@
 """Prepare an audited candidate experiment workspace without executing it."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

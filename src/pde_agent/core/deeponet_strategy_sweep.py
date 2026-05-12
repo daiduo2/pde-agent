@@ -1,6 +1,5 @@
 """Run bounded DeepONet strategy sweeps on an existing local window file."""
 
-from __future__ import annotations
 
 import csv
 import json

@@ -93,7 +93,7 @@ def test_lookup_local_strategies_prioritizes_unet_runtime_tuning(
     )
 
     assert result["matches"][0]["strategy_id"] == "unet_runtime_chunk_thread_tuning_v0"
-    assert "run-hermes-operator-tuning-loop" in result["matches"][0][
+    assert "run-operator-tuning-loop" in result["matches"][0][
         "implementation_hooks"
     ]
 
@@ -241,7 +241,7 @@ def test_lookup_local_strategies_exposes_task1_early_subsegment_patch(
         for item in result["matches"]
         if item["strategy_id"] == "task1_early_subsegment_patch_v0"
     )
-    assert "run-hermes-batch-optimization-loop" in patch["implementation_hooks"]
+    assert "run-batch-optimization-loop" in patch["implementation_hooks"]
     assert "hypothesis_lab_early_subsegment_patch_search" in patch[
         "implementation_hooks"
     ]

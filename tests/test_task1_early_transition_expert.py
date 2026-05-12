@@ -21,7 +21,7 @@ def _linear_transition_tensor(*, sample_count: int, phase_offset: float) -> np.n
 def test_task1_early_transition_expert_learns_short_window_velocity_map() -> None:
     from pde_agent.core.manual_operator_tuning import (
         make_persistence_prediction,
-        score_prediction_arrays,
+        score_burgers_segments,
     )
     from pde_agent.core.task1_early_transition_expert import (
         fit_task1_early_transition_expert,
@@ -44,11 +44,11 @@ def test_task1_early_transition_expert_learns_short_window_velocity_map() -> Non
     )
 
     prediction = result["prediction"]
-    persistence_score = score_prediction_arrays(
+    persistence_score = score_burgers_segments(
         prediction=base_prediction,
         target=target,
     )
-    expert_score = score_prediction_arrays(prediction=prediction, target=target)
+    expert_score = score_burgers_segments(prediction=prediction, target=target)
 
     assert np.allclose(prediction[:, :10, :], context, atol=1e-6)
     assert expert_score["segments"]["early"]["rel_mse"] < (

@@ -3,11 +3,11 @@ from __future__ import annotations
 import numpy as np
 
 
-def test_score_prediction_arrays_matches_perfect_prediction() -> None:
-    from pde_agent.core.manual_operator_tuning import score_prediction_arrays
+def test_score_burgers_segments_matches_perfect_prediction() -> None:
+    from pde_agent.core.manual_operator_tuning import score_burgers_segments
 
     target = np.ones((2, 200, 256), dtype=np.float32)
-    report = score_prediction_arrays(prediction=target.copy(), target=target)
+    report = score_burgers_segments(prediction=target.copy(), target=target)
 
     assert report["segment_score"] == 100.0
     assert report["task1_prediction_score"] == 75.0

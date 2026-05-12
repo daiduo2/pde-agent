@@ -140,7 +140,7 @@ def test_local_strategy_library_recalls_adaptive_spectral_smooth_skill(
         for item in result["matches"]
         if item["strategy_id"] == "task1_adaptive_spectral_smooth_v0"
     )
-    assert "run-hermes-batch-optimization-loop" in skill["implementation_hooks"]
+    assert "run-batch-optimization-loop" in skill["implementation_hooks"]
     assert "spectral_smooth" in skill["implementation_hooks"]
 
 

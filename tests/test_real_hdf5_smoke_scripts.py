@@ -26,7 +26,7 @@ def _download_module():
     repo_root = Path(__file__).resolve().parents[1]
     return _load_module(
         "download_pdebench_file",
-        repo_root / "scripts" / "download_pdebench_file.py",
+        repo_root / "scripts" / "data" / "download_pdebench_file.py",
     )
 
 
@@ -34,7 +34,7 @@ def _prepare_module():
     repo_root = Path(__file__).resolve().parents[1]
     return _load_module(
         "prepare_real_hdf5_smoke",
-        repo_root / "scripts" / "prepare_real_hdf5_smoke.py",
+        repo_root / "scripts" / "smoke" / "prepare_real_hdf5_smoke.py",
     )
 
 

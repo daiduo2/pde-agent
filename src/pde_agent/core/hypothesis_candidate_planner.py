@@ -1,12 +1,15 @@
-"""Trace-driven candidate-family planner for Hermes heartbeat runs."""
+"""Trace-driven candidate-family planner for Claude SDK agent runs.
 
-from __future__ import annotations
+The planner still reuses the historical Hermes candidate registry as a legacy
+strategy source, but the active agent substrate is Claude Agent SDK.
+"""
+
 
 import json
 from pathlib import Path
 from typing import Any
 
-from pde_agent.core.hermes_heartbeat import get_candidate_generator_registry
+from pde_agent.core.candidate_generator_registry import get_candidate_generator_registry
 
 
 STATE_HINT = "HYPOTHESIS_CANDIDATE_PLAN_BUILT"
@@ -25,6 +28,7 @@ def build_hypothesis_candidate_plan(
     repair_policy_summary_path: str | Path | None = None,
     research_chronicle_path: str | Path | None = None,
     expansion_handoff_report_path: str | Path | None = None,
+    expansion_report_path: str | Path | None = None,
     audit_repair_tasks_path: str | Path | None = None,
     preferred_error_modes: list[str] | None = None,
     guard_override_candidate_generators: list[str] | None = None,
@@ -55,20 +59,28 @@ def build_hypothesis_candidate_plan(
     )
     repair_policy = _load_optional_json(
         repair_policy_summary_path,
-        expected_state_hint="HERMES_REPAIR_POLICY_SUMMARY_BUILT",
+        expected_state_hint="REPAIR_POLICY_SUMMARY_BUILT",
         label="repair_policy_summary",
     )
     research_chronicle = _load_optional_research_chronicle(
         research_chronicle_path
     )
-    expansion_handoff = _load_optional_json(
+    expansion_handoff = _load_optional_json_with_state_hints(
         expansion_handoff_report_path,
-        expected_state_hint="HERMES_CANDIDATE_EXPANSION_HANDOFF_RAN",
+        expected_state_hints=[
+            "CANDIDATE_EXPANSION_HANDOFF_RAN",
+            "AGENT_CANDIDATE_EXPANSION_HANDOFF_RAN",
+        ],
         label="expansion_handoff_report",
+    )
+    expansion_report = _load_optional_json(
+        expansion_report_path,
+        expected_state_hint="LITERATURE_STRATEGY_EXPANSION_RAN",
+        label="expansion_report",
     )
     audit_repair = _load_optional_json(
         audit_repair_tasks_path,
-        expected_state_hint="HERMES_RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
+        expected_state_hint="RUNTIME_AUDIT_REPAIR_TASKS_PREPARED",
         label="audit_repair_tasks",
     )
     blocked = set(_blocked_candidate_families(guard))
@@ -83,7 +95,10 @@ def build_hypothesis_candidate_plan(
         audit_repair_tasks=audit_repair_tasks,
         audit_repair_policies=audit_repair_policies,
     )
-    prior_expansion_exhaustion = _prior_expansion_exhaustion(expansion_handoff)
+    prior_expansion_exhaustion = _prior_expansion_exhaustion(
+        expansion_handoff,
+        expansion_report=expansion_report,
+    )
     learning_constraints = _merge_expansion_exhaustion_constraints(
         learning_constraints,
         prior_expansion_exhaustion=prior_expansion_exhaustion,
@@ -105,6 +120,11 @@ def build_hypothesis_candidate_plan(
         research_chronicle=research_chronicle,
     )
     learned_avoid = set(learning_constraints.get("avoid_candidate_families", []))
+    learned_prefer = {
+        item
+        for item in learning_constraints.get("prefer_candidate_generators", [])
+        if isinstance(item, str) and item
+    }
     saturated = set(
         item
         for item in learning_constraints.get("saturated_candidate_families", [])
@@ -129,12 +149,18 @@ def build_hypothesis_candidate_plan(
             preferred_error_modes=preferred_error_modes or [],
             audit_repair_policies=audit_repair_policies,
         )
+        signals["matches_requested_candidate_generator"] = (
+            name == candidate_generator
+        )
+        signals["directive_guard_override"] = directive_guard_override
+        signals["matches_learning_preference"] = name in learned_prefer
         reason = _exclusion_reason(
             name=name,
             metadata=metadata,
             requested_candidate_generator=candidate_generator,
             blocked=blocked,
             learned_avoid=learned_avoid,
+            learned_prefer=learned_prefer,
             saturated=saturated,
             directive_guard_override=directive_guard_override,
         )
@@ -208,9 +234,9 @@ def build_hypothesis_candidate_plan(
         if expansion_required
         else "",
         "selection_rationale": selected_rationale + rationale,
-        "next_command": "run-hermes-literature-strategy-expansion"
+        "next_command": "run-candidate-expansion-handoff"
         if expansion_required
-        else "run-hermes-heartbeat",
+        else "run-claude-agent-sdk-runtime",
     }
     if expansion_required:
         report["expansion_handoff"] = _expansion_handoff(
@@ -243,6 +269,28 @@ def _load_optional_json(
     if not isinstance(payload, dict):
         raise HypothesisCandidatePlannerError(f"{label} must be a JSON object")
     if payload.get("state_hint") != expected_state_hint:
+        raise HypothesisCandidatePlannerError(f"{label} has invalid state_hint")
+    return payload
+
+
+def _load_optional_json_with_state_hints(
+    path: str | Path | None,
+    *,
+    expected_state_hints: list[str],
+    label: str,
+) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    file = Path(path)
+    if not file.exists():
+        raise HypothesisCandidatePlannerError(f"{label} does not exist: {file}")
+    try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HypothesisCandidatePlannerError(f"{label} invalid JSON: {file}") from exc
+    if not isinstance(payload, dict):
+        raise HypothesisCandidatePlannerError(f"{label} must be a JSON object")
+    if payload.get("state_hint") not in set(expected_state_hints):
         raise HypothesisCandidatePlannerError(f"{label} has invalid state_hint")
     return payload
 
@@ -337,10 +385,15 @@ def _learning_constraints(kpi: dict[str, Any] | None) -> dict[str, Any]:
     return constraints
 
 
-def _prior_expansion_exhaustion(handoff: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(handoff, dict):
+def _prior_expansion_exhaustion(
+    handoff: dict[str, Any] | None,
+    *,
+    expansion_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source = handoff if isinstance(handoff, dict) else expansion_report
+    if not isinstance(source, dict):
         return {"exhausted": False}
-    exhaustion = handoff.get("expansion_exhaustion")
+    exhaustion = source.get("expansion_exhaustion")
     if not isinstance(exhaustion, dict) or exhaustion.get("exhausted") is not True:
         return {"exhausted": False}
     families = [
@@ -361,11 +414,10 @@ def _prior_expansion_exhaustion(handoff: dict[str, Any] | None) -> dict[str, Any
         "recommended_next_command": str(
             exhaustion.get("recommended_next_command") or "plan-hypothesis-candidates"
         ),
-        "recommended_learning_objective": str(
-            exhaustion.get("recommended_learning_objective")
-            or "switch_candidate_family_after_axis_exhaustion"
-        ),
     }
+    objective = exhaustion.get("recommended_learning_objective")
+    if isinstance(objective, str) and objective:
+        report["recommended_learning_objective"] = objective
     candidate_ids = [
         item
         for item in exhaustion.get("exhausted_algorithm_candidate_ids", [])
@@ -423,7 +475,7 @@ def _active_audit_repair_tasks(kpi: dict[str, Any] | None) -> list[dict[str, Any
             "priority": "high",
             "repair_scope": "hypothesis_kpi_active_audit_repair",
             "recommended_action": "consume_active_audit_repair_before_next_runtime",
-            "next_command": "run-hermes-runtime-closed-loop",
+            "next_command": "run-claude-agent-sdk-runtime",
             "source": "hypothesis_kpi_report",
         }
         if audit_error in nonconverged_errors:
@@ -470,6 +522,9 @@ def _merge_audit_repair_constraints(
         ),
         "mutation_required_for_families": list(
             constraints.get("mutation_required_for_families", [])
+        ),
+        "prefer_candidate_generators": list(
+            constraints.get("prefer_candidate_generators", [])
         ),
         "reason_codes": list(constraints.get("reason_codes", [])),
     }
@@ -642,6 +697,9 @@ def _merge_expansion_exhaustion_constraints(
         "mutation_required_for_families": list(
             constraints.get("mutation_required_for_families", [])
         ),
+        "prefer_candidate_generators": list(
+            constraints.get("prefer_candidate_generators", [])
+        ),
         "reason_codes": list(constraints.get("reason_codes", [])),
     }
     for optional_key in [
@@ -721,6 +779,24 @@ def _merge_expansion_exhaustion_constraints(
     reason = prior_expansion_exhaustion.get("reason")
     if isinstance(reason, str) and reason:
         _append_unique(merged["reason_codes"], reason)
+    objective = prior_expansion_exhaustion.get("recommended_learning_objective")
+    if objective == "switch_candidate_family_after_axis_exhaustion":
+        for generator in [
+            "hypothesis_lab_front25_dynamics_smoke",
+            "hypothesis_lab_early_subsegment_patch_search",
+        ]:
+            _append_unique(merged["prefer_candidate_generators"], generator)
+    node_ids = [
+        item
+        for item in prior_expansion_exhaustion.get("exhausted_algorithm_node_ids", [])
+        if isinstance(item, str) and item
+    ]
+    if node_ids and reason == "local_strategy_mutation_axes_exhausted":
+        for generator in [
+            "sem_window_gate_blend_multi_early_smoke",
+            "sem_window_gate_blend",
+        ]:
+            _append_unique(merged["prefer_candidate_generators"], generator)
     return merged
 
 
@@ -1167,11 +1243,13 @@ def _exclusion_reason(
     blocked: set[str],
     learned_avoid: set[str],
     saturated: set[str],
+    learned_prefer: set[str],
     directive_guard_override: bool = False,
 ) -> str | None:
     if (
         metadata.get("factory_handoff_required") is True
         and name != requested_candidate_generator
+        and name not in learned_prefer
     ):
         return "requires_candidate_factory_handoff"
     if name in blocked and not directive_guard_override:
@@ -1289,6 +1367,12 @@ def _ranking_score(
         score += 100.0
     if signals.get("matches_audit_repair_policy") is True:
         score += 50.0
+    if signals.get("matches_learning_preference") is True:
+        score += 35.0
+    if signals.get("matches_requested_candidate_generator") is True:
+        score += 25.0
+    if signals.get("directive_guard_override") is True:
+        score += 25.0
     if signals.get("avoided_by_audit_repair_policy") is True:
         score -= 50.0
     if signals["matches_preferred_error_mode"]:
@@ -1315,5 +1399,5 @@ def _expansion_handoff(*, learning_constraints: dict[str, Any]) -> dict[str, Any
             ],
             "max_strategy_candidates": 5,
         },
-        "follow_up_command": "run-hermes-literature-strategy-expansion",
+        "follow_up_command": "run-candidate-expansion-handoff",
     }

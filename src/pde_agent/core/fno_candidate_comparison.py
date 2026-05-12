@@ -1,6 +1,5 @@
 """Compare evaluated FNO candidates and select the next iteration winner."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

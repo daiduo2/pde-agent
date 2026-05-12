@@ -12,8 +12,8 @@ def test_build_research_chronicle_summarizes_artifacts_and_updates_logs(
 ) -> None:
     from pde_agent.core.research_chronicle import build_research_chronicle
 
-    hermes_audit = _write_json(
-        tmp_path / "hermes_audit.json",
+    audit = _write_json(
+        tmp_path / "audit.json",
         {
             "status": "passed",
             "arm": "real_hdf5_deeponet_strategy_sweep",
@@ -65,7 +65,7 @@ def test_build_research_chronicle_summarizes_artifacts_and_updates_logs(
     )
 
     report = build_research_chronicle(
-        artifact_paths=[hermes_audit, benchmark, pipeline],
+        artifact_paths=[audit, benchmark, pipeline],
         output_path=tmp_path / "research_chronicle.md",
         submission_dir=submission_dir,
         task_ids=[1],
@@ -132,7 +132,7 @@ def test_build_research_chronicle_summarizes_local_strategy_loop(
     loop_report = _write_json(
         tmp_path / "local_loop.json",
         {
-            "state_hint": "HERMES_LOCAL_STRATEGY_LOOP_RAN",
+            "state_hint": "LOCAL_STRATEGY_LOOP_RAN",
             "iteration_count": 2,
             "iterations": [
                 {
@@ -197,7 +197,7 @@ def test_build_research_chronicle_summarizes_operator_tuning_and_submission_cand
     tuning = _write_json(
         tmp_path / "operator_tuning.json",
         {
-            "state_hint": "HERMES_OPERATOR_TUNING_LOOP_RAN",
+            "state_hint": "OPERATOR_TUNING_LOOP_RAN",
             "operator_family": "UNet",
             "selected_config": {
                 "inference_batch_size": 8,
@@ -225,9 +225,9 @@ def test_build_research_chronicle_summarizes_operator_tuning_and_submission_cand
         },
     )
     submission_candidate = _write_json(
-        tmp_path / "hermes_submission_candidate.json",
+        tmp_path / "submission_candidate.json",
         {
-            "state_hint": "HERMES_SUBMISSION_CANDIDATE_READY",
+            "state_hint": "SUBMISSION_CANDIDATE_READY",
             "operator_family": "UNet",
             "selected_config": {
                 "inference_batch_size": 8,
@@ -277,7 +277,7 @@ def test_build_research_chronicle_records_repair_policy_memory(
     runtime = _write_json(
         tmp_path / "runtime.json",
         {
-            "state_hint": "HERMES_RUNTIME_CLOSED_LOOP_RAN",
+            "state_hint": "RUNTIME_CLOSED_LOOP_RAN",
             "metrics": {
                 "repair_policy_recommended_action_count": 1,
                 "repair_policy_nonconverged_repair_error_count": 1,
@@ -297,7 +297,7 @@ def test_build_research_chronicle_records_repair_policy_memory(
     heartbeat = _write_json(
         tmp_path / "heartbeat.json",
         {
-            "state_hint": "HERMES_HEARTBEAT_RAN",
+            "state_hint": "HEARTBEAT_RAN",
             "parameters": {
                 "repair_policy_summary_path": str(tmp_path / "repair_policy.json"),
                 "repair_policy_recommended_action_count": 1,
@@ -356,7 +356,7 @@ def test_build_research_chronicle_records_auto_repair_memory_bridge(
     audit_chain = _write_json(
         tmp_path / "audit_chain.json",
         {
-            "state_hint": "HERMES_RUNTIME_AUDIT_CHAIN_RAN",
+            "state_hint": "RUNTIME_AUDIT_CHAIN_RAN",
             "decision": "repaired",
             "repair_convergence": {
                 "decision": "converged",

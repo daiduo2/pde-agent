@@ -65,6 +65,7 @@ from pde_agent.core.literature_algorithm_lab import (
     record_bounded_executor_sandbox_evidence,
     materialize_bounded_executor_template,
     record_literature_registry_event,
+    record_agent_algorithm_cards,
     record_bounded_executor_sandbox_event,
     run_arxiv_mineru_parse_pipeline,
     run_bounded_executor_sandbox,
@@ -621,6 +622,7 @@ def run_literature_algorithm_v2_pipeline_command(
     current_best_score: float,
     algorithm_candidate_id: str | None,
     sandbox_evidence_paths: list[str],
+    paper_parse_paths: list[str],
     force: bool,
 ) -> dict[str, object]:
     report = run_literature_algorithm_v2_pipeline(
@@ -630,6 +632,7 @@ def run_literature_algorithm_v2_pipeline_command(
         current_best_score=current_best_score,
         algorithm_candidate_id=algorithm_candidate_id,
         sandbox_evidence_paths=[Path(path) for path in sandbox_evidence_paths],
+        paper_parse_paths=[Path(path) for path in paper_parse_paths],
         force=force,
     )
     return success_payload(
@@ -638,6 +641,30 @@ def run_literature_algorithm_v2_pipeline_command(
         state_hint=LITERATURE_ALGORITHM_V2_PIPELINE_STATE_HINT,
         artifacts=report["artifacts"],
         metrics=report["metrics"],
+        next_hint=report["next_command"],
+    )
+
+
+def record_agent_algorithm_cards_command(
+    *,
+    cards_json: str,
+    output_path: str,
+    force: bool,
+) -> dict[str, object]:
+    report = record_agent_algorithm_cards(
+        cards_json=cards_json,
+        output_path=Path(output_path),
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="record-agent-algorithm-cards",
+        state_hint=ALGORITHM_CARDS_STATE_HINT,
+        artifacts={"algorithm_cards_path": report["algorithm_cards_path"]},
+        metrics={
+            "algorithm_card_count": report["algorithm_card_count"],
+            "extraction_status": report.get("extraction_status", "extracted"),
+        },
         next_hint=report["next_command"],
     )
 

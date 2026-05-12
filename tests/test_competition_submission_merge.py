@@ -19,7 +19,7 @@ def test_merge_competition_submissions_builds_dual_task_package(
     from pde_agent.core.competition_submission_merge import (
         merge_competition_submissions,
     )
-    from pde_agent.core.hermes_local_judge import judge_hermes_submission
+    from pde_agent.core.submission_judge import judge_submission
 
     task1_data = np.ones((2, 200, 256), dtype=np.float32)
     task2_data = np.full((2, 200, 256), 2.0, dtype=np.float32)
@@ -40,7 +40,7 @@ def test_merge_competition_submissions_builds_dual_task_package(
 
     report = merge_competition_submissions(
         output_dir=tmp_path / "merged",
-        submission_id="team_hermes_combined",
+        submission_id="team_default_combined",
         task_submission_dirs=[
             Path(task1["artifacts"]["submission_dir"]),
             Path(task2["artifacts"]["submission_dir"]),
@@ -60,7 +60,7 @@ def test_merge_competition_submissions_builds_dual_task_package(
     assert json.loads((submission_dir / "submission.json").read_text()) == {
         "code_path": "code",
         "problem_id": "PDE_Burgers",
-        "submission_id": "team_hermes_combined",
+        "submission_id": "team_default_combined",
     }
     assert (submission_dir / "code" / "train.py").exists()
     assert (submission_dir / "code" / "model.py").exists()
@@ -71,7 +71,7 @@ def test_merge_competition_submissions_builds_dual_task_package(
     assert "submission/task1_pred.hdf5" in names
     assert "submission/task2_pred.hdf5" in names
 
-    judge = judge_hermes_submission(
+    judge = judge_submission(
         submission_dir=submission_dir,
         output_path=None,
         task1_test_path=task1_path,
@@ -114,7 +114,7 @@ def test_merge_competition_submissions_cli_returns_payload(tmp_path: Path) -> No
             "--output-dir",
             str(tmp_path / "merged"),
             "--submission-id",
-            "team_hermes_combined",
+            "team_default_combined",
             "--task-submission-dir",
             str(task1["artifacts"]["submission_dir"]),
             "--task-submission-dir",

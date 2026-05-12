@@ -1,6 +1,5 @@
 """Unified Hermes sandbox for official checkpoint family candidates."""
 
-from __future__ import annotations
 
 import json
 import time
@@ -14,7 +13,7 @@ from pde_agent.core.competition_submission import build_competition_submission
 from pde_agent.core.competition_timing import normalize_timing
 from pde_agent.core.fno_competition_prediction import predict_fno_competition
 from pde_agent.core.fno_finetune_candidate import execute_fno_finetune_candidate
-from pde_agent.core.hermes_local_judge import judge_hermes_submission
+from pde_agent.core.submission_judge import judge_submission
 from pde_agent.core.unet_competition_prediction import predict_unet_competition
 
 
@@ -33,7 +32,7 @@ def run_checkpoint_family_sandbox(
     test_path: str | Path,
     target_path: str | Path,
     output_dir: str | Path,
-    submission_id: str = "team_hermes",
+    submission_id: str = "team_default",
     dataset_key: str = "tensor",
     prediction_dataset_key: str = "tensor",
     calibration_weights: list[float] | None = None,
@@ -240,7 +239,7 @@ def _materialize_calibrated_rows(
             force=force,
         )
         judge_path = output_dir / candidate_id / "judge_report.json"
-        judge = judge_hermes_submission(
+        judge = judge_submission(
             submission_dir=submission["artifacts"]["submission_dir"],
             output_path=judge_path,
             task1_test_path=test_path if task_id == 1 else None,

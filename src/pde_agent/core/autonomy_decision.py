@@ -1,10 +1,9 @@
-from __future__ import annotations
 
 import json
 from pathlib import Path
 
 
-STATE_HINT = "HERMES_AUTONOMY_DECISION_RECORDED"
+STATE_HINT = "AUTONOMY_DECISION_RECORDED"
 
 DECISION_NEXT_COMMANDS = {
     "request_evidence_sweep": "run-fno-evidence-sweep",

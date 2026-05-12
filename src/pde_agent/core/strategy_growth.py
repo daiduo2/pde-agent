@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 import shutil
@@ -6,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 
-PROPOSAL_STATE_HINT = "STRATEGY_PROPOSAL_RECORDED"
+from pde_agent.core.state_hint_registry import STRATEGY_PROPOSAL_RECORDED as PROPOSAL_STATE_HINT
 RUBRIC_STATE_HINT = "STRATEGY_RUBRIC_BUILT"
 PROMOTION_STATE_HINT = "STRATEGY_PROMOTION_EVALUATED"
 LEDGER_STATE_HINT = "STRATEGY_LEDGER_APPENDED"

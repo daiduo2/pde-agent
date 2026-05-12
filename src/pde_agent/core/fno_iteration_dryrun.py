@@ -1,6 +1,5 @@
 """One-command FNO diagnostic-to-config dry-run orchestration."""
 
-from __future__ import annotations
 
 import json
 from contextlib import suppress

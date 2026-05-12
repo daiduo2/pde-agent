@@ -1,6 +1,5 @@
 """Dry-run DeepONet candidate executor for closing the local evidence loop."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

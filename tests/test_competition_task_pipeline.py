@@ -69,7 +69,7 @@ def test_run_competition_task_pipeline_builds_audited_submission(tmp_path: Path)
         test_path=test_path,
         checkpoint_path=checkpoint_path,
         output_dir=tmp_path / "pipeline",
-        submission_id="team_hermes",
+        submission_id="team_default",
         dataset_key="tensor",
         force=False,
     )
@@ -122,7 +122,7 @@ def test_run_competition_task_pipeline_cli_returns_payload(tmp_path: Path) -> No
             "--output-dir",
             str(tmp_path / "pipeline"),
             "--submission-id",
-            "team_hermes",
+            "team_default",
         ],
     )
 
@@ -196,7 +196,7 @@ def test_run_competition_task_pipeline_command_can_record_local_strategy_result(
         test_path=str(tmp_path / "test.hdf5"),
         checkpoint_path=str(tmp_path / "checkpoint.pt"),
         output_dir=str(tmp_path / "pipeline"),
-        submission_id="team_hermes",
+        submission_id="team_default",
         target_path=None,
         dataset_key="tensor",
         force=False,

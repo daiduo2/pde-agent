@@ -47,7 +47,7 @@ def test_materialize_competition_candidate_builds_submission_and_score(
         candidate_report_path=candidate_report_path,
         test_path=test_path,
         output_dir=tmp_path / "materialized",
-        submission_id="team_hermes",
+        submission_id="team_default",
         target_path=target_path,
         force=True,
     )
@@ -86,7 +86,7 @@ def test_materialize_competition_candidate_cli_returns_payload(tmp_path: Path) -
             "--output-dir",
             str(tmp_path / "materialized"),
             "--submission-id",
-            "team_hermes",
+            "team_default",
             "--force",
         ],
     )

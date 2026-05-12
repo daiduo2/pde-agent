@@ -1,6 +1,0 @@
-{
-  "model_family": "fno",
-  "epochs": 20,
-  "seed": 42,
-  "loss_mode": "one_step"
-}

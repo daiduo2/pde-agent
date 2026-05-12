@@ -1,6 +1,5 @@
 """Build grouped spectral residual evidence from an audited stratification grid."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -9,7 +8,7 @@ from typing import Any
 
 
 STATE_HINT = "SPECTRAL_RESIDUAL_WINDOW_STRATIFICATION_GRID_COMPLETED"
-EVIDENCE_STATE_HINT = "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+from pde_agent.core.state_hint_registry import STRATEGY_EVIDENCE_SUMMARY_BUILT as EVIDENCE_STATE_HINT
 SOURCE_STATE_HINT = "SPECTRAL_RESIDUAL_WINDOW_STRATIFICATION_COMPLETED"
 INTERVENTION = "stratify_spectral_residual_window_evidence"
 

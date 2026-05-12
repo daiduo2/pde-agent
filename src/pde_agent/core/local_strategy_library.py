@@ -1,6 +1,5 @@
 """Built-in operator strategy library for Hermes local search."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -30,7 +29,7 @@ def build_local_strategy_library(
         "schema_version": 1,
         "state_hint": LIBRARY_STATE_HINT,
         "library_path": str(output_file),
-        "source": "hermes_local_operator_strategy_skills",
+        "source": "local_operator_strategy_skills",
         "entry_count": len(entries),
         "entries": entries,
         "next_command": "lookup-local-strategy",
@@ -307,7 +306,7 @@ def _builtin_entries() -> list[dict[str, Any]]:
                 "weights and scientific prediction logic."
             ),
             implementation_hooks=[
-                "run-hermes-operator-tuning-loop",
+                "run-operator-tuning-loop",
                 "profile-unet-runtime",
                 "predict-unet-competition",
             ],
@@ -673,7 +672,7 @@ def _builtin_entries() -> list[dict[str, Any]]:
                 "the context prefix exactly."
             ),
             implementation_hooks=[
-                "run-hermes-batch-optimization-loop",
+                "run-batch-optimization-loop",
                 "hypothesis_lab_early_subsegment_patch_search",
                 "early_subsegment_patch",
             ],
@@ -720,7 +719,7 @@ def _builtin_entries() -> list[dict[str, Any]]:
             implementation_hooks=[
                 "run-hypothesis-lab",
                 "task1_retrieval_refinement",
-                "judge-hermes-submission",
+                "judge-submission",
             ],
             expected_observables=[
                 "Task 1 proxy improves over task1_retrieval_prior_v0",
@@ -763,11 +762,11 @@ def _builtin_entries() -> list[dict[str, Any]]:
                 "and stop when accuracy gains no longer cover inference-time cost."
             ),
             implementation_hooks=[
-                "run-hermes-batch-optimization-loop",
+                "run-batch-optimization-loop",
                 "postprocess",
                 "spectral_smooth",
-                "build-hermes-iteration-memory",
-                "build-hermes-exploration-schedule",
+                "build-iteration-memory",
+                "build-exploration-schedule",
             ],
             expected_observables=[
                 "early, middle, and late segment scores improve together",
@@ -811,7 +810,7 @@ def _builtin_entries() -> list[dict[str, Any]]:
             implementation_hooks=[
                 "predict-task1-retrieval-prior",
                 "materialize-competition-candidate",
-                "judge-hermes-submission",
+                "judge-submission",
             ],
             expected_observables=[
                 "large Task 1 segment score improvement under leave-one-out validation",
@@ -853,7 +852,7 @@ def _builtin_entries() -> list[dict[str, Any]]:
             implementation_hooks=[
                 "run-hypothesis-lab",
                 "linear_trend_spectral",
-                "run-hermes-batch-optimization-loop",
+                "run-batch-optimization-loop",
             ],
             expected_observables=[
                 "higher local segment score than persistence plateau",

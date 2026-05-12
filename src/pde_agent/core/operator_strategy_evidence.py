@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 import math
@@ -8,7 +7,7 @@ from statistics import mean, pstdev
 from typing import Any
 
 
-STATE_HINT = "STRATEGY_EVIDENCE_SUMMARY_BUILT"
+from pde_agent.core.state_hint_registry import STRATEGY_EVIDENCE_SUMMARY_BUILT as STATE_HINT
 
 _NORMALIZED_RECORD_SCHEMA = {
     "schema_version": 1,

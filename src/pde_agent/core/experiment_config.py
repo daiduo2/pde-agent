@@ -1,6 +1,5 @@
 """Generate deterministic experiment configs from next-experiment plans."""
 
-from __future__ import annotations
 
 import itertools
 import json

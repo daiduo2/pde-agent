@@ -1,18 +1,65 @@
 import json
+import time
 
 import typer
 
 from pde_agent.commands.agent_runtime import build_agent_runtime_contract_command
 from pde_agent.commands.agent_runtime import (
     build_claude_fno_training_smoke_task_command,
+    build_claude_hypothesis_lab_closure_task_command,
+    build_claude_literature_candidate_closure_task_command,
     build_claude_promotion_smoke_task_command,
 )
+from pde_agent.commands.agent_runtime import export_competition_llm_log_command
+from pde_agent.commands.agent_runtime import record_agent_runtime_issue_command
+from pde_agent.commands.agent_runtime import run_claude_cli_runtime_command
 from pde_agent.commands.agent_runtime import run_claude_agent_sdk_runtime_command
+from pde_agent.commands.fno_training_closed_loop import (
+    build_fno_training_closed_loop_contract_command,
+    build_fno_training_final_report_command,
+    build_fno_training_health_report_command,
+    build_fno_training_memory_command,
+    checkpoint_fno_training_loop_command,
+    check_fno_training_convergence_command,
+    escalate_fno_training_to_hypothesis_command,
+    integrate_hypothesis_training_feedback_command,
+    resume_fno_training_loop_command,
+    run_fno_training_iteration_command,
+)
+from pde_agent.commands.fno_training_agent_loop import (
+    build_claude_fno_training_closed_loop_task_command,
+    build_fno_training_tool_catalog_command,
+    run_claude_fno_training_closed_loop_command,
+)
+from pde_agent.commands.meta_research_directive import (
+    build_agent_meta_research_directive_command,
+)
+from pde_agent.commands.research_directive import (
+    build_agent_research_directive_command,
+    evaluate_research_directive_followthrough_command,
+)
+from pde_agent.commands.run_literature_strategy_expansion import (
+    build_local_asset_algorithm_candidates_command,
+    convert_candidate_promotion_to_strategy_evidence_command,
+    evaluate_expansion_sandbox_queue_command,
+    plan_candidate_evidence_accumulation_command,
+    prepare_expansion_blocked_executor_authoring_tasks_command,
+    record_promoted_algorithm_strategy_proposal_command,
+    refine_algorithm_candidate_command,
+    run_candidate_expansion_handoff_command,
+    run_expansion_sandbox_queue_command,
+    run_literature_strategy_expansion_command,
+    summarize_literature_registry_command,
+)
+from pde_agent.commands.hypothesis_lab_policy import (
+    build_hypothesis_lab_next_policy_command,
+)
+from pde_agent.commands.plan_next_spectral_residual_experiment import (
+    plan_next_spectral_residual_experiment_command,
+)
+from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
 from pde_agent.commands.analyze_spectrum import analyze_spectrum
 from pde_agent.commands.append_strategy_ledger import append_strategy_ledger_command
-from pde_agent.commands.audit_hermes_strategy_growth_autopilot import (
-    audit_hermes_strategy_growth_autopilot_command,
-)
 from pde_agent.commands.audit_experiment_config import audit_experiment_config
 from pde_agent.commands.audit_competition_submission import (
     audit_competition_submission_command,
@@ -34,12 +81,6 @@ from pde_agent.commands.build_deeponet_evidence_sweep import (
 )
 from pde_agent.commands.build_competition_submission import (
     build_competition_submission_command,
-)
-from pde_agent.commands.build_hermes_iteration_memory import (
-    build_hermes_iteration_memory_command,
-)
-from pde_agent.commands.hermes_exploration_scheduler import (
-    build_hermes_exploration_schedule_command,
 )
 from pde_agent.commands.build_research_chronicle import (
     build_research_chronicle_command,
@@ -69,10 +110,6 @@ from pde_agent.commands.diagnose_rollout_error import diagnose_rollout_error
 from pde_agent.commands.diagnose_task2_nu_shift import (
     diagnose_task2_nu_shift_command,
 )
-from pde_agent.commands.diagnose_hermes_result import diagnose_hermes_result_command
-from pde_agent.commands.diagnose_hermes_model_quality import (
-    diagnose_hermes_model_quality_command,
-)
 from pde_agent.commands.eval_rollout import eval_rollout
 from pde_agent.commands.evaluate_burgers_residual import (
     evaluate_burgers_residual_command,
@@ -100,25 +137,14 @@ from pde_agent.commands.formalize_external_strategy_candidate import (
 )
 from pde_agent.commands.generate_baseline_prediction import generate_baseline_prediction
 from pde_agent.commands.generate_experiment_config import generate_experiment_config
-from pde_agent.commands.generate_hermes_postprocess_candidate import (
-    generate_hermes_postprocess_candidate_command,
-)
-from pde_agent.commands.hermes_strategy_growth_autopilot import (
-    hermes_strategy_growth_autopilot_command,
-)
 from pde_agent.commands.hypothesis_lab_runtime import (
     adapt_hypothesis_algorithm_sandbox_item_command,
     audit_agent_runtime_availability_command,
-    audit_hermes_availability_command,
-    audit_hermes_hypothesis_lab_infrastructure_command,
-    audit_hermes_runtime_closed_loop_command,
     build_fno_training_harness_contract_command,
     build_hypothesis_algorithm_design_command,
     build_hypothesis_kpi_report_command,
-    build_repair_policy_summary_command,
     build_scientific_tool_catalog_command,
     detect_hypothesis_doom_loop_command,
-    evaluate_hermes_task1_agent_capability_command,
     plan_fno_training_candidates_command,
     plan_hypothesis_algorithm_sandbox_command,
     plan_hypothesis_candidates_command,
@@ -126,44 +152,41 @@ from pde_agent.commands.hypothesis_lab_runtime import (
     record_fno_training_optimization_evidence_command,
     record_hypothesis_algorithm_evidence_command,
     record_hypothesis_lab_trace_event_command,
-    resolve_audit_repair_task_command,
     run_fno_training_optimization_loop_command,
-    run_hermes_auto_repair_memory_acceptance_smoke_command,
-    run_hermes_runtime_memory_bridge_smoke_command,
     run_hypothesis_algorithm_sandbox_command,
     run_hypothesis_algorithm_designer_stability_batch_command,
-    run_hypothesis_learning_constraint_smoke_command,
-    run_resolved_audit_repair_task_command,
-    run_hermes_runtime_audit_chain_command,
-    run_hermes_runtime_closed_loop_command,
     run_task1_short_window_family_selection_loop_command,
     run_task1_short_window_training_loop_command,
     summarize_hypothesis_lab_trace_command,
     validate_hypothesis_algorithm_design_command,
 )
-from pde_agent.commands.hermes_research_directive import (
-    build_hermes_research_directive_command,
-    evaluate_research_directive_followthrough_command,
-)
-from pde_agent.commands.hermes_meta_research_controller import (
-    build_hermes_meta_research_directive_command,
-)
 from pde_agent.commands.task1_candidate_factory import (
     evaluate_candidate_factory_capability_command,
     generate_task1_candidate_families_command,
+    materialize_candidate_family_item_command,
     run_candidate_family_sandbox_command,
+)
+from pde_agent.commands.task1_fno_graft_evaluator import (
+    run_task1_fno_graft_from_optimization_report_command,
+    run_task1_fno_graft_evaluator_command,
 )
 from pde_agent.commands.init_run import init_run
 from pde_agent.commands.ingest_local_strategy_result import (
     ingest_local_strategy_result_command,
+)
+from pde_agent.commands.interactive_cockpit import (
+    build_agent_dialogue_request_command,
+    build_cockpit_snapshot_command,
+    build_fno_training_loop_snapshot_command,
+    cockpit_chat_command,
+    dispatch_agent_dialogue_request_command,
+    run_interactive_cockpit_command,
 )
 from pde_agent.commands.inspect_data import inspect_data
 from pde_agent.commands.inspect_fno_checkpoint import inspect_fno_checkpoint
 from pde_agent.commands.inspect_unet_checkpoint import inspect_unet_checkpoint
 from pde_agent.commands.install_skill_draft import install_skill_draft_command
 from pde_agent.commands.interpret_error import interpret_error
-from pde_agent.commands.judge_hermes_submission import judge_hermes_submission_command
-from pde_agent.commands.lookup_strategy_skill import lookup_strategy_skill_command
 from pde_agent.commands.local_strategy_scheduler import (
     claim_next_scheduled_experiment_command,
     schedule_local_strategy_evaluation_command,
@@ -197,6 +220,7 @@ from pde_agent.commands.literature_algorithm_lab import (
     prepare_fno_literature_adaptation_task_command,
     prepare_literature_extraction_context_command,
     prepare_unet_literature_adaptation_task_command,
+    record_agent_algorithm_cards_command,
     record_bounded_executor_sandbox_evidence_command,
     record_bounded_executor_sandbox_event_command,
     record_literature_registry_event_command,
@@ -232,10 +256,6 @@ from pde_agent.commands.predict_local_model import predict_local_model
 from pde_agent.commands.plan_next_experiment import plan_next_experiment
 from pde_agent.commands.plan_next_experiment_from_fno_summary import (
     plan_next_experiment_from_fno_summary_command,
-)
-from pde_agent.commands.plan_hermes_next_action import plan_hermes_next_action_command
-from pde_agent.commands.plan_next_spectral_residual_experiment import (
-    plan_next_spectral_residual_experiment_command,
 )
 from pde_agent.commands.plan_spectral_residual_variance_intervention import (
     plan_spectral_residual_variance_intervention_command,
@@ -275,9 +295,6 @@ from pde_agent.commands.run_fno_iteration import run_fno_iteration_command
 from pde_agent.commands.run_fno_evidence_sweep import (
     run_fno_evidence_sweep_command,
 )
-from pde_agent.commands.run_hermes_batch_optimization_loop import (
-    run_hermes_batch_optimization_loop_command,
-)
 from pde_agent.commands.run_checkpoint_family_sandbox import (
     run_checkpoint_family_sandbox_command,
 )
@@ -285,45 +302,6 @@ from pde_agent.commands.compare_hypothesis_lab_memory import (
     compare_hypothesis_lab_memory_command,
 )
 from pde_agent.commands.run_hypothesis_lab import run_hypothesis_lab_command
-from pde_agent.commands.run_hermes_adaptive_heartbeat import (
-    run_hermes_adaptive_heartbeat_command,
-)
-from pde_agent.commands.run_hermes_local_strategy_loop import (
-    run_hermes_local_strategy_loop_command,
-)
-from pde_agent.commands.run_hermes_operator_tuning_loop import (
-    run_hermes_operator_tuning_loop_command,
-)
-from pde_agent.commands.run_hermes_validation_scoring import (
-    run_hermes_validation_scoring_command,
-)
-from pde_agent.commands.run_hermes_model_iteration_loop import (
-    run_hermes_model_iteration_loop_command,
-)
-from pde_agent.commands.run_hermes_convergence_loop import (
-    run_hermes_convergence_loop_command,
-)
-from pde_agent.commands.run_hermes_heartbeat import run_hermes_heartbeat_command
-from pde_agent.commands.run_hermes_literature_strategy_expansion import (
-    build_local_asset_algorithm_candidates_command,
-    convert_candidate_promotion_to_strategy_evidence_command,
-    evaluate_expansion_sandbox_queue_command,
-    plan_candidate_evidence_accumulation_command,
-    prepare_expansion_blocked_executor_authoring_tasks_command,
-    refine_algorithm_candidate_command,
-    record_promoted_algorithm_strategy_proposal_command,
-    record_hermes_literature_candidate_outcome_command,
-    run_candidate_expansion_handoff_command,
-    run_expansion_sandbox_queue_command,
-    run_hermes_literature_strategy_expansion_command,
-    summarize_literature_registry_for_hermes_command,
-)
-from pde_agent.commands.run_hermes_three_stage_policy import (
-    run_hermes_three_stage_policy_command,
-)
-from pde_agent.commands.run_hermes_submission_candidate import (
-    run_hermes_submission_candidate_command,
-)
 from pde_agent.commands.run_official_operator_comparison import (
     run_official_operator_comparison_command,
 )
@@ -355,6 +333,8 @@ from pde_agent.commands.select_pde_hypothesis import select_pde_hypothesis
 from pde_agent.commands.select_pde_hypothesis_from_fno_summary import (
     select_pde_hypothesis_from_fno_summary_command,
 )
+from pde_agent.commands.supervisor_tui import supervisor_tui_run_command
+from pde_agent.commands.supervisor_tui import supervisor_tui_runs_command
 from pde_agent.commands.train_baseline import train_baseline
 from pde_agent.commands.train_spectral_residual_baseline import (
     train_spectral_residual_baseline,
@@ -362,6 +342,153 @@ from pde_agent.commands.train_spectral_residual_baseline import (
 
 
 app = typer.Typer(help="CLI-first diagnostic harness for PDE agent experiments.")
+
+
+@app.command("supervisor-tui-runs")
+def supervisor_tui_runs_cmd(
+    runs_root: str = typer.Option("runs"),
+    limit: int = typer.Option(20),
+    wide: bool = typer.Option(False, "--wide"),
+    watch: float = typer.Option(0.0, "--watch"),
+    json_flag: bool = typer.Option(False, "--json"),
+) -> None:
+    while True:
+        view = supervisor_tui_runs_command(runs_root=runs_root, limit=limit, wide=wide)
+        if json_flag:
+            typer.echo(json.dumps(view))
+        else:
+            typer.echo(view["text"])
+        if watch <= 0:
+            break
+        time.sleep(watch)
+
+
+@app.command("supervisor-tui-run")
+def supervisor_tui_run_cmd(
+    run_dir: str = typer.Option(...),
+    json_flag: bool = typer.Option(False, "--json"),
+) -> None:
+    view = supervisor_tui_run_command(run_dir=run_dir)
+    if json_flag:
+        typer.echo(json.dumps(view))
+    else:
+        typer.echo(view["text"])
+
+
+@app.command("cockpit")
+def cockpit_cmd(
+    runs_root: str = typer.Option("runs"),
+    active_run_dir: str | None = typer.Option(None),
+    dialogue_output_dir: str = typer.Option("runs/cockpit_dialogue"),
+) -> None:
+    run_interactive_cockpit_command(
+        runs_root=runs_root,
+        active_run_dir=active_run_dir,
+        dialogue_output_dir=dialogue_output_dir,
+    )
+
+
+@app.command("cockpit-snapshot")
+def cockpit_snapshot_cmd(
+    runs_root: str = typer.Option("runs"),
+    active_run_dir: str | None = typer.Option(None),
+    limit: int = typer.Option(20),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_cockpit_snapshot_command(
+                runs_root=runs_root,
+                active_run_dir=active_run_dir,
+                limit=limit,
+            )
+        )
+    )
+
+
+@app.command("cockpit-dialogue-request")
+def cockpit_dialogue_request_cmd(
+    user_message: str = typer.Option(...),
+    runs_root: str = typer.Option("runs"),
+    active_run_dir: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_agent_dialogue_request_command(
+                user_message=user_message,
+                runs_root=runs_root,
+                active_run_dir=active_run_dir,
+                output_dir=output_dir,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("cockpit-dispatch-dialogue")
+def cockpit_dispatch_dialogue_cmd(
+    request_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option("."),
+    dry_run: bool = typer.Option(True, "--dry-run/--execute"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            dispatch_agent_dialogue_request_command(
+                request_path=request_path,
+                output_path=output_path,
+                workspace_dir=workspace_dir,
+                dry_run=dry_run,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("cockpit-chat")
+def cockpit_chat_cmd(
+    text: str = typer.Argument(...),
+    runs_root: str = typer.Option("runs"),
+    active_run_dir: str | None = typer.Option(None),
+    dialogue_output_dir: str = typer.Option("runs/cockpit_dialogue"),
+    workspace_dir: str = typer.Option("."),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    result = cockpit_chat_command(
+        text=text,
+        runs_root=runs_root,
+        active_run_dir=active_run_dir,
+        dialogue_output_dir=dialogue_output_dir,
+        workspace_dir=workspace_dir,
+        force=force,
+    )
+    if json_flag:
+        typer.echo(json.dumps(result))
+    else:
+        typer.echo(result.get("text", ""))
+
+
+@app.command("monitor-fno-training-loop")
+def monitor_fno_training_loop_cmd(
+    workspace_dir: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    result = build_fno_training_loop_snapshot_command(
+        workspace_dir=workspace_dir,
+    )
+    if json_flag:
+        typer.echo(json.dumps(result))
+    else:
+        typer.echo(result.get("panel_text", ""))
 
 
 @app.command("init-run")
@@ -373,38 +500,6 @@ def init_run_cmd(
     _ = json_flag
     typer.echo(json.dumps(init_run(run_id=run_id, runs_root=runs_root)))
 
-
-@app.command("hermes-strategy-growth-autopilot")
-def hermes_strategy_growth_autopilot_cmd(
-    seed_artifact_path: str = typer.Option(...),
-    workspace_dir: str = typer.Option(...),
-    proposal_path: str = typer.Option(...),
-    rubric_path: str = typer.Option(...),
-    skill_name: str = typer.Option(...),
-    install_root: str = typer.Option(...),
-    registry_path: str = typer.Option(...),
-    reviewer_id: str = typer.Option("hermes-autopilot"),
-    max_steps: int = typer.Option(32),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            hermes_strategy_growth_autopilot_command(
-                seed_artifact_path=seed_artifact_path,
-                workspace_dir=workspace_dir,
-                proposal_path=proposal_path,
-                rubric_path=rubric_path,
-                skill_name=skill_name,
-                install_root=install_root,
-                registry_path=registry_path,
-                reviewer_id=reviewer_id,
-                max_steps=max_steps,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("lookup-strategy-skill")
@@ -609,316 +704,6 @@ def ingest_local_strategy_result_cmd(
     )
 
 
-@app.command("run-hermes-local-strategy-loop")
-def run_hermes_local_strategy_loop_cmd(
-    output_dir: str = typer.Option(...),
-    applicable_pde: str = typer.Option(...),
-    model_family: str = typer.Option(...),
-    failure_modes: list[str] = typer.Option(..., "--failure-mode"),
-    max_experiments: int = typer.Option(3),
-    min_score_delta: float = typer.Option(1.0),
-    max_inference_seconds: float = typer.Option(120.0),
-    executor_name: str = typer.Option("dry-run", "--executor"),
-    task_id: int | None = typer.Option(None),
-    test_path: str | None = typer.Option(None),
-    checkpoint_path: str | None = typer.Option(None),
-    target_path: str | None = typer.Option(None),
-    submission_id: str = typer.Option("team_hermes"),
-    dataset_key: str = typer.Option("tensor"),
-    baseline_score: float | None = typer.Option(None),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_local_strategy_loop_command(
-                output_dir=output_dir,
-                applicable_pde=applicable_pde,
-                model_family=model_family,
-                failure_modes=failure_modes,
-                max_experiments=max_experiments,
-                min_score_delta=min_score_delta,
-                max_inference_seconds=max_inference_seconds,
-                executor_name=executor_name,
-                task_id=task_id,
-                test_path=test_path,
-                checkpoint_path=checkpoint_path,
-                target_path=target_path,
-                submission_id=submission_id,
-                dataset_key=dataset_key,
-                baseline_score=baseline_score,
-                dry_run=dry_run,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-operator-tuning-loop")
-def run_hermes_operator_tuning_loop_cmd(
-    output_dir: str = typer.Option(...),
-    operator_family: str = typer.Option(...),
-    task_id: int = typer.Option(...),
-    test_path: str = typer.Option(...),
-    checkpoint_path: str = typer.Option(...),
-    shard_sizes: list[int] = typer.Option(..., "--shard-size"),
-    inference_batch_sizes: list[int] = typer.Option(..., "--inference-batch-size"),
-    torch_num_threads_values: list[int] = typer.Option(..., "--torch-num-threads"),
-    dataset_key: str = typer.Option("tensor"),
-    timeout_seconds: float = typer.Option(120.0),
-    full_sample_count: int = typer.Option(1000),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_operator_tuning_loop_command(
-                output_dir=output_dir,
-                operator_family=operator_family,
-                task_id=task_id,
-                test_path=test_path,
-                checkpoint_path=checkpoint_path,
-                shard_sizes=shard_sizes,
-                inference_batch_sizes=inference_batch_sizes,
-                torch_num_threads_values=torch_num_threads_values,
-                dataset_key=dataset_key,
-                timeout_seconds=timeout_seconds,
-                full_sample_count=full_sample_count,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-validation-scoring")
-def run_hermes_validation_scoring_cmd(
-    output_dir: str = typer.Option(...),
-    operator_family: str = typer.Option(...),
-    task_id: int = typer.Option(...),
-    validation_path: str = typer.Option(...),
-    checkpoint_path: str = typer.Option(...),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    submission_id: str = typer.Option("team_hermes_validation"),
-    inference_batch_size: int | None = typer.Option(None),
-    torch_num_threads: int | None = typer.Option(None),
-    sample_limit: int | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_validation_scoring_command(
-                output_dir=output_dir,
-                operator_family=operator_family,
-                task_id=task_id,
-                validation_path=validation_path,
-                checkpoint_path=checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                submission_id=submission_id,
-                inference_batch_size=inference_batch_size,
-                torch_num_threads=torch_num_threads,
-                sample_limit=sample_limit,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("diagnose-hermes-model-quality")
-def diagnose_hermes_model_quality_cmd(
-    validation_report_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    min_segment_score: float = typer.Option(60.0),
-    min_task_prediction_score: float = typer.Option(45.0),
-    max_late_rmse: float = typer.Option(0.25),
-    max_inference_seconds: float = typer.Option(120.0),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            diagnose_hermes_model_quality_command(
-                validation_report_path=validation_report_path,
-                output_path=output_path,
-                min_segment_score=min_segment_score,
-                min_task_prediction_score=min_task_prediction_score,
-                max_late_rmse=max_late_rmse,
-                max_inference_seconds=max_inference_seconds,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-model-iteration-loop")
-def run_hermes_model_iteration_loop_cmd(
-    output_dir: str = typer.Option(...),
-    operator_family: str = typer.Option(...),
-    task_id: int = typer.Option(...),
-    validation_path: str = typer.Option(...),
-    checkpoint_path: str = typer.Option(...),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    submission_id: str = typer.Option("team_hermes_validation"),
-    inference_batch_size: int | None = typer.Option(None),
-    torch_num_threads: int | None = typer.Option(None),
-    sample_limit: int | None = typer.Option(None),
-    min_segment_score: float = typer.Option(60.0),
-    min_task_prediction_score: float = typer.Option(45.0),
-    max_late_rmse: float = typer.Option(0.25),
-    max_inference_seconds: float = typer.Option(120.0),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_model_iteration_loop_command(
-                output_dir=output_dir,
-                operator_family=operator_family,
-                task_id=task_id,
-                validation_path=validation_path,
-                checkpoint_path=checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                submission_id=submission_id,
-                inference_batch_size=inference_batch_size,
-                torch_num_threads=torch_num_threads,
-                sample_limit=sample_limit,
-                min_segment_score=min_segment_score,
-                min_task_prediction_score=min_task_prediction_score,
-                max_late_rmse=max_late_rmse,
-                max_inference_seconds=max_inference_seconds,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("judge-hermes-submission")
-def judge_hermes_submission_cmd(
-    submission_dir: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            judge_hermes_submission_command(
-                submission_dir=submission_dir,
-                output_path=output_path,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-batch-optimization-loop")
-def run_hermes_batch_optimization_loop_cmd(
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    max_rounds: int = typer.Option(3),
-    patience: int = typer.Option(1),
-    min_score_improvement: float = typer.Option(1.0),
-    submit_score_threshold: float = typer.Option(120.0),
-    learning_objective: str = typer.Option("score"),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task1_reference_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    unet_checkpoint_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    candidate_submission_dirs: list[str] = typer.Option(
-        [],
-        "--candidate-submission-dir",
-    ),
-    candidate_generator: str = typer.Option("none"),
-    hypothesis_blueprint_path: str | None = typer.Option(None),
-    hypothesis_reference_path: str | None = typer.Option(None),
-    hypothesis_reference_sample_limit: int | None = typer.Option(None),
-    hypothesis_reference_sample_limits: list[int] = typer.Option(
-        [],
-        "--hypothesis-reference-search-limit",
-    ),
-    postprocess_search_mode: str = typer.Option("paired"),
-    postprocess_strategies: list[str] = typer.Option(
-        [],
-        "--postprocess-strategy",
-    ),
-    postprocess_blend_weights: list[float] = typer.Option(
-        [],
-        "--postprocess-blend-weight",
-    ),
-    postprocess_adaptive_step: float = typer.Option(0.125),
-    submission_id: str = typer.Option("team_hermes"),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    deadline_seconds: float | None = typer.Option(None),
-    checkpoint_every: int = typer.Option(0),
-    memory_json_path: str | None = typer.Option(None),
-    avoid_repeating: bool = typer.Option(False, "--avoid-repeating"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_batch_optimization_loop_command(
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                max_rounds=max_rounds,
-                patience=patience,
-                min_score_improvement=min_score_improvement,
-                submit_score_threshold=submit_score_threshold,
-                learning_objective=learning_objective,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task1_reference_path=task1_reference_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                unet_checkpoint_path=unet_checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                candidate_submission_dirs=candidate_submission_dirs,
-                candidate_generator=candidate_generator,
-                hypothesis_blueprint_path=hypothesis_blueprint_path,
-                hypothesis_reference_path=hypothesis_reference_path,
-                hypothesis_reference_sample_limit=hypothesis_reference_sample_limit,
-                hypothesis_reference_sample_limits=hypothesis_reference_sample_limits,
-                postprocess_search_mode=postprocess_search_mode,
-                postprocess_strategies=postprocess_strategies,
-                postprocess_blend_weights=postprocess_blend_weights,
-                postprocess_adaptive_step=postprocess_adaptive_step,
-                submission_id=submission_id,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                deadline_seconds=deadline_seconds,
-                checkpoint_every=checkpoint_every,
-                memory_json_path=memory_json_path,
-                avoid_repeating=avoid_repeating,
-                force=force,
-            )
-        )
-    )
-
 
 @app.command("run-hypothesis-lab")
 def run_hypothesis_lab_cmd(
@@ -941,7 +726,7 @@ def run_hypothesis_lab_cmd(
     reference_path: str | None = typer.Option(None),
     reference_sample_limit: int | None = typer.Option(None),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     timing_profile: str | None = typer.Option(None),
     timing_factor: float | None = typer.Option(None),
     trace_path: str | None = typer.Option(None),
@@ -1049,6 +834,10 @@ def detect_hypothesis_doom_loop_cmd(
 @app.command("build-scientific-tool-catalog")
 def build_scientific_tool_catalog_cmd(
     output_path: str = typer.Option(...),
+    include_compatibility_tools: bool = typer.Option(
+        False,
+        "--include-compatibility-tools",
+    ),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1057,35 +846,12 @@ def build_scientific_tool_catalog_cmd(
         json.dumps(
             build_scientific_tool_catalog_command(
                 output_path=output_path,
+                include_compatibility_tools=include_compatibility_tools,
                 force=force,
             )
         )
     )
 
-
-@app.command("audit-hermes-availability")
-def audit_hermes_availability_cmd(
-    output_path: str = typer.Option(...),
-    tool_catalog_path: str = typer.Option(...),
-    canary_report_paths: list[str] = typer.Option([], "--canary-report-path"),
-    cli_commands: list[str] = typer.Option([], "--cli-command"),
-    required_commands: list[str] = typer.Option([], "--required-command"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            audit_hermes_availability_command(
-                output_path=output_path,
-                tool_catalog_path=tool_catalog_path,
-                canary_report_paths=canary_report_paths,
-                cli_commands=cli_commands,
-                required_commands=required_commands,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("audit-agent-runtime-availability")
@@ -1145,6 +911,7 @@ def run_claude_agent_sdk_runtime_cmd(
     prompt: str | None = typer.Option(None),
     prompt_file: str | None = typer.Option(None),
     output_path: str = typer.Option(...),
+    event_log_path: str | None = typer.Option(None),
     workspace_dir: str = typer.Option("."),
     allowed_tools: list[str] = typer.Option(
         ["Read", "Glob", "Grep", "Bash"],
@@ -1158,6 +925,11 @@ def run_claude_agent_sdk_runtime_cmd(
         ["uv run --frozen pde-agent"],
         "--allowed-bash-prefix",
     ),
+    allowed_pde_agent_commands: list[str] = typer.Option(
+        [],
+        "--allowed-pde-agent-command",
+    ),
+    timeout_seconds: int = typer.Option(3600),
     dry_run: bool = typer.Option(False, "--dry-run"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
@@ -1169,11 +941,68 @@ def run_claude_agent_sdk_runtime_cmd(
                 prompt=prompt,
                 prompt_file=prompt_file,
                 output_path=output_path,
+                event_log_path=event_log_path,
                 workspace_dir=workspace_dir,
                 allowed_tools=allowed_tools,
                 disallowed_tools=disallowed_tools,
                 allowed_bash_prefixes=allowed_bash_prefixes,
+                allowed_pde_agent_commands=allowed_pde_agent_commands,
                 dry_run=dry_run,
+                force=force,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    )
+
+
+@app.command("run-claude-cli-runtime")
+def run_claude_cli_runtime_cmd(
+    prompt: str | None = typer.Option(None),
+    prompt_file: str | None = typer.Option(None),
+    output_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option("."),
+    allowed_tools: list[str] = typer.Option(["Read", "Bash"], "--allowed-tool"),
+    disallowed_tools: list[str] = typer.Option(["Edit", "Write"], "--disallowed-tool"),
+    permission_mode: str = typer.Option("dontAsk"),
+    output_format: str = typer.Option("stream-json"),
+    timeout_seconds: int = typer.Option(3600),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_claude_cli_runtime_command(
+                prompt=prompt,
+                prompt_file=prompt_file,
+                output_path=output_path,
+                workspace_dir=workspace_dir,
+                allowed_tools=allowed_tools,
+                disallowed_tools=disallowed_tools,
+                permission_mode=permission_mode,
+                output_format=output_format,
+                timeout_seconds=timeout_seconds,
+                dry_run=dry_run,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("export-competition-llm-log")
+def export_competition_llm_log_cmd(
+    session_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            export_competition_llm_log_command(
+                session_path=session_path,
+                output_path=output_path,
                 force=force,
             )
         )
@@ -1230,6 +1059,97 @@ def build_claude_promotion_smoke_task_cmd(
     )
 
 
+@app.command("build-claude-hypothesis-lab-closure-task")
+def build_claude_hypothesis_lab_closure_task_cmd(
+    output_dir: str = typer.Option(...),
+    workspace_dir: str = typer.Option("."),
+    runtime_contract_path: str = typer.Option(...),
+    tool_catalog_path: str = typer.Option(...),
+    candidate_family_sandbox_path: str = typer.Option(...),
+    context_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    reference_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_claude_hypothesis_lab_closure_task_command(
+                output_dir=output_dir,
+                workspace_dir=workspace_dir,
+                runtime_contract_path=runtime_contract_path,
+                tool_catalog_path=tool_catalog_path,
+                candidate_family_sandbox_path=candidate_family_sandbox_path,
+                context_path=context_path,
+                target_path=target_path,
+                reference_path=reference_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-claude-literature-candidate-closure-task")
+def build_claude_literature_candidate_closure_task_cmd(
+    output_dir: str = typer.Option(...),
+    workspace_dir: str = typer.Option("."),
+    runtime_contract_path: str = typer.Option(...),
+    tool_catalog_path: str = typer.Option(...),
+    paper_parse_path: str = typer.Option(...),
+    operator_family: str = typer.Option("fno"),
+    target_problem: str = typer.Option("PDE_Burgers task1 early/middle dynamics"),
+    registry_path: str = typer.Option(...),
+    current_best_score: float = typer.Option(0.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_claude_literature_candidate_closure_task_command(
+                output_dir=output_dir,
+                workspace_dir=workspace_dir,
+                runtime_contract_path=runtime_contract_path,
+                tool_catalog_path=tool_catalog_path,
+                paper_parse_path=paper_parse_path,
+                operator_family=operator_family,
+                target_problem=target_problem,
+                registry_path=registry_path,
+                current_best_score=current_best_score,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("record-agent-runtime-issue")
+def record_agent_runtime_issue_cmd(
+    output_path: str = typer.Option(...),
+    failed_command: str = typer.Option(...),
+    artifact_path: str | None = typer.Option(None),
+    stderr_summary: str = typer.Option(...),
+    likely_schema_gap: bool = typer.Option(False, "--likely-schema-gap/--not-schema-gap"),
+    next_action: str = typer.Option("stop_after_issue_recorded"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_agent_runtime_issue_command(
+                output_path=output_path,
+                failed_command=failed_command,
+                artifact_path=artifact_path,
+                stderr_summary=stderr_summary,
+                likely_schema_gap=likely_schema_gap,
+                next_action=next_action,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("build-hypothesis-kpi-report")
 def build_hypothesis_kpi_report_cmd(
     trace_path: str = typer.Option(...),
@@ -1251,100 +1171,20 @@ def build_hypothesis_kpi_report_cmd(
     )
 
 
-@app.command("evaluate-hermes-task1-agent-capability")
-def evaluate_hermes_task1_agent_capability_cmd(
-    chain_report_path: str = typer.Option(...),
-    trace_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    baseline_score: float | None = typer.Option(None),
-    min_score_delta: float = typer.Option(0.5),
-    min_unique_candidate_families: int = typer.Option(2),
-    min_sandbox_evidence_events: int = typer.Option(1),
-    require_independent_slice_evidence: bool = typer.Option(
-        False,
-        "--require-independent-slice-evidence",
-    ),
-    memory_json_path: str | None = typer.Option(None),
-    exploration_schedule_path: str | None = typer.Option(None),
-    require_control_layer_evidence: bool = typer.Option(
-        False,
-        "--require-control-layer-evidence",
-    ),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            evaluate_hermes_task1_agent_capability_command(
-                chain_report_path=chain_report_path,
-                trace_path=trace_path,
-                output_path=output_path,
-                baseline_score=baseline_score,
-                min_score_delta=min_score_delta,
-                min_unique_candidate_families=min_unique_candidate_families,
-                min_sandbox_evidence_events=min_sandbox_evidence_events,
-                require_independent_slice_evidence=(
-                    require_independent_slice_evidence
-                ),
-                memory_json_path=memory_json_path,
-                exploration_schedule_path=exploration_schedule_path,
-                require_control_layer_evidence=require_control_layer_evidence,
-                force=force,
-            )
-        )
-    )
 
-
-@app.command("build-hermes-exploration-schedule")
-def build_hermes_exploration_schedule_cmd(
-    memory_json_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            build_hermes_exploration_schedule_command(
-                memory_json_path=memory_json_path,
-                output_path=output_path,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("build-repair-policy-summary")
-def build_repair_policy_summary_cmd(
-    trace_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    recent_window: int = typer.Option(50),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            build_repair_policy_summary_command(
-                trace_path=trace_path,
-                output_path=output_path,
-                recent_window=recent_window,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("plan-hypothesis-candidates")
 def plan_hypothesis_candidates_cmd(
     output_path: str = typer.Option(...),
     candidate_generator: str = typer.Option("postprocess"),
+    hypothesis_lab_next_policy_path: str | None = typer.Option(None),
     doom_loop_report_path: str | None = typer.Option(None),
     hypothesis_kpi_report_path: str | None = typer.Option(None),
     repair_policy_summary_path: str | None = typer.Option(None),
     research_chronicle_path: str | None = typer.Option(None),
     expansion_handoff_report_path: str | None = typer.Option(None),
+    expansion_report_path: str | None = typer.Option(None),
     audit_repair_tasks_path: str | None = typer.Option(None),
     preferred_error_modes: list[str] = typer.Option([], "--preferred-error-mode"),
     max_schedule_length: int = typer.Option(5),
@@ -1358,11 +1198,13 @@ def plan_hypothesis_candidates_cmd(
             plan_hypothesis_candidates_command(
                 output_path=output_path,
                 candidate_generator=candidate_generator,
+                hypothesis_lab_next_policy_path=hypothesis_lab_next_policy_path,
                 doom_loop_report_path=doom_loop_report_path,
                 hypothesis_kpi_report_path=hypothesis_kpi_report_path,
                 repair_policy_summary_path=repair_policy_summary_path,
                 research_chronicle_path=research_chronicle_path,
                 expansion_handoff_report_path=expansion_handoff_report_path,
+                expansion_report_path=expansion_report_path,
                 audit_repair_tasks_path=audit_repair_tasks_path,
                 preferred_error_modes=preferred_error_modes,
                 max_schedule_length=max_schedule_length,
@@ -1496,7 +1338,7 @@ def run_hypothesis_algorithm_sandbox_cmd(
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     reference_path: str | None = typer.Option(None),
     reference_sample_limit: int | None = typer.Option(None),
     timing_profile: str | None = typer.Option(None),
@@ -1529,7 +1371,7 @@ def run_hypothesis_algorithm_designer_stability_batch_cmd(
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     reference_path: str | None = typer.Option(None),
     reference_sample_limit: int | None = typer.Option(None),
     initial_submission_dir: str | None = typer.Option(None),
@@ -1568,6 +1410,7 @@ def run_task1_short_window_training_loop_cmd(
     time_reduction: int = typer.Option(1),
     space_reduction: int = typer.Option(4),
     model_family: str = typer.Option("conv1d_residual"),
+    normalization: str = typer.Option("none"),
     train_steps: int = typer.Option(8),
     batch_size: int = typer.Option(16),
     learning_rate: float = typer.Option(1e-3),
@@ -1589,6 +1432,7 @@ def run_task1_short_window_training_loop_cmd(
                 time_reduction=time_reduction,
                 space_reduction=space_reduction,
                 model_family=model_family,
+                normalization=normalization,
                 train_steps=train_steps,
                 batch_size=batch_size,
                 learning_rate=learning_rate,
@@ -1650,6 +1494,9 @@ def build_fno_training_harness_contract_cmd(
     output_path: str = typer.Option(...),
     workspace_dir: str = typer.Option(...),
     source_path: str = typer.Option(...),
+    baseline_prediction_path: str | None = typer.Option(None),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
     previous_evidence_paths: list[str] = typer.Option([], "--previous-evidence-path"),
     dataset_key: str = typer.Option("tensor"),
     train_sample_limit: int = typer.Option(16),
@@ -1665,14 +1512,16 @@ def build_fno_training_harness_contract_cmd(
     widths: list[int] = typer.Option([16, 32], "--width"),
     depths: list[int] = typer.Option([1], "--depth"),
     loss_types: list[str] = typer.Option(
-        ["mse", "early_weighted_mse", "spectral_mse"],
+        ["mse", "early_weighted_mse", "horizon_weighted_mse", "spectral_mse"],
         "--loss-type",
     ),
+    normalizations: list[str] = typer.Option(["none"], "--normalization"),
     forecast_steps_values: list[int] = typer.Option(
         [12, 20],
         "--forecast-steps-value",
     ),
     train_steps_values: list[int] = typer.Option([1, 2], "--train-steps-value"),
+    search_guidance: list[str] = typer.Option([], "--search-guidance"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1683,6 +1532,9 @@ def build_fno_training_harness_contract_cmd(
                 output_path=output_path,
                 workspace_dir=workspace_dir,
                 source_path=source_path,
+                baseline_prediction_path=baseline_prediction_path,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
                 previous_evidence_paths=previous_evidence_paths,
                 dataset_key=dataset_key,
                 train_sample_limit=train_sample_limit,
@@ -1698,12 +1550,16 @@ def build_fno_training_harness_contract_cmd(
                 widths=widths,
                 depths=depths,
                 loss_types=loss_types,
+                normalizations=normalizations,
                 forecast_steps_values=forecast_steps_values,
                 train_steps_values=train_steps_values,
+                search_guidance=search_guidance,
                 force=force,
             )
         )
     )
+
+
 
 
 @app.command("plan-fno-training-candidates")
@@ -1715,14 +1571,16 @@ def plan_fno_training_candidates_cmd(
     widths: list[int] = typer.Option([16, 32], "--width"),
     depths: list[int] = typer.Option([1], "--depth"),
     loss_types: list[str] = typer.Option(
-        ["mse", "early_weighted_mse", "spectral_mse"],
+        ["mse", "early_weighted_mse", "horizon_weighted_mse", "spectral_mse"],
         "--loss-type",
     ),
+    normalizations: list[str] = typer.Option(["none"], "--normalization"),
     forecast_steps_values: list[int] = typer.Option(
         [12, 20],
         "--forecast-steps-value",
     ),
     train_steps_values: list[int] = typer.Option([1, 2], "--train-steps-value"),
+    search_guidance: list[str] = typer.Option([], "--search-guidance"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1737,8 +1595,10 @@ def plan_fno_training_candidates_cmd(
                 widths=widths,
                 depths=depths,
                 loss_types=loss_types,
+                normalizations=normalizations,
                 forecast_steps_values=forecast_steps_values,
                 train_steps_values=train_steps_values,
+                search_guidance=search_guidance,
                 force=force,
             )
         )
@@ -1784,10 +1644,85 @@ def run_fno_training_optimization_loop_cmd(
     )
 
 
+@app.command("run-task1-fno-graft-evaluator")
+def run_task1_fno_graft_evaluator_cmd(
+    baseline_prediction_path: str = typer.Option(...),
+    checkpoint_path: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    target_dataset_key: str = typer.Option("tensor"),
+    windows: list[str] = typer.Option([], "--window"),
+    blend_weights: list[float] = typer.Option([], "--blend-weight"),
+    late_non_regression_tolerance: float = typer.Option(0.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_task1_fno_graft_evaluator_command(
+                baseline_prediction_path=baseline_prediction_path,
+                checkpoint_path=checkpoint_path,
+                test_path=test_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                target_dataset_key=target_dataset_key,
+                windows=windows,
+                blend_weights=blend_weights,
+                late_non_regression_tolerance=late_non_regression_tolerance,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-task1-fno-graft-from-optimization-report")
+def run_task1_fno_graft_from_optimization_report_cmd(
+    optimization_report_path: str = typer.Option(...),
+    baseline_prediction_path: str = typer.Option(...),
+    test_path: str = typer.Option(...),
+    target_path: str = typer.Option(...),
+    output_dir: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    prediction_dataset_key: str = typer.Option("tensor"),
+    target_dataset_key: str = typer.Option("tensor"),
+    windows: list[str] = typer.Option([], "--window"),
+    blend_weights: list[float] = typer.Option([], "--blend-weight"),
+    late_non_regression_tolerance: float = typer.Option(0.0),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_task1_fno_graft_from_optimization_report_command(
+                optimization_report_path=optimization_report_path,
+                baseline_prediction_path=baseline_prediction_path,
+                test_path=test_path,
+                target_path=target_path,
+                output_dir=output_dir,
+                dataset_key=dataset_key,
+                prediction_dataset_key=prediction_dataset_key,
+                target_dataset_key=target_dataset_key,
+                windows=windows,
+                blend_weights=blend_weights,
+                late_non_regression_tolerance=late_non_regression_tolerance,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("record-fno-training-optimization-evidence")
 def record_fno_training_optimization_evidence_cmd(
     optimization_report_path: str = typer.Option(...),
     output_path: str = typer.Option(...),
+    graft_report_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -1797,6 +1732,7 @@ def record_fno_training_optimization_evidence_cmd(
             record_fno_training_optimization_evidence_command(
                 optimization_report_path=optimization_report_path,
                 output_path=output_path,
+                graft_report_path=graft_report_path,
                 force=force,
             )
         )
@@ -1897,8 +1833,51 @@ def evaluate_candidate_factory_capability_cmd(
     )
 
 
-@app.command("build-hermes-research-directive")
-def build_hermes_research_directive_cmd(
+@app.command("materialize-candidate-family-item")
+def materialize_candidate_family_item_cmd(
+    sandbox_report_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    candidate_family_id: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            materialize_candidate_family_item_command(
+                sandbox_report_path=sandbox_report_path,
+                output_path=output_path,
+                candidate_family_id=candidate_family_id,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-hypothesis-lab-next-policy")
+def build_hypothesis_lab_next_policy_cmd(
+    output_path: str = typer.Option(...),
+    failure_memory_path: str | None = typer.Option(None),
+    hypothesis_lab_report_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_hypothesis_lab_next_policy_command(
+                output_path=output_path,
+                failure_memory_path=failure_memory_path,
+                hypothesis_lab_report_path=hypothesis_lab_report_path,
+                force=force,
+            )
+        )
+    )
+
+
+
+@app.command("build-agent-research-directive")
+def build_agent_research_directive_cmd(
     task1_benchmark_path: str = typer.Option(...),
     candidate_factory_benchmark_path: str = typer.Option(...),
     output_path: str = typer.Option(...),
@@ -1909,7 +1888,7 @@ def build_hermes_research_directive_cmd(
     _ = json_flag
     typer.echo(
         json.dumps(
-            build_hermes_research_directive_command(
+            build_agent_research_directive_command(
                 task1_benchmark_path=task1_benchmark_path,
                 candidate_factory_benchmark_path=candidate_factory_benchmark_path,
                 output_path=output_path,
@@ -1941,8 +1920,9 @@ def evaluate_research_directive_followthrough_cmd(
     )
 
 
-@app.command("build-hermes-meta-research-directive")
-def build_hermes_meta_research_directive_cmd(
+
+@app.command("build-agent-meta-research-directive")
+def build_agent_meta_research_directive_cmd(
     followthrough_report_path: str = typer.Option(...),
     chain_report_path: str = typer.Option(...),
     task1_benchmark_path: str = typer.Option(...),
@@ -1954,7 +1934,7 @@ def build_hermes_meta_research_directive_cmd(
     _ = json_flag
     typer.echo(
         json.dumps(
-            build_hermes_meta_research_directive_command(
+            build_agent_meta_research_directive_command(
                 followthrough_report_path=followthrough_report_path,
                 chain_report_path=chain_report_path,
                 task1_benchmark_path=task1_benchmark_path,
@@ -1965,336 +1945,6 @@ def build_hermes_meta_research_directive_cmd(
         )
     )
 
-
-@app.command("run-hypothesis-learning-constraint-smoke")
-def run_hypothesis_learning_constraint_smoke_cmd(
-    trace_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    local_strategy_library_path: str = typer.Option(...),
-    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
-    candidate_generator: str = typer.Option("sem_window_blend"),
-    min_viable_candidate_count: int = typer.Option(999),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hypothesis_learning_constraint_smoke_command(
-                trace_path=trace_path,
-                output_dir=output_dir,
-                local_strategy_library_path=local_strategy_library_path,
-                checkpoint_paths=checkpoint_paths,
-                candidate_generator=candidate_generator,
-                min_viable_candidate_count=min_viable_candidate_count,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-runtime-memory-bridge-smoke")
-def run_hermes_runtime_memory_bridge_smoke_cmd(
-    trace_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    task1_test_path: str = typer.Option(...),
-    task1_target_path: str = typer.Option(...),
-    audit_repair_tasks_path: str = typer.Option(...),
-    candidate_generator: str = typer.Option("postprocess"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_runtime_memory_bridge_smoke_command(
-                trace_path=trace_path,
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                audit_repair_tasks_path=audit_repair_tasks_path,
-                candidate_generator=candidate_generator,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-auto-repair-memory-acceptance-smoke")
-def run_hermes_auto_repair_memory_acceptance_smoke_cmd(
-    trace_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    task1_test_path: str = typer.Option(...),
-    task1_target_path: str = typer.Option(...),
-    candidate_generator: str = typer.Option("postprocess"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_auto_repair_memory_acceptance_smoke_command(
-                trace_path=trace_path,
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                candidate_generator=candidate_generator,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("audit-hermes-hypothesis-lab-infrastructure")
-def audit_hermes_hypothesis_lab_infrastructure_cmd(
-    acceptance_smoke_path: str = typer.Option(...),
-    preflight_chain_report_path: str = typer.Option(...),
-    runbook_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    min_completed_iterations: int = typer.Option(1),
-    stability_chain_report_path: str | None = typer.Option(None),
-    candidate_pressure_chain_report_path: str | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            audit_hermes_hypothesis_lab_infrastructure_command(
-                acceptance_smoke_path=acceptance_smoke_path,
-                preflight_chain_report_path=preflight_chain_report_path,
-                runbook_path=runbook_path,
-                output_path=output_path,
-                min_completed_iterations=min_completed_iterations,
-                stability_chain_report_path=stability_chain_report_path,
-                candidate_pressure_chain_report_path=(
-                    candidate_pressure_chain_report_path
-                ),
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("resolve-audit-repair-task")
-def resolve_audit_repair_task_cmd(
-    audit_repair_tasks_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    task_id: str | None = typer.Option(None),
-    provided_inputs: list[str] = typer.Option([], "--provided-input"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            resolve_audit_repair_task_command(
-                audit_repair_tasks_path=audit_repair_tasks_path,
-                output_path=output_path,
-                task_id=task_id,
-                provided_inputs=provided_inputs,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-resolved-audit-repair-task")
-def run_resolved_audit_repair_task_cmd(
-    audit_repair_tasks_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    task_id: str | None = typer.Option(None),
-    provided_inputs: list[str] = typer.Option([], "--provided-input"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_resolved_audit_repair_task_command(
-                audit_repair_tasks_path=audit_repair_tasks_path,
-                output_dir=output_dir,
-                task_id=task_id,
-                provided_inputs=provided_inputs,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-runtime-closed-loop")
-def run_hermes_runtime_closed_loop_cmd(
-    output_dir: str = typer.Option(...),
-    trace_path: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    candidate_generator: str = typer.Option("postprocess"),
-    candidate_generator_fallback: str = typer.Option("auto"),
-    max_batches: int = typer.Option(1),
-    recent_window: int = typer.Option(50),
-    repeated_family_threshold: int = typer.Option(3),
-    failed_family_threshold: int = typer.Option(2),
-    min_score_delta: float = typer.Option(0.1),
-    max_rounds_per_batch: int = typer.Option(1),
-    batch_deadline_seconds: float = typer.Option(300.0),
-    submit_score_threshold: float = typer.Option(120.0),
-    learning_objective: str = typer.Option("score"),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task1_reference_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    evidence_accumulation_plan_path: str | None = typer.Option(None),
-    expansion_registry_summary_path: str | None = typer.Option(None),
-    expansion_handoff_report_path: str | None = typer.Option(None),
-    audit_repair_tasks_path: str | None = typer.Option(None),
-    input_research_chronicle_path: str | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_runtime_closed_loop_command(
-                output_dir=output_dir,
-                trace_path=trace_path,
-                initial_submission_dir=initial_submission_dir,
-                candidate_generator=candidate_generator,
-                candidate_generator_fallback=candidate_generator_fallback,
-                max_batches=max_batches,
-                recent_window=recent_window,
-                repeated_family_threshold=repeated_family_threshold,
-                failed_family_threshold=failed_family_threshold,
-                min_score_delta=min_score_delta,
-                max_rounds_per_batch=max_rounds_per_batch,
-                batch_deadline_seconds=batch_deadline_seconds,
-                submit_score_threshold=submit_score_threshold,
-                learning_objective=learning_objective,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task1_reference_path=task1_reference_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                evidence_accumulation_plan_path=evidence_accumulation_plan_path,
-                expansion_registry_summary_path=expansion_registry_summary_path,
-                expansion_handoff_report_path=expansion_handoff_report_path,
-                audit_repair_tasks_path=audit_repair_tasks_path,
-                input_research_chronicle_path=input_research_chronicle_path,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("audit-hermes-runtime-closed-loop")
-def audit_hermes_runtime_closed_loop_cmd(
-    runtime_report_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    require_guard_effect: bool = typer.Option(False, "--require-guard-effect"),
-    require_learning_constraint_smoke: bool = typer.Option(
-        False,
-        "--require-learning-constraint-smoke",
-    ),
-    require_runtime_memory_bridge_smoke: bool = typer.Option(
-        False,
-        "--require-runtime-memory-bridge-smoke",
-    ),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            audit_hermes_runtime_closed_loop_command(
-                runtime_report_path=runtime_report_path,
-                output_path=output_path,
-                require_guard_effect=require_guard_effect,
-                require_learning_constraint_smoke=require_learning_constraint_smoke,
-                require_runtime_memory_bridge_smoke=require_runtime_memory_bridge_smoke,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-runtime-audit-chain")
-def run_hermes_runtime_audit_chain_cmd(
-    output_dir: str = typer.Option(...),
-    trace_path: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    candidate_generator: str = typer.Option("postprocess"),
-    candidate_generator_fallback: str = typer.Option("auto"),
-    iterations: int = typer.Option(2),
-    max_batches: int = typer.Option(1),
-    recent_window: int = typer.Option(50),
-    repeated_family_threshold: int = typer.Option(3),
-    failed_family_threshold: int = typer.Option(2),
-    min_score_delta: float = typer.Option(0.1),
-    max_rounds_per_batch: int = typer.Option(1),
-    batch_deadline_seconds: float = typer.Option(300.0),
-    submit_score_threshold: float = typer.Option(120.0),
-    learning_objective: str = typer.Option("score"),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task1_reference_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    audit_repair_tasks_path: str | None = typer.Option(None),
-    hypothesis_candidate_options_json: str | None = typer.Option(None),
-    research_directive_path: str | None = typer.Option(None),
-    preflight_acceptance_smoke_path: str | None = typer.Option(None),
-    preflight_infrastructure_audit_path: str | None = typer.Option(None),
-    auto_repair: bool = typer.Option(False, "--auto-repair"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_runtime_audit_chain_command(
-                output_dir=output_dir,
-                trace_path=trace_path,
-                initial_submission_dir=initial_submission_dir,
-                candidate_generator=candidate_generator,
-                candidate_generator_fallback=candidate_generator_fallback,
-                iterations=iterations,
-                max_batches=max_batches,
-                recent_window=recent_window,
-                repeated_family_threshold=repeated_family_threshold,
-                failed_family_threshold=failed_family_threshold,
-                min_score_delta=min_score_delta,
-                max_rounds_per_batch=max_rounds_per_batch,
-                batch_deadline_seconds=batch_deadline_seconds,
-                submit_score_threshold=submit_score_threshold,
-                learning_objective=learning_objective,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task1_reference_path=task1_reference_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                audit_repair_tasks_path=audit_repair_tasks_path,
-                hypothesis_candidate_options_json=hypothesis_candidate_options_json,
-                research_directive_path=research_directive_path,
-                preflight_acceptance_smoke_path=preflight_acceptance_smoke_path,
-                preflight_infrastructure_audit_path=(
-                    preflight_infrastructure_audit_path
-                ),
-                auto_repair=auto_repair,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("compare-hypothesis-lab-memory")
@@ -2312,7 +1962,7 @@ def compare_hypothesis_lab_memory_cmd(
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2407,7 +2057,7 @@ def run_arxiv_mineru_parse_pipeline_cmd(
     mode: str = typer.Option("precise_url"),
     model_version: str = typer.Option("vlm"),
     max_results: int = typer.Option(5),
-    selected_index: int = typer.Option(0),
+    selected_index: int = typer.Option(-1),
     max_polls: int = typer.Option(3),
     poll_interval_seconds: float = typer.Option(5.0),
     force: bool = typer.Option(False, "--force"),
@@ -2708,6 +2358,25 @@ def extract_algorithm_cards_cmd(
     )
 
 
+@app.command("record-agent-algorithm-cards")
+def record_agent_algorithm_cards_cmd(
+    cards_json: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            record_agent_algorithm_cards_command(
+                cards_json=cards_json,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("compile-algorithm-candidates")
 def compile_algorithm_candidates_cmd(
     algorithm_cards_path: str = typer.Option(...),
@@ -2773,6 +2442,7 @@ def run_literature_algorithm_v2_pipeline_cmd(
     current_best_score: float = typer.Option(...),
     algorithm_candidate_id: str | None = typer.Option(None),
     sandbox_evidence_paths: list[str] = typer.Option([], "--sandbox-evidence-path"),
+    paper_parse_paths: list[str] = typer.Option([], "--paper-parse-path"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -2786,6 +2456,7 @@ def run_literature_algorithm_v2_pipeline_cmd(
                 current_best_score=current_best_score,
                 algorithm_candidate_id=algorithm_candidate_id,
                 sandbox_evidence_paths=sandbox_evidence_paths,
+                paper_parse_paths=paper_parse_paths,
                 force=force,
             )
         )
@@ -2987,7 +2658,7 @@ def run_bounded_executor_sandbox_cmd(
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     trace_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
@@ -3061,7 +2732,7 @@ def prepare_bounded_executor_authoring_task_cmd(
     sandbox_output_dir: str = typer.Option(...),
     audit_output_path: str = typer.Option(...),
     event_output_path: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
 ) -> None:
@@ -3140,7 +2811,7 @@ def run_checkpoint_family_sandbox_cmd(
     test_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     dataset_key: str = typer.Option("tensor"),
     prediction_dataset_key: str = typer.Option("tensor"),
     calibration_weights: list[float] = typer.Option([1.0], "--calibration-weight"),
@@ -3171,297 +2842,6 @@ def run_checkpoint_family_sandbox_cmd(
         )
     )
 
-
-@app.command("generate-hermes-postprocess-candidate")
-def generate_hermes_postprocess_candidate_cmd(
-    base_submission_dir: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    task_id: int = typer.Option(...),
-    test_path: str = typer.Option(...),
-    strategy: str = typer.Option(...),
-    blend_weight: float = typer.Option(0.25),
-    submission_id: str = typer.Option("team_hermes"),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            generate_hermes_postprocess_candidate_command(
-                base_submission_dir=base_submission_dir,
-                output_dir=output_dir,
-                task_id=task_id,
-                test_path=test_path,
-                strategy=strategy,
-                blend_weight=blend_weight,
-                submission_id=submission_id,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("build-hermes-iteration-memory")
-def build_hermes_iteration_memory_cmd(
-    batch_loop_report_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    memory_json_path: str = typer.Option(...),
-    submission_dir: str | None = typer.Option(None),
-    task_ids: list[int] = typer.Option([], "--task-id"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            build_hermes_iteration_memory_command(
-                batch_loop_report_path=batch_loop_report_path,
-                output_path=output_path,
-                memory_json_path=memory_json_path,
-                submission_dir=submission_dir,
-                task_ids=task_ids,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-adaptive-heartbeat")
-def run_hermes_adaptive_heartbeat_cmd(
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    verified_blueprint_path: str | None = typer.Option(None),
-    max_policy_stages: int = typer.Option(2),
-    max_batches: int = typer.Option(1),
-    batch_deadline_seconds: float = typer.Option(16800.0),
-    max_rounds_per_batch: int = typer.Option(50),
-    checkpoint_every: int = typer.Option(5),
-    max_stagnant_batches: int = typer.Option(1),
-    min_batch_score_improvement: float = typer.Option(1.0),
-    min_score_improvement: float = typer.Option(1.0),
-    submit_score_threshold: float = typer.Option(120.0),
-    learning_objective: str = typer.Option("score"),
-    learning_objective_schedule: list[str] = typer.Option(
-        [],
-        "--learning-objective-schedule",
-    ),
-    patience: int = typer.Option(10),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    unet_checkpoint_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    initial_candidate_generator: str = typer.Option("postprocess"),
-    candidate_generator_schedule: list[str] = typer.Option(
-        [],
-        "--candidate-generator-schedule",
-    ),
-    hypothesis_reference_path: str | None = typer.Option(None),
-    hypothesis_reference_sample_limit: int | None = typer.Option(None),
-    hypothesis_reference_sample_limits: list[int] = typer.Option(
-        [],
-        "--hypothesis-reference-search-limit",
-    ),
-    postprocess_search_mode: str = typer.Option("adaptive"),
-    postprocess_strategies: list[str] = typer.Option([], "--postprocess-strategy"),
-    postprocess_blend_weights: list[float] = typer.Option(
-        [],
-        "--postprocess-blend-weight",
-    ),
-    postprocess_adaptive_step: float = typer.Option(0.125),
-    submission_id: str = typer.Option("team_hermes"),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_adaptive_heartbeat_command(
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                verified_blueprint_path=verified_blueprint_path,
-                max_policy_stages=max_policy_stages,
-                max_batches=max_batches,
-                batch_deadline_seconds=batch_deadline_seconds,
-                max_rounds_per_batch=max_rounds_per_batch,
-                checkpoint_every=checkpoint_every,
-                max_stagnant_batches=max_stagnant_batches,
-                min_batch_score_improvement=min_batch_score_improvement,
-                min_score_improvement=min_score_improvement,
-                submit_score_threshold=submit_score_threshold,
-                learning_objective=learning_objective,
-                learning_objective_schedule=learning_objective_schedule,
-                patience=patience,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                unet_checkpoint_path=unet_checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                initial_candidate_generator=initial_candidate_generator,
-                candidate_generator_schedule=candidate_generator_schedule,
-                hypothesis_reference_path=hypothesis_reference_path,
-                hypothesis_reference_sample_limit=hypothesis_reference_sample_limit,
-                hypothesis_reference_sample_limits=hypothesis_reference_sample_limits,
-                postprocess_search_mode=postprocess_search_mode,
-                postprocess_strategies=postprocess_strategies,
-                postprocess_blend_weights=postprocess_blend_weights,
-                postprocess_adaptive_step=postprocess_adaptive_step,
-                submission_id=submission_id,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-heartbeat")
-def run_hermes_heartbeat_cmd(
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    max_batches: int = typer.Option(1),
-    batch_deadline_seconds: float = typer.Option(16800.0),
-    max_rounds_per_batch: int = typer.Option(50),
-    checkpoint_every: int = typer.Option(5),
-    max_stagnant_batches: int = typer.Option(1),
-    min_batch_score_improvement: float = typer.Option(1.0),
-    min_score_improvement: float = typer.Option(1.0),
-    submit_score_threshold: float = typer.Option(120.0),
-    learning_objective: str = typer.Option("score"),
-    learning_objective_schedule: list[str] = typer.Option(
-        [],
-        "--learning-objective-schedule",
-    ),
-    patience: int = typer.Option(10),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    unet_checkpoint_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    candidate_generator: str = typer.Option("postprocess"),
-    candidate_generator_schedule: list[str] = typer.Option(
-        [],
-        "--candidate-generator-schedule",
-    ),
-    doom_loop_report_path: str | None = typer.Option(None),
-    candidate_generator_fallback: str = typer.Option("auto"),
-    hypothesis_blueprint_path: str | None = typer.Option(None),
-    hypothesis_reference_path: str | None = typer.Option(None),
-    hypothesis_reference_sample_limit: int | None = typer.Option(None),
-    hypothesis_reference_sample_limits: list[int] = typer.Option(
-        [],
-        "--hypothesis-reference-search-limit",
-    ),
-    hypothesis_kpi_report_path: str | None = typer.Option(None),
-    repair_policy_summary_path: str | None = typer.Option(None),
-    saturation_probe_interval_batches: int = typer.Option(0),
-    postprocess_search_mode: str = typer.Option("adaptive"),
-    postprocess_strategies: list[str] = typer.Option(
-        [],
-        "--postprocess-strategy",
-    ),
-    postprocess_blend_weights: list[float] = typer.Option(
-        [],
-        "--postprocess-blend-weight",
-    ),
-    postprocess_adaptive_step: float = typer.Option(0.125),
-    submission_id: str = typer.Option("team_hermes"),
-    timing_profile: str | None = typer.Option(None),
-    timing_factor: float | None = typer.Option(None),
-    trace_path: str | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_heartbeat_command(
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                max_batches=max_batches,
-                batch_deadline_seconds=batch_deadline_seconds,
-                max_rounds_per_batch=max_rounds_per_batch,
-                checkpoint_every=checkpoint_every,
-                max_stagnant_batches=max_stagnant_batches,
-                min_batch_score_improvement=min_batch_score_improvement,
-                min_score_improvement=min_score_improvement,
-                submit_score_threshold=submit_score_threshold,
-                learning_objective=learning_objective,
-                learning_objective_schedule=learning_objective_schedule,
-                patience=patience,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                unet_checkpoint_path=unet_checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                candidate_generator=candidate_generator,
-                candidate_generator_schedule=candidate_generator_schedule,
-                doom_loop_report_path=doom_loop_report_path,
-                candidate_generator_fallback=candidate_generator_fallback,
-                hypothesis_blueprint_path=hypothesis_blueprint_path,
-                hypothesis_reference_path=hypothesis_reference_path,
-                hypothesis_reference_sample_limit=hypothesis_reference_sample_limit,
-                hypothesis_reference_sample_limits=hypothesis_reference_sample_limits,
-                hypothesis_kpi_report_path=hypothesis_kpi_report_path,
-                repair_policy_summary_path=repair_policy_summary_path,
-                saturation_probe_interval_batches=saturation_probe_interval_batches,
-                postprocess_search_mode=postprocess_search_mode,
-                postprocess_strategies=postprocess_strategies,
-                postprocess_blend_weights=postprocess_blend_weights,
-                postprocess_adaptive_step=postprocess_adaptive_step,
-                submission_id=submission_id,
-                timing_profile=timing_profile,
-                timing_factor=timing_factor,
-                trace_path=trace_path,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-literature-strategy-expansion")
-def run_hermes_literature_strategy_expansion_cmd(
-    algorithm_candidates_path: str = typer.Option(...),
-    workspace_dir: str = typer.Option(...),
-    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
-    failure_memory_path: str | None = typer.Option(None),
-    registry_summary_path: str | None = typer.Option(None),
-    trace_path: str | None = typer.Option(None),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_literature_strategy_expansion_command(
-                algorithm_candidates_path=algorithm_candidates_path,
-                workspace_dir=workspace_dir,
-                checkpoint_paths=checkpoint_paths,
-                failure_memory_path=failure_memory_path,
-                registry_summary_path=registry_summary_path,
-                trace_path=trace_path,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("run-candidate-expansion-handoff")
@@ -3495,13 +2875,14 @@ def run_candidate_expansion_handoff_cmd(
     )
 
 
-@app.command("record-hermes-literature-candidate-outcome")
-def record_hermes_literature_candidate_outcome_cmd(
-    algorithm_candidate_id: str = typer.Option(...),
-    candidate_key: str = typer.Option(...),
-    outcome: str = typer.Option(...),
-    reason_codes: list[str] = typer.Option([], "--reason-code"),
-    output_path: str = typer.Option(...),
+
+@app.command("run-literature-strategy-expansion")
+def run_literature_strategy_expansion_cmd(
+    algorithm_candidates_path: str = typer.Option(...),
+    workspace_dir: str = typer.Option(...),
+    checkpoint_paths: list[str] = typer.Option([], "--checkpoint-path"),
+    failure_memory_path: str | None = typer.Option(None),
+    registry_summary_path: str | None = typer.Option(None),
     trace_path: str | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
@@ -3509,12 +2890,12 @@ def record_hermes_literature_candidate_outcome_cmd(
     _ = json_flag
     typer.echo(
         json.dumps(
-            record_hermes_literature_candidate_outcome_command(
-                algorithm_candidate_id=algorithm_candidate_id,
-                candidate_key=candidate_key,
-                outcome=outcome,
-                reason_codes=reason_codes,
-                output_path=output_path,
+            run_literature_strategy_expansion_command(
+                algorithm_candidates_path=algorithm_candidates_path,
+                workspace_dir=workspace_dir,
+                checkpoint_paths=checkpoint_paths,
+                failure_memory_path=failure_memory_path,
+                registry_summary_path=registry_summary_path,
                 trace_path=trace_path,
                 force=force,
             )
@@ -3529,7 +2910,7 @@ def run_expansion_sandbox_queue_cmd(
     target_path: str = typer.Option(...),
     initial_submission_dir: str | None = typer.Option(None),
     output_dir: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     max_items: int | None = typer.Option(None),
     failure_memory_path: str | None = typer.Option(None),
     reference_path: str | None = typer.Option(None),
@@ -3590,13 +2971,36 @@ def evaluate_expansion_sandbox_queue_cmd(
     )
 
 
+@app.command("summarize-literature-registry")
+def summarize_literature_registry_cmd(
+    registry_path: str = typer.Option(...),
+    output_path: str = typer.Option(...),
+    current_best_score: float = typer.Option(...),
+    trace_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            summarize_literature_registry_command(
+                registry_path=registry_path,
+                output_path=output_path,
+                current_best_score=current_best_score,
+                trace_path=trace_path,
+                force=force,
+            )
+        )
+    )
+
+
 @app.command("prepare-expansion-blocked-executor-authoring-tasks")
 def prepare_expansion_blocked_executor_authoring_tasks_cmd(
     queue_report_path: str = typer.Option(...),
     output_dir: str = typer.Option(...),
     context_path: str = typer.Option(...),
     target_path: str = typer.Option(...),
-    submission_id: str = typer.Option("team_hermes"),
+    submission_id: str = typer.Option("team_default"),
     max_tasks: int | None = typer.Option(None),
     force: bool = typer.Option(False, "--force"),
     json_flag: bool = typer.Option(True, "--json"),
@@ -3616,26 +3020,6 @@ def prepare_expansion_blocked_executor_authoring_tasks_cmd(
         )
     )
 
-
-@app.command("summarize-literature-registry-for-hermes")
-def summarize_literature_registry_for_hermes_cmd(
-    registry_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    current_best_score: float = typer.Option(...),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            summarize_literature_registry_for_hermes_command(
-                registry_path=registry_path,
-                output_path=output_path,
-                current_best_score=current_best_score,
-                force=force,
-            )
-        )
-    )
 
 
 @app.command("refine-algorithm-candidate")
@@ -3746,138 +3130,6 @@ def build_local_asset_algorithm_candidates_cmd(
     )
 
 
-@app.command("run-hermes-three-stage-policy")
-def run_hermes_three_stage_policy_cmd(
-    output_dir: str = typer.Option(...),
-    initial_submission_dir: str = typer.Option(...),
-    task1_test_path: str | None = typer.Option(None),
-    task1_target_path: str | None = typer.Option(None),
-    task2_test_path: str | None = typer.Option(None),
-    task2_target_path: str | None = typer.Option(None),
-    unet_checkpoint_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    submission_id: str = typer.Option("team_hermes"),
-    stage_deadline_seconds: float = typer.Option(600.0),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_three_stage_policy_command(
-                output_dir=output_dir,
-                initial_submission_dir=initial_submission_dir,
-                task1_test_path=task1_test_path,
-                task1_target_path=task1_target_path,
-                task2_test_path=task2_test_path,
-                task2_target_path=task2_target_path,
-                unet_checkpoint_path=unet_checkpoint_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                submission_id=submission_id,
-                stage_deadline_seconds=stage_deadline_seconds,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("diagnose-hermes-result")
-def diagnose_hermes_result_cmd(
-    artifact_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    max_inference_seconds: float = typer.Option(120.0),
-    min_score_delta: float = typer.Option(1.0),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            diagnose_hermes_result_command(
-                artifact_path=artifact_path,
-                output_path=output_path,
-                max_inference_seconds=max_inference_seconds,
-                min_score_delta=min_score_delta,
-            )
-        )
-    )
-
-
-@app.command("plan-hermes-next-action")
-def plan_hermes_next_action_cmd(
-    diagnosis_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            plan_hermes_next_action_command(
-                diagnosis_path=diagnosis_path,
-                output_path=output_path,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-convergence-loop")
-def run_hermes_convergence_loop_cmd(
-    initial_artifact_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    max_steps: int = typer.Option(3),
-    max_inference_seconds: float = typer.Option(120.0),
-    min_score_delta: float = typer.Option(1.0),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_convergence_loop_command(
-                initial_artifact_path=initial_artifact_path,
-                output_dir=output_dir,
-                max_steps=max_steps,
-                max_inference_seconds=max_inference_seconds,
-                min_score_delta=min_score_delta,
-                force=force,
-            )
-        )
-    )
-
-
-@app.command("run-hermes-submission-candidate")
-def run_hermes_submission_candidate_cmd(
-    tuning_report_path: str = typer.Option(...),
-    output_dir: str = typer.Option(...),
-    task_id: int = typer.Option(...),
-    test_path: str = typer.Option(...),
-    checkpoint_path: str = typer.Option(...),
-    submission_id: str = typer.Option(...),
-    target_path: str | None = typer.Option(None),
-    dataset_key: str = typer.Option("tensor"),
-    prediction_dataset_key: str = typer.Option("tensor"),
-    force: bool = typer.Option(False, "--force"),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            run_hermes_submission_candidate_command(
-                tuning_report_path=tuning_report_path,
-                output_dir=output_dir,
-                task_id=task_id,
-                test_path=test_path,
-                checkpoint_path=checkpoint_path,
-                submission_id=submission_id,
-                target_path=target_path,
-                dataset_key=dataset_key,
-                prediction_dataset_key=prediction_dataset_key,
-                force=force,
-            )
-        )
-    )
-
 
 @app.command("diagnose-task2-nu-shift")
 def diagnose_task2_nu_shift_cmd(
@@ -3928,22 +3180,6 @@ def record_unet_timeout_evidence_cmd(
         )
     )
 
-
-@app.command("audit-hermes-strategy-growth-autopilot")
-def audit_hermes_strategy_growth_autopilot_cmd(
-    autopilot_report_path: str = typer.Option(...),
-    output_path: str = typer.Option(...),
-    json_flag: bool = typer.Option(True, "--json"),
-) -> None:
-    _ = json_flag
-    typer.echo(
-        json.dumps(
-            audit_hermes_strategy_growth_autopilot_command(
-                autopilot_report_path=autopilot_report_path,
-                output_path=output_path,
-            )
-        )
-    )
 
 
 @app.command("resolve-config")
@@ -6081,6 +5317,339 @@ def build_research_chronicle_cmd(
                 output_path=output_path,
                 submission_dir=submission_dir,
                 task_ids=task_ids,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-fno-training-iteration")
+def run_fno_training_iteration_cmd(
+    workspace_dir: str = typer.Option(...),
+    source_path: str = typer.Option(...),
+    memory_path: str | None = typer.Option(None),
+    evidence_path: list[str] | None = typer.Option(None, "--evidence-path"),
+    dataset_key: str = typer.Option("tensor"),
+    train_sample_limit: int = typer.Option(64),
+    val_sample_limit: int = typer.Option(32),
+    context_steps: int = typer.Option(10),
+    time_reduction: int = typer.Option(5),
+    space_reduction: int = typer.Option(4),
+    batch_size: int = typer.Option(16),
+    learning_rate: float = typer.Option(1e-3),
+    seed: int = typer.Option(0),
+    max_candidates: int = typer.Option(3),
+    mode: list[int] | None = typer.Option(None, "--mode"),
+    width: list[int] | None = typer.Option(None, "--width"),
+    depth: list[int] | None = typer.Option(None, "--depth"),
+    loss_type: list[str] | None = typer.Option(None, "--loss-type"),
+    forecast_steps_value: list[int] | None = typer.Option(None, "--forecast-steps-value"),
+    train_steps_value: list[int] | None = typer.Option(None, "--train-steps-value"),
+    normalization: list[str] | None = typer.Option(None, "--normalization"),
+    target_score: float | None = typer.Option(None),
+    patience: int = typer.Option(3),
+    checkpoint_every: int = typer.Option(1),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_fno_training_iteration_command(
+                workspace_dir=workspace_dir,
+                source_path=source_path,
+                memory_path=memory_path,
+                evidence_paths=evidence_path,
+                dataset_key=dataset_key,
+                train_sample_limit=train_sample_limit,
+                val_sample_limit=val_sample_limit,
+                context_steps=context_steps,
+                time_reduction=time_reduction,
+                space_reduction=space_reduction,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                seed=seed,
+                max_candidates=max_candidates,
+                modes=mode,
+                widths=width,
+                depths=depth,
+                loss_types=loss_type,
+                forecast_steps_values=forecast_steps_value,
+                train_steps_values=train_steps_value,
+                normalizations=normalization,
+                target_score=target_score,
+                patience=patience,
+                checkpoint_every=checkpoint_every,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-fno-training-closed-loop-contract")
+def build_fno_training_closed_loop_contract_cmd(
+    workspace_dir: str = typer.Option(...),
+    source_path: str = typer.Option(...),
+    output_path: str | None = typer.Option(None),
+    dataset_key: str = typer.Option("tensor"),
+    baseline_prediction_path: str | None = typer.Option(None),
+    task1_test_path: str | None = typer.Option(None),
+    task1_target_path: str | None = typer.Option(None),
+    required_command: list[str] | None = typer.Option(None, "--required-command"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_fno_training_closed_loop_contract_command(
+                workspace_dir=workspace_dir,
+                source_path=source_path,
+                output_path=output_path,
+                dataset_key=dataset_key,
+                baseline_prediction_path=baseline_prediction_path,
+                task1_test_path=task1_test_path,
+                task1_target_path=task1_target_path,
+                required_commands=required_command,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("check-fno-training-convergence")
+def check_fno_training_convergence_cmd(
+    memory_path: str = typer.Option(...),
+    target_score: float | None = typer.Option(None),
+    patience: int = typer.Option(3),
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            check_fno_training_convergence_command(
+                memory_path=memory_path,
+                target_score=target_score,
+                patience=patience,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-fno-training-memory")
+def build_fno_training_memory_cmd(
+    optimization_report_path: str = typer.Option(...),
+    iteration_index: int = typer.Option(...),
+    previous_memory_path: str | None = typer.Option(None),
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_fno_training_memory_command(
+                optimization_report_path=optimization_report_path,
+                iteration_index=iteration_index,
+                previous_memory_path=previous_memory_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("checkpoint-fno-training-loop")
+def checkpoint_fno_training_loop_cmd(
+    workspace_dir: str = typer.Option(...),
+    iteration_index: int = typer.Option(...),
+    memory_path: str = typer.Option(...),
+    convergence_path: str = typer.Option(...),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            checkpoint_fno_training_loop_command(
+                workspace_dir=workspace_dir,
+                iteration_index=iteration_index,
+                memory_path=memory_path,
+                convergence_path=convergence_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("resume-fno-training-loop")
+def resume_fno_training_loop_cmd(
+    checkpoint_path: str = typer.Option(...),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            resume_fno_training_loop_command(
+                checkpoint_path=checkpoint_path,
+            )
+        )
+    )
+
+
+@app.command("escalate-fno-training-to-hypothesis")
+def escalate_fno_training_to_hypothesis_cmd(
+    workspace_dir: str = typer.Option(...),
+    memory_path: str = typer.Option(...),
+    output_path: str | None = typer.Option(None),
+    max_strategy_candidates: int = typer.Option(5, "--max-strategy-candidates"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            escalate_fno_training_to_hypothesis_command(
+                workspace_dir=workspace_dir,
+                memory_path=memory_path,
+                output_path=output_path,
+                max_strategy_candidates=max_strategy_candidates,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("integrate-hypothesis-training-feedback")
+def integrate_hypothesis_training_feedback_cmd(
+    hypothesis_report_path: str = typer.Option(...),
+    memory_path: str = typer.Option(...),
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            integrate_hypothesis_training_feedback_command(
+                hypothesis_report_path=hypothesis_report_path,
+                memory_path=memory_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-fno-training-final-report")
+def build_fno_training_final_report_cmd(
+    workspace_dir: str = typer.Option(...),
+    memory_path: str = typer.Option(...),
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_fno_training_final_report_command(
+                workspace_dir=workspace_dir,
+                memory_path=memory_path,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-fno-training-health-report")
+def build_fno_training_health_report_cmd(
+    workspace_dir: str = typer.Option(...),
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_fno_training_health_report_command(
+                workspace_dir=workspace_dir,
+                output_path=output_path,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("run-claude-fno-training-closed-loop")
+def run_claude_fno_training_closed_loop_cmd(
+    workspace_dir: str = typer.Option(...),
+    source_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    max_iterations: int = typer.Option(10),
+    target_score: float | None = typer.Option(None),
+    timeout_seconds: int = typer.Option(3600),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            run_claude_fno_training_closed_loop_command(
+                workspace_dir=workspace_dir,
+                source_path=source_path,
+                dataset_key=dataset_key,
+                max_iterations=max_iterations,
+                target_score=target_score,
+                timeout_seconds=timeout_seconds,
+                dry_run=dry_run,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-claude-fno-training-closed-loop-task")
+def build_claude_fno_training_closed_loop_task_cmd(
+    workspace_dir: str = typer.Option(...),
+    source_path: str = typer.Option(...),
+    dataset_key: str = typer.Option("tensor"),
+    max_iterations: int = typer.Option(10),
+    target_score: float | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_claude_fno_training_closed_loop_task_command(
+                workspace_dir=workspace_dir,
+                source_path=source_path,
+                dataset_key=dataset_key,
+                max_iterations=max_iterations,
+                target_score=target_score,
+                force=force,
+            )
+        )
+    )
+
+
+@app.command("build-fno-training-tool-catalog")
+def build_fno_training_tool_catalog_cmd(
+    output_path: str | None = typer.Option(None),
+    force: bool = typer.Option(False, "--force"),
+    json_flag: bool = typer.Option(True, "--json"),
+) -> None:
+    _ = json_flag
+    typer.echo(
+        json.dumps(
+            build_fno_training_tool_catalog_command(
+                output_path=output_path,
                 force=force,
             )
         )

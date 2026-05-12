@@ -1,6 +1,5 @@
 """Run official-style UNet checkpoints on competition test inputs."""
 
-from __future__ import annotations
 
 import json
 import time

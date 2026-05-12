@@ -1,6 +1,5 @@
 """Competition-shaped scoring utilities for Burgers submission predictions."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

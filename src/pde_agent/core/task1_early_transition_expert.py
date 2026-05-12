@@ -1,6 +1,5 @@
 """Local short-window transition expert for Task 1 Burgers rollouts."""
 
-from __future__ import annotations
 
 from typing import Any
 

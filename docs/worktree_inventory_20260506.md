@@ -73,7 +73,6 @@ before keeping in the main branch:
 - `integration_tests/hermes_hypothesis_lab_infrastructure/`
 - `scripts/audit_hermes_hypothesis_lab_infrastructure.py`
 - `scripts/run_hermes_hypothesis_lab_infrastructure.py`
-- `scripts/run_task1_scalar_source_gate.py`
 - `docs/hermes_hypothesis_lab_runbook.md`
 - `docs/superpowers/plans/2026-05-04-hermes-research-directive.md`
 - `docs/superpowers/plans/2026-05-04-task1-candidate-factory.md`

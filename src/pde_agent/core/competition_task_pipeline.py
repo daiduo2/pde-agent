@@ -1,6 +1,5 @@
 """End-to-end competition task pipeline for official operator checkpoints."""
 
-from __future__ import annotations
 
 import json
 import zipfile

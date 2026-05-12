@@ -74,7 +74,7 @@ def _manual_report_with_external_best(path: Path) -> Path:
 
 def _adaptive_plateau_report(path: Path) -> Path:
     payload = {
-        "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+        "state_hint": "ADAPTIVE_HEARTBEAT_RAN",
         "stage_count": 2,
         "policy_events": [
             {
@@ -109,7 +109,7 @@ def _adaptive_plateau_report(path: Path) -> Path:
 
 def _adaptive_plateau_escape_report(path: Path) -> Path:
     payload = {
-        "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+        "state_hint": "ADAPTIVE_HEARTBEAT_RAN",
         "stage_count": 2,
         "policy_events": [
             {
@@ -825,7 +825,7 @@ def test_hypothesis_lab_run_executes_sem_burgers_rollout_candidate(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -1081,7 +1081,7 @@ def test_hypothesis_lab_builds_early_policy_card_from_adaptive_search_policy(
     report_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+                "state_hint": "ADAPTIVE_HEARTBEAT_RAN",
                 "policy_events": [
                     {
                         "stage_index": 1,
@@ -1188,7 +1188,7 @@ def test_hypothesis_lab_applies_mode_policy_from_adaptive_search_policy(
     report_path.write_text(
         json.dumps(
             {
-                "state_hint": "HERMES_ADAPTIVE_HEARTBEAT_RAN",
+                "state_hint": "ADAPTIVE_HEARTBEAT_RAN",
                 "policy_events": [
                     {
                         "stage_index": 1,
@@ -1974,7 +1974,7 @@ def test_hypothesis_lab_sandbox_verifies_blueprint_with_submission(tmp_path: Pat
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2021,7 +2021,7 @@ def test_hypothesis_lab_sandbox_audits_external_retrieval_reference(
         target_path=target_path,
         reference_path=reference_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2096,7 +2096,7 @@ def test_hypothesis_lab_sandbox_executes_late_spectral_ramp_params(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2138,7 +2138,7 @@ def test_hypothesis_lab_sandbox_executes_learned_residual_correction(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2176,7 +2176,7 @@ def test_hypothesis_lab_sandbox_records_task1_multiview_judge(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2226,7 +2226,7 @@ def test_hypothesis_lab_sandbox_records_early_segment_diagnosis(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2444,7 +2444,7 @@ def test_hypothesis_lab_sandbox_executes_task1_early_refinement_family(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2541,7 +2541,7 @@ def test_hypothesis_lab_sandbox_executes_task1_early_transition_expert_family(
         target_path=target_path,
         reference_path=reference_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2619,7 +2619,7 @@ def test_hypothesis_lab_sandbox_accepts_reduced_time_reference_for_transition_ex
         target_path=target_path,
         reference_path=reference_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2680,7 +2680,7 @@ def test_hypothesis_lab_sandbox_executes_task1_front25_dynamics_family(
         target_path=target_path,
         reference_path=reference_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2689,6 +2689,63 @@ def test_hypothesis_lab_sandbox_executes_task1_front25_dynamics_family(
     assert sandbox["best_candidate"]["metadata"]["early_objective"] == "early_rel_mse"
     assert sandbox["best_candidate"]["metadata"]["horizon_steps"] == 25
     assert sandbox["verifier"]["selection_objective"]["primary"] == "early_rel_mse"
+
+
+def test_hypothesis_lab_builds_front25_dynamics_from_factory_hook(
+    tmp_path: Path,
+) -> None:
+    from pde_agent.core.hypothesis_lab import (
+        build_knowledge_cards,
+        design_algorithm_blueprints,
+        generate_hypotheses,
+    )
+
+    candidates_path = tmp_path / "front25_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "state_hint": "ALGORITHM_CANDIDATES_COMPILED",
+                "algorithm_candidates": [
+                    {
+                        "algorithm_candidate_id": (
+                            "candidate_task1_front25_dynamics_v0"
+                        ),
+                        "candidate_family": "factory_candidate_family",
+                        "target_problem": "PDE_Burgers",
+                        "target_task": "task1",
+                        "hypothesis": "Improve early segment with front25 dynamics.",
+                        "mechanism": "Fit bounded front-window dynamics source.",
+                        "executor_spec": {
+                            "cli_command": "run-hypothesis-lab",
+                            "implementation_hooks": [
+                                "hypothesis_lab_front25_dynamics_smoke"
+                            ],
+                        },
+                        "expected_observables": ["early_rel_mse_down"],
+                        "risk_controls": ["early_oversmoothing"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = build_knowledge_cards(
+        manual_report_paths=[],
+        algorithm_candidate_paths=[candidates_path],
+        output_path=None,
+        force=False,
+    )
+    hypotheses = generate_hypotheses(cards=cards, output_path=None, force=False)
+    blueprints = design_algorithm_blueprints(
+        hypotheses=hypotheses,
+        output_path=None,
+        force=False,
+    )
+
+    assert cards["cards"][0]["implementation_hooks"] == ["task1_front25_dynamics"]
+    assert hypotheses["hypotheses"][0]["candidate_family"] == "task1_front25_dynamics"
+    assert blueprints["blueprints"][0]["candidate_family"] == "task1_front25_dynamics"
 
 
 def test_hypothesis_lab_sandbox_accepts_reduced_time_reference_for_front25_dynamics(
@@ -2742,7 +2799,7 @@ def test_hypothesis_lab_sandbox_accepts_reduced_time_reference_for_front25_dynam
         target_path=target_path,
         reference_path=reference_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2847,7 +2904,7 @@ def test_hypothesis_lab_sandbox_executes_derivative_aware_early_anchors(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2911,7 +2968,7 @@ def test_hypothesis_lab_sandbox_executes_scaled_damped_velocity_anchor(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -2979,7 +3036,7 @@ def test_hypothesis_lab_sandbox_executes_phase_bias_and_curved_handoff(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3049,7 +3106,7 @@ def test_hypothesis_lab_sandbox_executes_compound_calibration_anchors(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3197,7 +3254,7 @@ def test_hypothesis_lab_sandbox_executes_retrieval_prior_leave_one_out(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3247,7 +3304,7 @@ def test_hypothesis_lab_sandbox_executes_retrieval_refinement_leave_one_out(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3307,7 +3364,7 @@ def test_hypothesis_lab_sandbox_executes_sem_burgers_rollout_family(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3371,7 +3428,7 @@ def test_hypothesis_lab_sandbox_executes_physics_residual_refinement_family(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3446,7 +3503,7 @@ def test_hypothesis_lab_physics_residual_noop_sentinel_blocks_false_promotion(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3510,7 +3567,7 @@ def test_hypothesis_lab_sandbox_executes_pi_deeponet_correction_head_family(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3582,7 +3639,7 @@ def test_hypothesis_lab_pi_deeponet_noop_sentinel_blocks_false_promotion(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "sandbox",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3610,7 +3667,7 @@ def test_hypothesis_lab_run_writes_verified_blueprint_seeded_by_sandbox_best(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -3647,7 +3704,7 @@ def test_hypothesis_lab_records_algorithm_candidate_outcome(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         failure_memory_output_path=memory_path,
         force=False,
     )
@@ -3883,7 +3940,7 @@ def test_hypothesis_lab_reads_pareto_memory_into_knowledge_cards(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -3981,7 +4038,7 @@ def test_hypothesis_lab_memory_readback_changes_early_candidate_blueprint(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4070,7 +4127,7 @@ def test_hypothesis_lab_memory_directives_filter_repeated_evidence_only_params(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4151,7 +4208,7 @@ def test_hypothesis_lab_memory_deprioritizes_non_top_anchors(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4241,7 +4298,7 @@ def test_hypothesis_lab_memory_uses_candidate_pool_policy_for_rescue_probes(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4349,7 +4406,7 @@ def test_hypothesis_lab_run_accepts_failure_memory_input(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4399,7 +4456,7 @@ def test_hypothesis_lab_run_accepts_failure_memory_input(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -4435,7 +4492,7 @@ def test_hypothesis_lab_promoted_candidate_records_strategy_growth_artifacts(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -4482,7 +4539,7 @@ def test_hypothesis_lab_single_window_evidence_does_not_promote_to_ledger(
         context_path=context_path,
         target_path=target_path,
         output_dir=tmp_path / "lab",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=False,
     )
 
@@ -4506,6 +4563,12 @@ def test_hypothesis_lab_single_window_evidence_does_not_promote_to_ledger(
     assert promotion["decision"] == "reject"
     assert promotion["promote_to_skill_candidate"] is False
     assert "insufficient_evaluation_windows" in promotion["reason_codes"]
+
+
+def test_hypothesis_lab_trace_marks_revise_as_failed() -> None:
+    from pde_agent.commands.run_hypothesis_lab import _trace_outcome
+
+    assert _trace_outcome("reject_or_revise") == "failed"
 
 
 def test_hypothesis_lab_cli_accepts_algorithm_candidates_and_memory_output(
@@ -4541,7 +4604,7 @@ def test_hypothesis_lab_cli_accepts_algorithm_candidates_and_memory_output(
             "--output-dir",
             str(tmp_path / "lab"),
             "--submission-id",
-            "team_hermes",
+            "team_default",
         ],
     )
 
@@ -4565,7 +4628,7 @@ def test_hypothesis_lab_cli_accepts_failure_memory_input(
         json.dumps(
             {
                 "schema_version": 1,
-                "state_hint": "HERMES_LITERATURE_FAILURE_MEMORY_RECORDED",
+                "state_hint": "LITERATURE_FAILURE_MEMORY_RECORDED",
                 "failed_algorithm_candidate_ids": [],
                 "failed_candidate_keys": [],
                 "failed_candidate_families": [],
@@ -4615,7 +4678,7 @@ def test_hypothesis_lab_cli_accepts_failure_memory_input(
             "--output-dir",
             str(tmp_path / "lab"),
             "--submission-id",
-            "team_hermes",
+            "team_default",
         ],
     )
 
@@ -4627,206 +4690,3 @@ def test_hypothesis_lab_cli_accepts_failure_memory_input(
     )
     assert cards["cards"][0]["source_type"] == "pareto_learning_memory"
 
-
-def test_hermes_batch_loop_can_run_linear_trend_spectral_generator(
-    tmp_path: Path,
-) -> None:
-    from pde_agent.core.competition_submission import build_competition_submission
-    from pde_agent.core.hermes_batch_optimization_loop import (
-        run_hermes_batch_optimization_loop,
-    )
-
-    context = np.ones((1, 10, 256), dtype=np.float32)
-    for step in range(10):
-        context[:, step, :] += np.float32(0.01 * step)
-    target = np.empty((1, 200, 256), dtype=np.float32)
-    target[:, :10, :] = context
-    for step in range(190):
-        target[:, 10 + step, :] = context[:, 9, :] - np.float32(0.002 * (step + 1))
-    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
-    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
-    initial = build_competition_submission(
-        task_id=1,
-        test_path=test_path,
-        output_dir=tmp_path / "initial",
-        submission_id="team_hermes",
-        method="persistence",
-        force=False,
-    )
-
-    report = run_hermes_batch_optimization_loop(
-        output_dir=tmp_path / "loop",
-        initial_submission_dir=initial["artifacts"]["submission_dir"],
-        max_rounds=3,
-        patience=2,
-        min_score_improvement=0.0,
-        submit_score_threshold=150.0,
-        task1_test_path=test_path,
-        task1_target_path=target_path,
-        candidate_generator="linear_trend_spectral",
-        force=False,
-    )
-
-    assert report["best_candidate"]["metadata"]["source"] == (
-        "linear_trend_spectral_generator"
-    )
-    assert report["best_candidate"]["objective_signals"]["segment_score"] > (
-        report["trajectory"][0]["objective_signals"]["segment_score"]
-    )
-
-
-def test_hermes_batch_loop_can_drive_linear_trend_spectral_from_blueprint(
-    tmp_path: Path,
-) -> None:
-    from pde_agent.core.competition_submission import build_competition_submission
-    from pde_agent.core.hermes_batch_optimization_loop import (
-        run_hermes_batch_optimization_loop,
-    )
-
-    context = np.ones((1, 10, 256), dtype=np.float32)
-    target = np.concatenate(
-        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
-        axis=1,
-    )
-    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
-    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
-    initial = build_competition_submission(
-        task_id=1,
-        test_path=test_path,
-        output_dir=tmp_path / "initial",
-        submission_id="team_hermes",
-        method="persistence",
-        force=False,
-    )
-    blueprint_path = tmp_path / "blueprints.json"
-    blueprint_path.write_text(
-        json.dumps(
-            {
-                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_DESIGNED",
-                "blueprints": [
-                    {
-                        "candidate_family": "linear_trend_spectral",
-                        "seed_params": [
-                            {
-                                "params": {
-                                    "slope_window": 5,
-                                    "gain": -0.1,
-                                    "decay": 60.0,
-                                    "spectral_strength": 1.0,
-                                },
-                                "source": "sandbox_best",
-                            }
-                        ],
-                        "parameter_grid": {
-                            "slope_window": [4],
-                            "gain": [-0.075],
-                            "decay": [70.0],
-                            "spectral_strength": [0.5],
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    report = run_hermes_batch_optimization_loop(
-        output_dir=tmp_path / "loop",
-        initial_submission_dir=initial["artifacts"]["submission_dir"],
-        max_rounds=1,
-        patience=1,
-        min_score_improvement=0.0,
-        submit_score_threshold=150.0,
-        task1_test_path=test_path,
-        task1_target_path=target_path,
-        candidate_generator="linear_trend_spectral",
-        hypothesis_blueprint_path=blueprint_path,
-        force=False,
-    )
-
-    assert report["trajectory"][1]["metadata"]["params"] == {
-        "slope_window": 5,
-        "gain": -0.1,
-        "decay": 60.0,
-        "spectral_strength": 1.0,
-    }
-
-
-def test_hermes_batch_loop_can_drive_late_spectral_ramp_blueprint(
-    tmp_path: Path,
-) -> None:
-    from pde_agent.core.competition_submission import build_competition_submission
-    from pde_agent.core.hermes_batch_optimization_loop import (
-        run_hermes_batch_optimization_loop,
-    )
-
-    context = np.ones((1, 10, 256), dtype=np.float32)
-    target = np.concatenate(
-        [context, np.repeat(context[:, -1:, :], 190, axis=1)],
-        axis=1,
-    )
-    test_path = _write_hdf5(tmp_path / "task1_test.hdf5", context)
-    target_path = _write_hdf5(tmp_path / "task1_val.hdf5", target)
-    initial = build_competition_submission(
-        task_id=1,
-        test_path=test_path,
-        output_dir=tmp_path / "initial",
-        submission_id="team_hermes",
-        method="persistence",
-        force=False,
-    )
-    blueprint_path = tmp_path / "blueprints.json"
-    blueprint_path.write_text(
-        json.dumps(
-            {
-                "state_hint": "HYPOTHESIS_LAB_BLUEPRINTS_VERIFIED",
-                "blueprints": [
-                    {
-                        "candidate_family": "linear_trend_spectral",
-                        "search_mode": "late_spectral_ramp",
-                        "seed_params": [
-                            {
-                                "params": {
-                                    "slope_window": 5,
-                                    "gain": -0.075,
-                                    "decay": 70.0,
-                                    "spectral_strength": 1.5,
-                                    "late_spectral_strength": 2.0,
-                                    "late_start": 80,
-                                },
-                                "source": "sandbox_best",
-                            }
-                        ],
-                        "parameter_grid": {
-                            "slope_window": [5],
-                            "gain": [-0.075],
-                            "decay": [70.0],
-                            "spectral_strength": [1.5],
-                            "late_spectral_strength": [2.0],
-                            "late_start": [80],
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    report = run_hermes_batch_optimization_loop(
-        output_dir=tmp_path / "loop",
-        initial_submission_dir=initial["artifacts"]["submission_dir"],
-        max_rounds=1,
-        patience=1,
-        min_score_improvement=0.0,
-        submit_score_threshold=150.0,
-        task1_test_path=test_path,
-        task1_target_path=target_path,
-        candidate_generator="linear_trend_spectral",
-        hypothesis_blueprint_path=blueprint_path,
-        force=False,
-    )
-
-    params = report["trajectory"][1]["metadata"]["params"]
-    assert params["late_spectral_strength"] == 2.0
-    assert params["late_start"] == 80
-    assert "_ls2" in report["trajectory"][1]["candidate_id"]

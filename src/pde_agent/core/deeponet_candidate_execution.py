@@ -1,6 +1,5 @@
 """Execute a minimal trainable DeepONet candidate on local window data."""
 
-from __future__ import annotations
 
 import json
 import re

@@ -1,13 +1,12 @@
 """Record timeout-aware UNet evidence without closing the UNet line."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
 
-STATE_HINT = "LOCAL_EXPERIMENT_RESULT"
+from pde_agent.core.state_hint_registry import LOCAL_EXPERIMENT_RESULT as STATE_HINT
 
 
 class UNetTimeoutEvidenceError(RuntimeError):

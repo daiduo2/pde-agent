@@ -1,6 +1,5 @@
 """Task 2 source-policy audit for avoiding Task 1 data and checkpoint leakage."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

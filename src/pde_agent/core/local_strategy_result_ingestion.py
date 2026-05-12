@@ -1,6 +1,5 @@
 """Normalize heterogeneous experiment artifacts into local strategy results."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

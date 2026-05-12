@@ -1,6 +1,5 @@
 """Scientific repetition guard for Hypothesis Lab strategy loops."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

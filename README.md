@@ -2,13 +2,24 @@
 
 CLI-first diagnostic harness for PDE agent experiments.
 
+Repository contract:
+
+- `core/` owns business logic and reusable algorithms.
+- `commands/` stays thin and JSON-only.
+- `scripts/` are grouped operational wrappers, not feature modules.
+- `runs/` contains artifacts, not source.
+- `integration_tests/` define protocol canaries.
+- The active autonomous runtime is Claude Code SDK via `claude-agent-sdk`.
+
+See [docs/repo_contract.md](docs/repo_contract.md) for the stable layer model.
+
 Initial MVP goals:
 
 - strict JSON-only CLI contract
 - explicit `run_id` and run directory tree
 - resolved config generation
 - manifest-centered artifact contract
-- Thin-Hermes integration hooks
+- Claude SDK agent-runtime hooks
 
 ## Local PDEBench Window Scoring
 
@@ -95,7 +106,9 @@ uv run --frozen pde-agent select-pde-hypothesis \
   --output-path runs/selected_pde_hypothesis.json
 ```
 
-This chain is intended to give Hermes a reproducible failed baseline, numerical error diagnosis, physics proxy diagnosis, and bounded next-experiment proposal.
+This chain is intended to give the agent a reproducible failed baseline,
+numerical error diagnosis, physics proxy diagnosis, and bounded next-experiment
+proposal.
 
 ## Lightweight Spectral Baseline
 
@@ -203,36 +216,32 @@ policy prioritizes zero failure rate and low score-delta variance before mean
 score, allowing the loop to keep converging without waiting for manual next-step
 selection.
 
-Hermes can also run the promoted strategy-growth chain as a state-driven
-autopilot. Starting from a `NEXT_EXPERIMENT_PLANNED` artifact, it generates and
-audits the experiment config, executes supported candidate grids, routes
-strategy decisions, evaluates promotion, appends the ledger, materializes a skill
-draft, installs it into an isolated root, and registers it for later lookup:
+The active autonomous path is Claude SDK. Strategy-growth artifacts still use
+the same evidence gate: starting from a `NEXT_EXPERIMENT_PLANNED` artifact, the
+agent should generate and audit the experiment config, execute supported
+candidate grids, route strategy decisions, evaluate promotion, append the
+ledger, materialize a skill draft, install it into an isolated root, and
+register it for later lookup.
 
 ```bash
-uv run --frozen pde-agent hermes-strategy-growth-autopilot \
-  --seed-artifact-path runs/spectral_residual_convergence/variance_intervention_plan.json \
-  --workspace-dir runs/hermes_strategy_growth_autopilot/workspace \
-  --proposal-path runs/spectral_residual_evidence_sweep_001/growth/strategy_proposal.json \
-  --rubric-path runs/spectral_residual_evidence_sweep_001/growth/experiment_rubric.json \
-  --skill-name spectral-residual-window-stratified-burgers \
-  --install-root runs/hermes_strategy_growth_autopilot/installed_skills \
-  --registry-path runs/hermes_strategy_growth_autopilot/strategy_registry.json \
+uv run --frozen pde-agent build-scientific-tool-catalog \
+  --output-path runs/agent_tool_catalog.json \
   --force
 ```
 
-Afterward, audit and lookup are separate machine-readable gates:
+For FNO training work, prefer the Claude SDK closed-loop task surface:
 
 ```bash
-uv run --frozen pde-agent audit-hermes-strategy-growth-autopilot \
-  --autopilot-report-path runs/hermes_strategy_growth_autopilot/workspace/hermes_strategy_growth_autopilot_report.json \
-  --output-path runs/hermes_strategy_growth_autopilot/audit.json
+uv run --frozen pde-agent build-claude-fno-training-closed-loop-task \
+  --output-dir runs/claude_fno_training_task \
+  --workspace-dir . \
+  --force
 
 uv run --frozen pde-agent lookup-strategy-skill \
-  --registry-path runs/hermes_strategy_growth_autopilot/strategy_registry.json \
+  --registry-path runs/strategy_registry.json \
   --applicable-pde "1D Burgers" \
   --model-family SpectralResidual \
-  --output-path runs/hermes_strategy_growth_autopilot/strategy_lookup.json
+  --output-path runs/strategy_lookup.json
 ```
 
 ## Burgers Spectral Viscosity Benchmark
@@ -455,7 +464,8 @@ uv run --frozen pde-agent plan-next-experiment-from-fno-summary \
 ```
 
 This produces the same `NEXT_EXPERIMENT_PLANNED` artifact as
-`plan-next-experiment`, while keeping the FNO path contract compact for Hermes.
+`plan-next-experiment`, while keeping the FNO path contract compact for the
+agent.
 
 For agent runs, prefer the one-command dry-run wrapper:
 
@@ -487,7 +497,7 @@ uv run --frozen --extra torch pde-agent run-fno-iteration \
   --force
 ```
 
-This is the recommended Hermes entrypoint for ordinary V1 iterations after a
+This is the recommended local FNO entrypoint for ordinary V1 iterations after a
 local window file exists. It runs the dry-run, audits the experiment config,
 executes all generated candidates, evaluates them against the same window, and
 writes `fno_iteration_report.json` plus `candidate_comparison.json`. The current

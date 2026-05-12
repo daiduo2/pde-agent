@@ -1,6 +1,5 @@
 """Local rollout error diagnosis utilities for PDE predictions."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

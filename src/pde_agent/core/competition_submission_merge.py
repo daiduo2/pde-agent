@@ -1,6 +1,5 @@
 """Merge single-task Burgers submission directories into one package."""
 
-from __future__ import annotations
 
 import json
 import shutil
@@ -65,7 +64,7 @@ def merge_competition_submissions(
             "submission_zip_path": str(zip_path),
             "merge_report_path": str(report_path),
         },
-        "next_command": "judge-hermes-submission",
+        "next_command": "judge-submission",
     }
     report_path.write_text(
         json.dumps(report, allow_nan=False, indent=2, sort_keys=True) + "\n",

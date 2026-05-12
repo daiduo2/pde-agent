@@ -1,25 +1,87 @@
-"""Task 1 short-window trainable dynamics loop for Hermes."""
+"""Task 1 short-window trainable dynamics loop for the Claude SDK agent."""
 
-from __future__ import annotations
 
 import json
 import time
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 
 from pde_agent.core.local_windows import build_local_windows
-
-
-STATE_HINT = "TASK1_SHORT_WINDOW_TRAINING_LOOP_RAN"
-FAMILY_SELECTION_STATE_HINT = "TASK1_SHORT_WINDOW_FAMILY_SELECTION_RAN"
-SUPPORTED_MODEL_FAMILIES = {"conv1d_residual", "fno_lite"}
-SUPPORTED_FNO_LOSS_TYPES = {"mse", "early_weighted_mse", "spectral_mse"}
-
-
-class Task1ShortWindowTrainingError(RuntimeError):
-    pass
+from pde_agent.core.task1_fno_training_policy import (
+    _any_guardrail_evaluated,
+    _anchor_family_challenge_candidates,
+    _anchor_neighborhood_candidates,
+    _anchor_only_int_values,
+    _anchor_train_step_values,
+    _attempted_fno_config_signatures,
+    _candidate_rationale,
+    _cap_positive_int_values,
+    _decision_reasons,
+    _dedupe,
+    _diversified_model_family_values,
+    _fno_candidate_record,
+    _fno_config_signature,
+    _fno_directive_action,
+    _fno_directive_reason_codes,
+    _fno_graft_evidence_summary,
+    _fno_model_family_values,
+    _fno_optimization_constraints,
+    _fno_planning_preferences,
+    _fno_regression_repair_candidates,
+    _first_available_loss,
+    _first_available_string,
+    _fno_selection_components,
+    _fno_selection_reason_codes,
+    _fno_selection_score,
+    _fno_training_directive,
+    _guardrail_quality,
+    _has_expanded_capacity_axis,
+    _has_positive_late_safe_graft_evidence,
+    _loss_type_list,
+    _medium_training_budget_values,
+    _merge_preferred_ints,
+    _merge_preferred_strings,
+    _normalization_list,
+    _normalize_fno_candidate_config,
+    _operator_policy_from_search_guidance,
+    _ordered_values,
+    _prefers_medium_training_budget,
+    _prioritize_new_dynamics_families,
+    _preferred_probe_forecast,
+    _select_fno_candidate,
+    _short_window_metrics,
+    _string_list,
+    _training_constraints,
+    _training_decision,
+)
+from pde_agent.core.task1_short_window_common import (
+    FAMILY_SELECTION_STATE_HINT,
+    STATE_HINT,
+    SUPPORTED_FNO_LOSS_TYPES,
+    SUPPORTED_MODEL_FAMILIES,
+    SUPPORTED_NORMALIZATION_TYPES,
+    Task1ShortWindowTrainingError,
+)
+from pde_agent.core.task1_short_window_family_policy import (
+    family_record as _family_record,
+    family_selection_constraints as _family_selection_constraints,
+    family_training_directive as _family_training_directive,
+    select_family as _select_family,
+)
+from pde_agent.core.task1_short_window_hypothesis_bridge import (
+    convert_hypothesis_algorithm_evidence_for_candidate_promotion,
+    materialize_training_windows_for_hypothesis_sandbox,
+)
+from pde_agent.core.task1_short_window_models import (
+    build_model as _build_model,
+    denormalize_prediction as _denormalize_prediction,
+    normalize_windows as _normalize_windows,
+    parameter_count as _parameter_count,
+    training_loss as _training_loss,
+)
 
 
 def run_task1_short_window_training_loop(
@@ -38,6 +100,7 @@ def run_task1_short_window_training_loop(
     fno_width: int = 32,
     fno_depth: int = 1,
     loss_type: str = "mse",
+    normalization: str = "none",
     train_steps: int = 8,
     batch_size: int = 16,
     learning_rate: float = 1e-3,
@@ -62,6 +125,11 @@ def run_task1_short_window_training_loop(
     if loss_type not in SUPPORTED_FNO_LOSS_TYPES:
         raise Task1ShortWindowTrainingError(
             "loss_type must be one of: " + ", ".join(sorted(SUPPORTED_FNO_LOSS_TYPES))
+        )
+    if normalization not in SUPPORTED_NORMALIZATION_TYPES:
+        raise Task1ShortWindowTrainingError(
+            "normalization must be one of: "
+            + ", ".join(sorted(SUPPORTED_NORMALIZATION_TYPES))
         )
     lr = _positive_float(learning_rate, "learning_rate")
 
@@ -105,6 +173,16 @@ def run_task1_short_window_training_loop(
     )
     train_context, train_target = _load_windows(artifacts["train_windows_path"])
     val_context, val_target = _load_windows(artifacts["val_windows_path"])
+    train_context_model, train_target_model, train_norm = _normalize_windows(
+        context=train_context,
+        target=train_target,
+        normalization=normalization,
+    )
+    val_context_model, val_target_model, val_norm = _normalize_windows(
+        context=val_context,
+        target=val_target,
+        normalization=normalization,
+    )
 
     torch.manual_seed(int(seed))
     model = _build_model(
@@ -113,15 +191,15 @@ def run_task1_short_window_training_loop(
         context_steps=context_steps,
         forecast_steps=forecast_steps,
         space_points=int(train_context.shape[2]),
-        hidden_channels=fno_width if model_family == "fno_lite" else 32,
+        hidden_channels=fno_width if model_family in {"fno_ar1", "fno_lite"} else 32,
         modes=fno_modes,
         depth=fno_depth,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    train_context_t = torch.as_tensor(train_context, dtype=torch.float32)
-    train_target_t = torch.as_tensor(train_target, dtype=torch.float32)
-    val_context_t = torch.as_tensor(val_context, dtype=torch.float32)
-    val_target_t = torch.as_tensor(val_target, dtype=torch.float32)
+    train_context_t = torch.as_tensor(train_context_model, dtype=torch.float32)
+    train_target_t = torch.as_tensor(train_target_model, dtype=torch.float32)
+    val_context_t = torch.as_tensor(val_context_model, dtype=torch.float32)
+    val_target_t = torch.as_tensor(val_target_model, dtype=torch.float32)
     rng = np.random.default_rng(seed)
     loss_curve = {"train": [], "val": []}
     start_time = time.perf_counter()
@@ -159,7 +237,12 @@ def run_task1_short_window_training_loop(
         loss_curve["val"].append(float(val_loss.detach().cpu().item()))
     train_runtime = time.perf_counter() - start_time
     with torch.no_grad():
-        prediction = model(val_context_t).detach().cpu().numpy().astype(np.float32)
+        prediction_model = model(val_context_t).detach().cpu().numpy().astype(np.float32)
+    prediction = _denormalize_prediction(
+        prediction=prediction_model,
+        stats=val_norm,
+        normalization=normalization,
+    )
 
     torch.save(
         {
@@ -175,6 +258,7 @@ def run_task1_short_window_training_loop(
                 "space_points": int(train_context.shape[2]),
                 "train_steps": train_steps,
                 "loss_type": loss_type,
+                "normalization": normalization,
                 "learning_rate": lr,
                 "seed": int(seed),
             },
@@ -195,6 +279,7 @@ def run_task1_short_window_training_loop(
         "fno_width": fno_width,
         "fno_depth": fno_depth,
         "loss_type": loss_type,
+        "normalization": normalization,
         "context_steps": context_steps,
         "forecast_steps": forecast_steps,
         "time_reduction": time_reduction,
@@ -225,6 +310,7 @@ def run_task1_short_window_training_loop(
             "initial_val": loss_curve["val"][0],
             "final_val": loss_curve["val"][-1],
         },
+        "normalization": normalization,
         "horizon": {
             "context_steps": context_steps,
             "forecast_steps": forecast_steps,
@@ -248,6 +334,7 @@ def run_task1_short_window_training_loop(
                 "width": fno_width,
                 "depth": fno_depth,
                 "loss_type": loss_type,
+                "normalization": normalization,
                 "forecast_steps": forecast_steps,
                 "train_steps": train_steps,
             },
@@ -410,6 +497,10 @@ def plan_fno_training_candidates(
     loss_types: list[str],
     forecast_steps_values: list[int],
     train_steps_values: list[int],
+    normalizations: list[str] | None = None,
+    blocked_families: list[str] | None = None,
+    search_guidance: list[dict[str, Any]] | None = None,
+    budget_adjustment: dict[str, Any] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     output_file = Path(output_path) if output_path is not None else None
@@ -421,55 +512,350 @@ def plan_fno_training_candidates(
     forecast_values = _positive_int_list(forecast_steps_values, "forecast_steps_values")
     train_values = _positive_int_list(train_steps_values, "train_steps_values")
     loss_values = _loss_type_list(loss_types)
+    normalization_values = _normalization_list(normalizations or ["none"])
     evidences = [_load_json(Path(path), "FNO training evidence") for path in evidence_paths]
     attempted = _attempted_fno_config_signatures(evidences)
     preferences = _fno_planning_preferences(evidences)
+    operator_policy = _operator_policy_from_search_guidance(search_guidance or [])
+    if operator_policy:
+        policy_losses = [
+            value
+            for value in _string_list(operator_policy.get("preferred_loss_types"))
+            if value in SUPPORTED_FNO_LOSS_TYPES
+        ]
+        loss_values = _dedupe([*policy_losses, *loss_values])
+        normalization_values = _merge_preferred_strings(
+            normalization_values,
+            operator_policy.get("preferred_normalizations", []),
+        )
+        forecast_values = _merge_preferred_ints(
+            forecast_values,
+            operator_policy.get("preferred_forecast_steps", []),
+        )
+        policy_budget = operator_policy.get("budget_adjustments")
+        if isinstance(policy_budget, dict):
+            budget_adjustment = {
+                **policy_budget,
+                **(budget_adjustment or {}),
+            }
+        preferences = dict(preferences)
+        preferences["loss_types"] = _dedupe(
+            [*policy_losses, *preferences.get("loss_types", [])]
+        )
+        policy_families = [
+            value
+            for value in _string_list(operator_policy.get("preferred_model_families"))
+            if value in SUPPORTED_MODEL_FAMILIES
+        ]
+        preferences["model_families"] = _dedupe(
+            [*policy_families, *preferences.get("model_families", [])]
+        )
+        if operator_policy.get("next_action") == "request_new_dynamics_source":
+            preferences["requires_new_dynamics_source"] = True
+        required_axes = set(_string_list(operator_policy.get("required_axis_changes")))
+        if "model_family" in required_axes:
+            preferences["requires_model_family_change"] = True
+    early_middle_source_mode = (
+        forecast_values
+        and max(forecast_values) <= 95
+        and 190 not in {int(value) for value in forecast_values}
+    )
+    if early_middle_source_mode:
+        preferences = dict(preferences)
+        preferences["forecast_steps"] = [
+            value for value in preferences.get("forecast_steps", []) if int(value) <= 95
+        ]
+    if not early_middle_source_mode:
+        mode_values = _merge_preferred_ints(mode_values, preferences["modes"])
+        width_values = _merge_preferred_ints(width_values, preferences["widths"])
+        depth_values = _merge_preferred_ints(depth_values, preferences["depths"])
+        forecast_values = _merge_preferred_ints(
+            forecast_values,
+            preferences["forecast_steps"],
+        )
+        train_values = _merge_preferred_ints(train_values, preferences["train_steps"])
+        normalization_values = _merge_preferred_strings(
+            normalization_values,
+            preferences["normalizations"],
+        )
     rows = []
-    index = 1
-    for loss_type in _ordered_values(loss_values, preferences["loss_types"]):
-        for forecast_steps in _ordered_values(forecast_values, preferences["forecast_steps"]):
-            for modes_value in _ordered_values(mode_values, preferences["modes"]):
-                for width in _ordered_values(width_values, preferences["widths"]):
-                    for depth in _ordered_values(depth_values, preferences["depths"]):
-                        for train_steps in _ordered_values(train_values, preferences["train_steps"]):
-                            config = {
-                                "candidate_id": f"fno_train_candidate_{index:03d}",
-                                "model_family": "fno_lite",
-                                "modes": modes_value,
-                                "width": width,
-                                "depth": depth,
-                                "loss_type": loss_type,
-                                "forecast_steps": forecast_steps,
-                                "train_steps": train_steps,
-                                "rationale": _candidate_rationale(
-                                    loss_type=loss_type,
-                                    forecast_steps=forecast_steps,
-                                    preferences=preferences,
-                                ),
-                            }
-                            if _fno_config_signature(config) in attempted:
-                                continue
-                            rows.append(config)
-                            index += 1
-                            if len(rows) >= max_candidates:
-                                break
-                        if len(rows) >= max_candidates:
-                            break
-                    if len(rows) >= max_candidates:
-                        break
-                if len(rows) >= max_candidates:
-                    break
-            if len(rows) >= max_candidates:
-                break
+    candidates = []
+    model_family_values = _fno_model_family_values(preferences)
+    if preferences.get("requires_model_family_change"):
+        model_family_values = _diversified_model_family_values(model_family_values)
+    ordered_forecasts = _ordered_values(forecast_values, preferences["forecast_steps"])
+    ordered_losses = _ordered_values(loss_values, preferences["loss_types"])
+    ordered_modes = _ordered_values(mode_values, preferences["modes"])
+    ordered_widths = _ordered_values(width_values, preferences["widths"])
+    ordered_depths = _ordered_values(depth_values, preferences["depths"])
+    ordered_train_steps = _ordered_values(train_values, preferences["train_steps"])
+    ordered_normalizations = _ordered_values(
+        normalization_values,
+        preferences["normalizations"],
+    )
+    repair_mode = bool(
+        preferences.get("regression_mode")
+        or preferences.get("capacity_expansion_regression_memory")
+        or operator_policy.get("next_action") == "repair_regression"
+    )
+    health_repair_mode = bool(preferences.get("health_requested_regression_repair"))
+    if not health_repair_mode:
+        for anchor_config in preferences.get("anchor_configs", []):
+            if isinstance(anchor_config, dict):
+                candidates.append(
+                    {
+                        **anchor_config,
+                        "rationale": [
+                            "training_memory_anchor_reuse",
+                            "new_global_best_training_candidate",
+                        ],
+                    }
+                )
+                candidates.extend(_anchor_family_challenge_candidates(anchor_config))
+                candidates.extend(_anchor_neighborhood_candidates(anchor_config))
+    if repair_mode:
+        new_dynamics_candidates = []
+        if "fno_ar1" in model_family_values:
+            new_dynamics_candidates.append(
+                {
+                    "model_family": "fno_ar1",
+                    "modes": max(mode_values),
+                    "width": max(width_values),
+                    "depth": max(depth_values),
+                    "loss_type": ordered_losses[0],
+                    "normalization": ordered_normalizations[0],
+                    "forecast_steps": _preferred_probe_forecast(
+                        ordered_forecasts,
+                        preferences,
+                    ),
+                    "train_steps": min(max(train_values), 100),
+                    "rationale": [
+                        "new_dynamics_family_short_horizon_probe",
+                        "autoregressive_rollout_source",
+                    ],
+                }
+            )
+        repair_candidates = _fno_regression_repair_candidates(
+            preferences=preferences,
+            loss_values=ordered_losses,
+        )
+        if "conv1d_residual" in model_family_values:
+            new_dynamics_candidates.append(
+                {
+                    "model_family": "conv1d_residual",
+                    "modes": min(mode_values),
+                    "width": min(width_values),
+                    "depth": 1,
+                    "loss_type": ordered_losses[0],
+                    "normalization": ordered_normalizations[0],
+                    "forecast_steps": _preferred_probe_forecast(
+                        ordered_forecasts,
+                        preferences,
+                    ),
+                    "train_steps": min(max(train_values), 100),
+                    "rationale": [
+                        "new_dynamics_family_short_horizon_probe",
+                        "local_residual_convolution_source",
+                    ],
+                }
+            )
+        if preferences.get("requires_new_dynamics_source"):
+            candidates.extend(new_dynamics_candidates)
+            candidates.extend(repair_candidates)
+        else:
+            candidates.extend(repair_candidates)
+            candidates.extend(new_dynamics_candidates)
+        if health_repair_mode:
+            for anchor_config in preferences.get("anchor_configs", []):
+                if isinstance(anchor_config, dict):
+                    candidates.extend(_anchor_family_challenge_candidates(anchor_config))
+                    candidates.extend(_anchor_neighborhood_candidates(anchor_config))
+    elif not early_middle_source_mode:
+        candidates.append(
+            {
+                "model_family": "fno_lite",
+                "modes": max(mode_values),
+                "width": max(width_values),
+                "depth": max(depth_values),
+                "loss_type": ordered_losses[0],
+                "normalization": ordered_normalizations[0],
+                "forecast_steps": max(forecast_values),
+                "train_steps": max(train_values),
+                "rationale": [
+                    "capacity_axis_coverage",
+                    "full_horizon_middle_late_guardrail",
+                ],
+            }
+        )
+    elif _has_expanded_capacity_axis(
+        mode_values=mode_values,
+        width_values=width_values,
+        depth_values=depth_values,
+        train_values=train_values,
+    ):
+        candidates.append(
+            {
+                "model_family": "fno_lite",
+                "modes": max(mode_values),
+                "width": max(width_values),
+                "depth": max(depth_values),
+                "loss_type": _first_available_loss(
+                    ordered_losses,
+                    preferred=("horizon_weighted_mse", "early_weighted_mse"),
+                ),
+                "normalization": _first_available_string(
+                    ordered_normalizations,
+                    preferred=("sample_standard", "none"),
+                ),
+                "forecast_steps": min(ordered_forecasts),
+                "train_steps": max(train_values),
+                "rationale": [
+                    "early_middle_capacity_axis_coverage",
+                    "positive_graft_expand_capacity_within_guard",
+                ],
+            }
+        )
+    if repair_mode:
+        mode_values = _anchor_only_int_values(preferences, "modes", mode_values)
+        width_values = _anchor_only_int_values(preferences, "widths", width_values)
+        train_values = _anchor_train_step_values(preferences, train_values)
+        if (
+            preferences.get("requires_new_dynamics_source")
+            or preferences.get("requires_model_family_change")
+        ):
+            model_family_values = _prioritize_new_dynamics_families(model_family_values)
+        else:
+            model_family_values = ["fno_lite"]
+        ordered_modes = _ordered_values(mode_values, preferences["modes"])
+        ordered_widths = _ordered_values(width_values, preferences["widths"])
+        ordered_train_steps = _ordered_values(train_values, preferences["train_steps"])
+    coverage_count = max(
+        len(ordered_forecasts),
+        len(ordered_normalizations),
+        len(ordered_losses),
+        min(2, len(ordered_modes)),
+        min(2, len(ordered_widths)),
+        min(2, len(ordered_depths)),
+        min(2, len(ordered_train_steps)),
+    )
+    for index in range(coverage_count):
+        model_family = model_family_values[index % len(model_family_values)]
+        forecast_steps = ordered_forecasts[index % len(ordered_forecasts)]
+        loss_type = ordered_losses[index % len(ordered_losses)]
+        normalization_value = ordered_normalizations[index % len(ordered_normalizations)]
+        modes_value = ordered_modes[index % min(2, len(ordered_modes))]
+        width = ordered_widths[index % min(2, len(ordered_widths))]
+        depth = ordered_depths[index % min(2, len(ordered_depths))]
+        train_steps = ordered_train_steps[index % min(2, len(ordered_train_steps))]
+        candidates.append(
+            {
+                "model_family": model_family,
+                "modes": modes_value,
+                "width": width,
+                "depth": depth,
+                "loss_type": loss_type,
+                "normalization": normalization_value,
+                "forecast_steps": forecast_steps,
+                "train_steps": train_steps,
+                "rationale": _candidate_rationale(
+                    loss_type=loss_type,
+                    forecast_steps=forecast_steps,
+                    preferences=preferences,
+                ),
+            }
+        )
+    for model_family in model_family_values:
+        for forecast_steps in ordered_forecasts:
+            for loss_type in ordered_losses:
+                for normalization_value in ordered_normalizations:
+                    for modes_value in ordered_modes:
+                        for width in ordered_widths:
+                            for depth in ordered_depths:
+                                for train_steps in ordered_train_steps:
+                                    candidates.append(
+                                        {
+                                            "model_family": model_family,
+                                            "modes": modes_value,
+                                            "width": width,
+                                            "depth": depth,
+                                            "loss_type": loss_type,
+                                            "normalization": normalization_value,
+                                            "forecast_steps": forecast_steps,
+                                            "train_steps": train_steps,
+                                            "rationale": _candidate_rationale(
+                                                loss_type=loss_type,
+                                                forecast_steps=forecast_steps,
+                                                preferences=preferences,
+                                            ),
+                                        }
+                                    )
+    seen = set()
+    for config in candidates:
+        signature = _fno_config_signature(config)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        if _fno_config_signature(config) in attempted:
+            continue
+        config = dict(config)
+        config["candidate_id"] = f"fno_train_candidate_{len(rows) + 1:03d}"
+        rows.append(config)
         if len(rows) >= max_candidates:
             break
+
+    applied_constraints: dict[str, Any] = {}
+    if blocked_families:
+        blocked_set = set(blocked_families)
+        rows = [
+            row for row in rows
+            if row.get("model_family") not in blocked_set
+        ]
+        applied_constraints["blocked_families"] = list(blocked_set)
+    if budget_adjustment:
+        train_steps_delta = budget_adjustment.get("train_steps_delta")
+        if isinstance(train_steps_delta, int):
+            for row in rows:
+                current = row.get("train_steps", 2)
+                if isinstance(current, int):
+                    row["train_steps"] = max(1, current + train_steps_delta)
+            applied_constraints["train_steps_delta"] = train_steps_delta
+        width_delta = budget_adjustment.get("width_delta")
+        if isinstance(width_delta, int):
+            for row in rows:
+                current = row.get("width", 16)
+                if isinstance(current, int):
+                    row["width"] = max(4, current + width_delta)
+            applied_constraints["width_delta"] = width_delta
+    rows = [_normalize_fno_candidate_config(row) for row in rows]
+    if search_guidance:
+        guidance_types = set()
+        for guidance in search_guidance:
+            if isinstance(guidance, dict):
+                guidance_type = guidance.get("guidance_type")
+                if guidance_type:
+                    guidance_types.add(guidance_type)
+        if guidance_types:
+            applied_constraints["search_guidance_types"] = sorted(guidance_types)
+    if operator_policy:
+        applied_constraints["operator_policy"] = {
+            "next_action": operator_policy.get("next_action"),
+            "required_axis_changes": operator_policy.get("required_axis_changes", []),
+            "reason_codes": operator_policy.get("reason_codes", []),
+        }
+    if preferences.get("health_feedback_actions"):
+        applied_constraints["health_feedback_actions"] = list(
+            preferences["health_feedback_actions"]
+        )
+
     report = {
         "schema_version": 1,
         "state_hint": "FNO_TRAINING_CANDIDATES_PLANNED",
         "evidence_paths": [str(path) for path in evidence_paths],
         "candidate_configs": rows,
         "planning_preferences": preferences,
+        "early_middle_source_mode": early_middle_source_mode,
         "avoided_config_count": len(attempted),
+        "applied_constraints": applied_constraints,
         "next_command": "run-fno-training-optimization-loop",
     }
     _write_optional_json(output_file, report)
@@ -516,11 +902,12 @@ def run_fno_training_optimization_loop(
             forecast_steps=int(config["forecast_steps"]),
             time_reduction=time_reduction,
             space_reduction=space_reduction,
-            model_family="fno_lite",
+            model_family=str(config.get("model_family", "fno_lite")),
             fno_modes=int(config["modes"]),
             fno_width=int(config["width"]),
             fno_depth=int(config["depth"]),
             loss_type=str(config["loss_type"]),
+            normalization=str(config.get("normalization", "none")),
             train_steps=int(config["train_steps"]),
             batch_size=batch_size,
             learning_rate=learning_rate,
@@ -554,6 +941,7 @@ def record_fno_training_optimization_evidence(
     *,
     optimization_report_path: str | Path,
     output_path: str | Path | None,
+    graft_report_path: str | Path | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     output_file = Path(output_path) if output_path is not None else None
@@ -561,13 +949,20 @@ def record_fno_training_optimization_evidence(
     report = _load_json(Path(optimization_report_path), "FNO optimization report")
     if report.get("state_hint") != "FNO_TRAINING_OPTIMIZATION_LOOP_RAN":
         raise Task1ShortWindowTrainingError("optimization report has invalid state_hint")
-    selected = report["selected_candidate"]
+    selected = _select_fno_candidate(report["candidate_records"])
     directive = report["training_directive"]
+    graft_evidence = (
+        _fno_graft_evidence_summary(Path(graft_report_path))
+        if graft_report_path is not None
+        else None
+    )
     evidence = {
         "schema_version": 1,
         "state_hint": "FNO_TRAINING_OPTIMIZATION_EVIDENCE_RECORDED",
         "source_type": "fno_training_optimization",
         "optimization_report_path": str(optimization_report_path),
+        "graft_report_path": str(graft_report_path) if graft_report_path is not None else None,
+        "graft_evidence": graft_evidence,
         "selected_candidate": selected,
         "training_directive": directive,
         "candidate_records": report["candidate_records"],
@@ -575,6 +970,7 @@ def record_fno_training_optimization_evidence(
             selected=selected,
             directive=directive,
             records=report["candidate_records"],
+            graft_evidence=graft_evidence,
         ),
         "next_command": "build-hypothesis-algorithm-design",
     }
@@ -587,6 +983,9 @@ def build_fno_training_harness_contract(
     output_path: str | Path | None,
     workspace_dir: str | Path,
     source_path: str | Path,
+    baseline_prediction_path: str | Path | None = None,
+    task1_test_path: str | Path | None = None,
+    task1_target_path: str | Path | None = None,
     previous_evidence_paths: list[str | Path] | None = None,
     dataset_key: str = "tensor",
     train_sample_limit: int = 16,
@@ -604,6 +1003,7 @@ def build_fno_training_harness_contract(
     loss_types: list[str] | None = None,
     forecast_steps_values: list[int] | None = None,
     train_steps_values: list[int] | None = None,
+    normalizations: list[str] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     output_file = Path(output_path) if output_path is not None else None
@@ -618,10 +1018,38 @@ def build_fno_training_harness_contract(
         forecast_steps_values or [12, 20],
         "forecast_steps_values",
     )
+    horizon_guard = _source_horizon_guard(
+        source_path=source,
+        dataset_key=dataset_key,
+        context_steps=context_steps,
+        time_reduction=time_reduction,
+    )
+    if horizon_guard is not None:
+        max_forecast_steps = int(horizon_guard["max_forecast_steps"])
+        forecast_values = [
+            value for value in forecast_values if int(value) <= max_forecast_steps
+        ]
+        if not forecast_values:
+            raise Task1ShortWindowTrainingError(
+                "forecast_steps_values has no values compatible with "
+                f"source horizon after reduction; max_forecast_steps={max_forecast_steps}"
+            )
+    budget_repair = _repair_training_sample_budget(
+        source_path=source,
+        dataset_key=dataset_key,
+        train_sample_limit=train_sample_limit,
+        val_sample_limit=val_sample_limit,
+        batch_size=batch_size,
+    )
+    train_sample_limit = int(budget_repair["resolved_train_sample_limit"])
+    val_sample_limit = int(budget_repair["resolved_val_sample_limit"])
+    batch_size = int(budget_repair["resolved_batch_size"])
     train_values = _positive_int_list(train_steps_values or [1, 2], "train_steps_values")
     loss_values = _loss_type_list(
-        loss_types or ["mse", "early_weighted_mse", "spectral_mse"]
+        loss_types
+        or ["mse", "early_weighted_mse", "horizon_weighted_mse", "spectral_mse"]
     )
+    normalization_values = _normalization_list(normalizations or ["none"])
     budget = {
         "max_candidates": max_candidates,
         "train_sample_limit": train_sample_limit,
@@ -632,11 +1060,28 @@ def build_fno_training_harness_contract(
         "batch_size": batch_size,
         "learning_rate": learning_rate,
         "seed": seed,
+        "normalizations": normalization_values,
+        "training_contract_repair": budget_repair,
     }
     data = {
         "source_path": str(source),
         "dataset_key": dataset_key,
+        "baseline_prediction_path": str(baseline_prediction_path)
+        if baseline_prediction_path is not None
+        else None,
+        "task1_test_path": str(task1_test_path) if task1_test_path is not None else None,
+        "task1_target_path": str(task1_target_path)
+        if task1_target_path is not None
+        else None,
     }
+    graft_inputs = _resolve_fno_graft_inputs(
+        baseline_prediction_path=baseline_prediction_path,
+        task1_test_path=task1_test_path,
+        task1_target_path=task1_target_path,
+        dataset_key=dataset_key,
+    )
+    if graft_inputs is not None:
+        data["graft_contract_repair"] = graft_inputs["repair"]
     paths = {
         "candidate_plan_path": str(root / "fno_training_plan.json"),
         "optimization_dir": str(root / "optimization"),
@@ -646,6 +1091,10 @@ def build_fno_training_harness_contract(
         "optimization_evidence_path": str(root / "fno_training_optimization_evidence.json"),
         "algorithm_design_path": str(root / "hypothesis_algorithm_design.json"),
         "algorithm_design_validation_path": str(root / "hypothesis_validation_result.json"),
+        "fno_graft_dir": str(root / "fno_graft_evaluation"),
+        "fno_graft_report_path": str(
+            root / "fno_graft_evaluation" / "task1_fno_graft_evaluator_report.json"
+        ),
     }
     actions = [
         {
@@ -653,7 +1102,7 @@ def build_fno_training_harness_contract(
             "state_hint": "FNO_TRAINING_CANDIDATES_PLANNED",
             "command": _join_command(
                 [
-                    "uv run --frozen pde-agent plan-fno-training-candidates",
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent plan-fno-training-candidates",
                     f"--output-path {paths['candidate_plan_path']}",
                     *[
                         f"--evidence-path {path}"
@@ -664,6 +1113,7 @@ def build_fno_training_harness_contract(
                     *[f"--width {value}" for value in width_values],
                     *[f"--depth {value}" for value in depth_values],
                     *[f"--loss-type {value}" for value in loss_values],
+                    *[f"--normalization {value}" for value in normalization_values],
                     *[
                         f"--forecast-steps-value {value}"
                         for value in forecast_values
@@ -680,7 +1130,7 @@ def build_fno_training_harness_contract(
             "state_hint": "FNO_TRAINING_OPTIMIZATION_LOOP_RAN",
             "command": _join_command(
                 [
-                    "uv run --frozen pde-agent run-fno-training-optimization-loop",
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent run-fno-training-optimization-loop",
                     f"--candidate-plan-path {paths['candidate_plan_path']}",
                     f"--source-path {source}",
                     f"--output-dir {paths['optimization_dir']}",
@@ -699,22 +1149,39 @@ def build_fno_training_harness_contract(
             "reads": [paths["candidate_plan_path"], str(source)],
             "writes": [paths["optimization_report_path"]],
             "next_action_options": [
+                "run_task1_fno_graft_from_optimization_report",
                 "record_fno_training_optimization_evidence",
                 "stop_and_report",
             ],
         },
+        *_fno_graft_harness_actions(
+            paths=paths,
+            graft_inputs=graft_inputs,
+        ),
         {
             "action_id": "record_fno_training_optimization_evidence",
             "state_hint": "FNO_TRAINING_OPTIMIZATION_EVIDENCE_RECORDED",
             "command": _join_command(
                 [
-                    "uv run --frozen pde-agent record-fno-training-optimization-evidence",
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent record-fno-training-optimization-evidence",
                     f"--optimization-report-path {paths['optimization_report_path']}",
                     f"--output-path {paths['optimization_evidence_path']}",
+                    *(
+                        [f"--graft-report-path {paths['fno_graft_report_path']}"]
+                        if graft_inputs is not None
+                        else []
+                    ),
                     "--force",
                 ]
             ),
-            "reads": [paths["optimization_report_path"]],
+            "reads": [
+                paths["optimization_report_path"],
+                *(
+                    [paths["fno_graft_report_path"]]
+                    if graft_inputs is not None
+                    else []
+                ),
+            ],
             "writes": [paths["optimization_evidence_path"]],
             "next_action_options": [
                 "build_hypothesis_algorithm_design",
@@ -727,7 +1194,7 @@ def build_fno_training_harness_contract(
             "state_hint": "HYPOTHESIS_ALGORITHM_DESIGN_BUILT",
             "command": _join_command(
                 [
-                    "uv run --frozen pde-agent build-hypothesis-algorithm-design",
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent build-hypothesis-algorithm-design",
                     f"--output-path {paths['algorithm_design_path']}",
                     f"--evidence-path {paths['optimization_evidence_path']}",
                     "--min-hypothesis-count 5",
@@ -747,7 +1214,7 @@ def build_fno_training_harness_contract(
             "state_hint": "HYPOTHESIS_ALGORITHM_DESIGN_VALIDATED",
             "command": _join_command(
                 [
-                    "uv run --frozen pde-agent validate-hypothesis-algorithm-design",
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent validate-hypothesis-algorithm-design",
                     f"--design-path {paths['algorithm_design_path']}",
                     f"--output-path {paths['algorithm_design_validation_path']}",
                     "--min-hypothesis-count 5",
@@ -761,7 +1228,7 @@ def build_fno_training_harness_contract(
         },
         {
             "action_id": "stop_and_report",
-            "state_hint": "HERMES_REPORTED_DECISION",
+            "state_hint": "CLAUDE_AGENT_SDK_REPORTED_DECISION",
             "command": None,
             "reason": "Use when evidence is sufficient, budget is exhausted, or an upstream action fails.",
         },
@@ -777,8 +1244,12 @@ def build_fno_training_harness_contract(
             "widths": width_values,
             "depths": depth_values,
             "loss_types": loss_values,
+            "normalizations": normalization_values,
             "forecast_steps_values": forecast_values,
             "train_steps_values": train_values,
+        },
+        "candidate_space_guards": {
+            "source_horizon": horizon_guard,
         },
         "paths": paths,
         "previous_evidence_paths": [str(path) for path in evidence_paths],
@@ -790,632 +1261,471 @@ def build_fno_training_harness_contract(
             "do_not_create_directories_with_shell": True,
             "stop_conditions": [
                 "action_failed_without_clear_parameter_repair",
+                "graft_evaluation_shows_no_positive_delta_after_multiple_training_sources",
                 "validation_accepted",
                 "budget_exhausted",
             ],
+            "score_objective": (
+                "Do not judge trained FNO as a standalone full replacement. "
+                "Prefer a trained dynamics source only if graft evaluation improves "
+                "the stronger baseline under late non-regression."
+            ),
         },
-        "next_command": "Hermes should choose an available action, not blindly run all actions.",
+        "next_command": (
+            "Claude SDK agent should choose an available action from evidence, "
+            "not blindly run all actions."
+        ),
     }
     _write_optional_json(output_file, report)
     return report
 
 
-class _Conv1DResidualRollout:
-    def __init__(
-        self,
-        *,
-        torch: Any,
-        context_steps: int,
-        forecast_steps: int,
-        hidden_channels: int,
-    ) -> None:
-        self._torch = torch
-        self.operator_type = "conv1d_residual"
-        self.network = torch.nn.Sequential(
-            torch.nn.Conv1d(context_steps, hidden_channels, kernel_size=5, padding=2),
-            torch.nn.GELU(),
-            torch.nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=2),
-            torch.nn.GELU(),
-            torch.nn.Conv1d(hidden_channels, forecast_steps, kernel_size=1),
-        )
-
-    def parameters(self) -> Any:
-        return self.network.parameters()
-
-    def state_dict(self) -> dict[str, Any]:
-        return self.network.state_dict()
-
-    def train(self) -> None:
-        self.network.train()
-
-    def eval(self) -> None:
-        self.network.eval()
-
-    def __call__(self, context: Any) -> Any:
-        raw = self.network(context)
-        anchor = context[:, -1:, :]
-        return anchor + raw
-
-
-class _FNOLiteRollout:
-    def __init__(
-        self,
-        *,
-        torch: Any,
-        context_steps: int,
-        forecast_steps: int,
-        space_points: int,
-        hidden_channels: int,
-        modes: int = 8,
-        depth: int = 1,
-    ) -> None:
-        self._torch = torch
-        self.operator_type = "spectral_conv1d"
-        mode_count = max(1, min(int(modes), (int(space_points) // 2) + 1))
-        self.lift = torch.nn.Conv1d(context_steps, hidden_channels, kernel_size=1)
-        self.spectral_layers = [
-            _SpectralConv1D(torch=torch, channels=hidden_channels, modes=mode_count)
-            for _ in range(depth)
-        ]
-        self.local_layers = [
-            torch.nn.Conv1d(hidden_channels, hidden_channels, kernel_size=1)
-            for _ in range(depth)
-        ]
-        self.project = torch.nn.Conv1d(hidden_channels, forecast_steps, kernel_size=1)
-        self.activation = torch.nn.GELU()
-
-    def parameters(self) -> Any:
-        return (
-            list(self.lift.parameters())
-            + list(self.project.parameters())
-            + [
-                parameter
-                for layer in self.local_layers
-                for parameter in layer.parameters()
-            ]
-            + [layer.weight for layer in self.spectral_layers]
-        )
-
-    def state_dict(self) -> dict[str, Any]:
-        return {
-            "lift": self.lift.state_dict(),
-            "spectral_layers": [
-                layer.state_dict() for layer in self.spectral_layers
-            ],
-            "local_layers": [layer.state_dict() for layer in self.local_layers],
-            "project": self.project.state_dict(),
-        }
-
-    def train(self) -> None:
-        self.lift.train()
-        for layer in self.local_layers:
-            layer.train()
-        self.project.train()
-
-    def eval(self) -> None:
-        self.lift.eval()
-        for layer in self.local_layers:
-            layer.eval()
-        self.project.eval()
-
-    def __call__(self, context: Any) -> Any:
-        hidden = self.activation(self.lift(context))
-        for spectral_layer, local_layer in zip(self.spectral_layers, self.local_layers):
-            hidden = self.activation(spectral_layer(hidden) + local_layer(hidden))
-        raw = self.project(hidden)
-        anchor = context[:, -1:, :]
-        return anchor + raw
-
-
-class _SpectralConv1D:
-    def __init__(self, *, torch: Any, channels: int, modes: int) -> None:
-        self._torch = torch
-        self.channels = int(channels)
-        self.modes = int(modes)
-        scale = 1.0 / max(1, channels * channels)
-        self.weight = torch.nn.Parameter(
-            scale
-            * torch.randn(
-                channels,
-                channels,
-                self.modes,
-                dtype=torch.cfloat,
+def build_fno_training_iteration_contract_from_evidence(
+    *,
+    previous_evidence_path: str | Path,
+    previous_evidence_paths: list[str | Path] | None = None,
+    output_dir: str | Path,
+    workspace_dir: str | Path,
+    source_path: str | Path,
+    baseline_prediction_path: str | Path | None = None,
+    task1_test_path: str | Path | None = None,
+    task1_target_path: str | Path | None = None,
+    dataset_key: str = "tensor",
+    train_sample_limit: int = 32,
+    val_sample_limit: int = 16,
+    context_steps: int = 10,
+    time_reduction: int = 5,
+    space_reduction: int = 4,
+    batch_size: int = 4,
+    learning_rate: float = 1e-3,
+    seed: int = 0,
+    max_candidates: int = 4,
+    force: bool = False,
+) -> dict[str, Any]:
+    evidence_paths = [
+        Path(path)
+        for path in (previous_evidence_paths or [previous_evidence_path])
+    ]
+    evidences = []
+    for evidence_path in evidence_paths:
+        evidence = _load_json(evidence_path, "FNO training optimization evidence")
+        if evidence.get("state_hint") != "FNO_TRAINING_OPTIMIZATION_EVIDENCE_RECORDED":
+            raise Task1ShortWindowTrainingError("previous evidence has invalid state_hint")
+        evidences.append(evidence)
+    if max_candidates < 4:
+        max_candidates = 4
+    preferences = _fno_planning_preferences(evidences if isinstance(evidences, list) else [])
+    mode_values = _merge_preferred_ints([4, 8], preferences["modes"])
+    width_values = _merge_preferred_ints([16, 32], preferences["widths"])
+    depth_values = _merge_preferred_ints([1], preferences["depths"])
+    if (
+        baseline_prediction_path is not None
+        and task1_test_path is not None
+        and task1_target_path is not None
+    ):
+        forecast_values = _merge_preferred_ints([47, 95], preferences["forecast_steps"])
+        forecast_values = [value for value in forecast_values if int(value) <= 95]
+    else:
+        forecast_values = _merge_preferred_ints([47, 95, 190], preferences["forecast_steps"])
+    train_values = _merge_preferred_ints([1, 2, 20], preferences["train_steps"])
+    normalization_values = _merge_preferred_strings(
+        ["none", "sample_standard"],
+        preferences["normalizations"],
+    )
+    graft_evaluation_available = (
+        baseline_prediction_path is not None
+        and task1_test_path is not None
+        and task1_target_path is not None
+    )
+    if (
+        not graft_evaluation_available
+        and _prefers_medium_training_budget(preferences)
+    ):
+        train_values = _medium_training_budget_values(train_values)
+    if graft_evaluation_available:
+        if _has_positive_late_safe_graft_evidence(evidences):
+            max_candidates = max(max_candidates, 6)
+            mode_values = _merge_preferred_ints(mode_values, [12, 16])
+            width_values = _merge_preferred_ints(width_values, [48, 64])
+            depth_values = _merge_preferred_ints(depth_values, [2, 3, 4])
+            train_values = _merge_preferred_ints(train_values, [50, 100, 150])
+            mode_values = _cap_positive_int_values(
+                mode_values,
+                maximum=16,
+                fallback=[4, 8, 12, 16],
             )
-        )
-
-    def parameters(self) -> Any:
-        return [self.weight]
-
-    def state_dict(self) -> dict[str, Any]:
-        return {"weight": self.weight}
-
-    def train(self) -> None:
-        return None
-
-    def eval(self) -> None:
-        return None
-
-    def __call__(self, value: Any) -> Any:
-        torch = self._torch
-        spectrum = torch.fft.rfft(value, dim=-1)
-        output_spectrum = torch.zeros_like(spectrum)
-        modes = min(self.modes, spectrum.shape[-1])
-        output_spectrum[:, :, :modes] = torch.einsum(
-            "bim,iom->bom",
-            spectrum[:, :, :modes],
-            self.weight[:, :, :modes],
-        )
-        return torch.fft.irfft(output_spectrum, n=value.shape[-1], dim=-1)
-
-
-def _build_model(
-    *,
-    torch: Any,
-    model_family: str,
-    context_steps: int,
-    forecast_steps: int,
-    space_points: int,
-        hidden_channels: int,
-        modes: int,
-        depth: int,
-) -> Any:
-    if model_family == "conv1d_residual":
-        return _Conv1DResidualRollout(
-            torch=torch,
-            context_steps=context_steps,
-            forecast_steps=forecast_steps,
-            hidden_channels=hidden_channels,
-        )
-    if model_family == "fno_lite":
-        return _FNOLiteRollout(
-            torch=torch,
-            context_steps=context_steps,
-            forecast_steps=forecast_steps,
-            space_points=space_points,
-            hidden_channels=hidden_channels,
-            modes=modes,
-            depth=depth,
-        )
-    raise Task1ShortWindowTrainingError(f"unsupported model_family: {model_family}")
-
-
-def _family_record(report: dict[str, Any]) -> dict[str, Any]:
-    loss_curve = report["training"]["loss_curve"]
-    middle = report["metrics"]["middle_guardrail"]
-    return {
-        "model_family": report["model"]["model_family"],
-        "operator_type": report["model"]["operator_type"],
-        "parameter_count": report["model"]["parameter_count"],
-        "runtime_seconds": report["training"]["runtime_seconds"],
-        "train_steps": report["training"]["train_steps"],
-        "loss_curve": loss_curve,
-        "final_train_loss": float(loss_curve["train"][-1]),
-        "final_val_loss": float(loss_curve["val"][-1]),
-        "early_rel_mse": float(report["metrics"]["early"]["rel_mse"]),
-        "early_score": float(report["metrics"]["early"]["score"]),
-        "middle_guardrail": middle,
-        "decision": report["evidence"]["decision"],
-        "reason_codes": report["evidence"]["reason_codes"],
-        "artifacts": report["artifacts"],
-    }
-
-
-def _select_family(records: list[dict[str, Any]]) -> dict[str, Any]:
-    ranked = sorted(
-        records,
-        key=lambda item: (
-            -float(item.get("early_score", 0.0)),
-            float(item.get("final_val_loss", float("inf"))),
-            float(item.get("runtime_seconds", float("inf"))),
-        ),
+            width_values = _cap_positive_int_values(
+                width_values,
+                maximum=64,
+                fallback=[16, 32, 48, 64],
+            )
+            depth_values = _cap_positive_int_values(
+                depth_values,
+                maximum=4,
+                fallback=[1, 2, 3, 4],
+            )
+            train_values = _cap_positive_int_values(
+                train_values,
+                maximum=150,
+                fallback=[20, 50, 100, 150],
+            )
+        else:
+            mode_values = _cap_positive_int_values(mode_values, maximum=8, fallback=[4, 8])
+            width_values = _cap_positive_int_values(width_values, maximum=32, fallback=[16, 32])
+            depth_values = _cap_positive_int_values(depth_values, maximum=2, fallback=[1, 2])
+            train_values = _cap_positive_int_values(
+                train_values,
+                maximum=50,
+                fallback=[1, 2, 20],
+            )
+    root = Path(output_dir)
+    _guard_artifacts(
+        [
+            root / "fno_training_harness_contract.json",
+            root / "claude_fno_training_iteration_prompt.md",
+            root / "fno_training_iteration_contract.json",
+        ],
+        force=force,
     )
-    selected = dict(ranked[0])
-    selected["selection_reason_codes"] = _selection_reason_codes(
-        selected=selected,
-        records=records,
+    root.mkdir(parents=True, exist_ok=True)
+    harness_contract_path = root / "fno_training_harness_contract.json"
+    prompt_path = root / "claude_fno_training_iteration_prompt.md"
+    output_path = root / "fno_training_iteration_contract.json"
+    harness = build_fno_training_harness_contract(
+        output_path=harness_contract_path,
+        workspace_dir=root,
+        source_path=source_path,
+        baseline_prediction_path=baseline_prediction_path,
+        task1_test_path=task1_test_path,
+        task1_target_path=task1_target_path,
+        previous_evidence_paths=evidence_paths,
+        dataset_key=dataset_key,
+        train_sample_limit=train_sample_limit,
+        val_sample_limit=val_sample_limit,
+        context_steps=context_steps,
+        time_reduction=time_reduction,
+        space_reduction=space_reduction,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        seed=seed,
+        max_candidates=max_candidates,
+        modes=mode_values,
+        widths=width_values,
+        depths=depth_values,
+        loss_types=["early_weighted_mse", "horizon_weighted_mse", "spectral_mse"],
+        forecast_steps_values=forecast_values,
+        train_steps_values=train_values,
+        normalizations=normalization_values,
+        force=True,
     )
-    return selected
-
-
-def _selection_reason_codes(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> list[str]:
-    reasons = ["best_early_score"]
-    early_scores = [float(item.get("early_score", 0.0)) for item in records]
-    if early_scores and max(early_scores) - min(early_scores) < 1e-9:
-        reasons.append("tie_broken_by_val_loss_or_runtime")
-    if selected.get("middle_guardrail", {}).get("evaluated"):
-        reasons.append("middle_guardrail_available")
-    if selected.get("decision") == "continue_training":
-        reasons.append("selected_family_wants_more_training")
-    return reasons
-
-
-def _family_training_directive(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> dict[str, Any]:
-    action = _family_directive_action(selected=selected, records=records)
-    return {
-        "action": action,
-        "target_family": selected["model_family"],
-        "reason_codes": selected["selection_reason_codes"],
-        "next_command": "run-task1-short-window-training-loop"
-        if action in {"continue_training", "change_loss_or_horizon"}
-        else "build-hypothesis-algorithm-design",
-    }
-
-
-def _family_directive_action(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> str:
-    if all(item.get("decision") == "abandon_model_family" for item in records):
-        return "abandon_candidate_family"
-    if selected.get("decision") == "change_loss_or_horizon":
-        return "change_loss_or_horizon"
-    if selected.get("decision") == "continue_training":
-        return "continue_training"
-    return "expand_model_family"
-
-
-def _family_selection_constraints(
-    *, directive: dict[str, Any]
-) -> dict[str, list[str]]:
-    target = str(directive["target_family"])
-    constraints = {
-        "training_model_families": [],
-        "prefer_training_objectives": [],
-        "refine_training_horizons": [],
-        "avoid_training_model_families": [],
-    }
-    if directive["action"] == "abandon_candidate_family":
-        constraints["avoid_training_model_families"].append(target)
-    else:
-        constraints["training_model_families"].append(target)
-        constraints["prefer_training_objectives"].append("short_window_mse")
-    if directive["action"] == "change_loss_or_horizon":
-        constraints["prefer_training_objectives"].extend(
-            ["early_weighted_mse", "rollout_consistency"]
-        )
-        constraints["refine_training_horizons"].append("early_window")
-    if "middle_guardrail_available" in directive.get("reason_codes", []):
-        constraints["refine_training_horizons"].append("middle_guardrail")
-    return {key: _dedupe(value) for key, value in constraints.items()}
-
-
-def _training_loss(*, torch: Any, prediction: Any, target: Any, loss_type: str) -> Any:
-    if loss_type == "mse":
-        return torch.nn.functional.mse_loss(prediction, target)
-    if loss_type == "early_weighted_mse":
-        weights = torch.linspace(
-            1.5,
-            0.75,
-            steps=prediction.shape[1],
-            dtype=prediction.dtype,
-            device=prediction.device,
-        ).view(1, -1, 1)
-        return torch.mean(weights * (prediction - target) ** 2)
-    if loss_type == "spectral_mse":
-        base = torch.nn.functional.mse_loss(prediction, target)
-        pred_spec = torch.fft.rfft(prediction, dim=-1)
-        target_spec = torch.fft.rfft(target, dim=-1)
-        spectral = torch.mean(torch.abs(pred_spec - target_spec) ** 2)
-        return base + 0.01 * spectral
-    raise Task1ShortWindowTrainingError(f"unsupported loss_type: {loss_type}")
-
-
-def _fno_candidate_record(
-    *, config: dict[str, Any], report: dict[str, Any]
-) -> dict[str, Any]:
-    base = _family_record(report)
-    base["candidate_id"] = str(config["candidate_id"])
-    base["config"] = {
-        "modes": int(config["modes"]),
-        "width": int(config["width"]),
-        "depth": int(config["depth"]),
-        "loss_type": str(config["loss_type"]),
-        "forecast_steps": int(config["forecast_steps"]),
-        "train_steps": int(config["train_steps"]),
-    }
-    return base
-
-
-def _select_fno_candidate(records: list[dict[str, Any]]) -> dict[str, Any]:
-    ranked = sorted(
-        records,
-        key=lambda item: (
-            -float(item["early_score"]),
-            float(item["final_val_loss"]),
-            float(item["runtime_seconds"]),
-        ),
+    prompt = _build_fno_training_iteration_prompt(
+        workspace_dir=Path(workspace_dir),
+        previous_evidence_path=evidence_paths[-1],
+        previous_evidence_paths=evidence_paths,
+        harness_contract_path=harness_contract_path,
+        harness=harness,
     )
-    selected = dict(ranked[0])
-    selected["selection_reason_codes"] = _fno_selection_reason_codes(
-        selected=selected,
-        records=records,
-    )
-    return selected
-
-
-def _fno_selection_reason_codes(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> list[str]:
-    reasons = ["best_early_score"]
-    if selected.get("middle_guardrail", {}).get("evaluated"):
-        reasons.append("middle_guardrail_available")
-    if selected.get("config", {}).get("loss_type") != "mse":
-        reasons.append("non_default_loss_selected")
-    if len({item["config"]["loss_type"] for item in records}) > 1:
-        reasons.append("loss_family_compared")
-    return reasons
-
-
-def _fno_training_directive(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> dict[str, Any]:
-    action = _fno_directive_action(selected=selected, records=records)
-    return {
-        "action": action,
-        "target_family": "fno_lite"
-        if action != "fallback_to_conv1d"
-        else "conv1d_residual",
-        "selected_candidate_id": selected["candidate_id"],
-        "reason_codes": selected["selection_reason_codes"]
-        + _fno_directive_reason_codes(action=action, selected=selected),
-        "next_command": "plan-fno-training-candidates"
-        if action
-        in {
-            "continue_current_fno_family",
-            "change_loss",
-            "change_horizon",
-            "change_architecture",
-        }
-        else "run-task1-short-window-family-selection-loop",
-    }
-
-
-def _fno_directive_action(
-    *, selected: dict[str, Any], records: list[dict[str, Any]]
-) -> str:
-    if float(selected["early_rel_mse"]) >= 4.5:
-        return "fallback_to_conv1d"
-    if selected["config"]["loss_type"] == "mse" and float(selected["early_rel_mse"]) >= 1.0:
-        return "change_loss"
-    if float(selected["early_rel_mse"]) >= 1.0:
-        return "change_horizon"
-    if _architecture_search_exhausted(records):
-        return "expand_new_model_family"
-    if selected.get("decision") == "continue_training":
-        return "continue_current_fno_family"
-    return "change_architecture"
-
-
-def _fno_directive_reason_codes(
-    *, action: str, selected: dict[str, Any]
-) -> list[str]:
-    reasons = [action]
-    if float(selected["early_rel_mse"]) >= 1.0:
-        reasons.append("early_rel_mse_high")
-    else:
-        reasons.append("early_signal_learned")
-    return reasons
-
-
-def _architecture_search_exhausted(records: list[dict[str, Any]]) -> bool:
-    return len({(item["config"]["modes"], item["config"]["width"], item["config"]["depth"]) for item in records}) >= 6
-
-
-def _fno_optimization_constraints(
-    *,
-    selected: dict[str, Any],
-    directive: dict[str, Any],
-    records: list[dict[str, Any]],
-) -> dict[str, Any]:
-    config = selected["config"]
-    constraints = {
-        "training_model_families": ["fno_lite"]
-        if directive["action"] != "fallback_to_conv1d"
-        else ["conv1d_residual"],
-        "prefer_training_objectives": [],
-        "refine_training_horizons": [],
-        "avoid_training_model_families": [],
-        "fno_training_configs": [item["config"] for item in records],
-    }
-    if directive["action"] == "change_loss":
-        constraints["prefer_training_objectives"].extend(
-            ["early_weighted_mse", "spectral_mse"]
-        )
-    else:
-        constraints["prefer_training_objectives"].append(str(config["loss_type"]))
-    if directive["action"] == "change_horizon":
-        constraints["refine_training_horizons"].append("shorter_early_window")
-    if directive["action"] == "fallback_to_conv1d":
-        constraints["avoid_training_model_families"].append("fno_lite")
-    if selected.get("middle_guardrail", {}).get("evaluated"):
-        constraints["refine_training_horizons"].append("middle_guardrail")
-    constraints["prefer_training_objectives"] = _dedupe(
-        constraints["prefer_training_objectives"]
-    )
-    constraints["refine_training_horizons"] = _dedupe(
-        constraints["refine_training_horizons"]
-    )
-    constraints["avoid_training_model_families"] = _dedupe(
-        constraints["avoid_training_model_families"]
-    )
-    return constraints
-
-
-def _attempted_fno_config_signatures(evidences: list[dict[str, Any]]) -> set[tuple[Any, ...]]:
-    signatures = set()
-    for evidence in evidences:
-        for record in evidence.get("family_records", []) or []:
-            if isinstance(record, dict) and isinstance(record.get("config"), dict):
-                signatures.add(_fno_config_signature(record["config"]))
-        for record in evidence.get("candidate_records", []) or []:
-            if isinstance(record, dict) and isinstance(record.get("config"), dict):
-                signatures.add(_fno_config_signature(record["config"]))
-        constraints = evidence.get("next_generation_constraints")
-        if isinstance(constraints, dict):
-            for config in constraints.get("fno_training_configs", []) or []:
-                if isinstance(config, dict):
-                    signatures.add(_fno_config_signature(config))
-    return signatures
-
-
-def _fno_config_signature(config: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        int(config.get("modes", 0)),
-        int(config.get("width", 0)),
-        int(config.get("depth", 0)),
-        str(config.get("loss_type", "mse")),
-        int(config.get("forecast_steps", 0)),
-        int(config.get("train_steps", 0)),
-    )
-
-
-def _fno_planning_preferences(evidences: list[dict[str, Any]]) -> dict[str, Any]:
-    preferences = {
-        "loss_types": [],
-        "forecast_steps": [],
-        "modes": [],
-        "widths": [],
-        "depths": [],
-        "train_steps": [],
-    }
-    for evidence in evidences:
-        constraints = evidence.get("next_generation_constraints")
-        if not isinstance(constraints, dict):
-            continue
-        objectives = _string_list(constraints.get("prefer_training_objectives"))
-        for objective in objectives:
-            if objective in SUPPORTED_FNO_LOSS_TYPES:
-                preferences["loss_types"].append(objective)
-            if objective == "short_window_mse":
-                preferences["loss_types"].append("mse")
-        horizons = _string_list(constraints.get("refine_training_horizons"))
-        if any("shorter" in horizon or "early" in horizon for horizon in horizons):
-            preferences["forecast_steps"].extend([12, 20])
-        selected = evidence.get("selected_candidate")
-        if isinstance(selected, dict) and isinstance(selected.get("config"), dict):
-            config = selected["config"]
-            preferences["modes"].append(int(config.get("modes", 0)) + 4)
-            preferences["widths"].append(int(config.get("width", 0)))
-            preferences["depths"].append(int(config.get("depth", 0)))
-            preferences["train_steps"].append(int(config.get("train_steps", 0)) + 1)
-    return {
-        key: _dedupe([str(item) for item in value]) for key, value in preferences.items()
-    }
-
-
-def _candidate_rationale(
-    *, loss_type: str, forecast_steps: int, preferences: dict[str, Any]
-) -> list[str]:
-    reasons = []
-    if str(loss_type) in preferences.get("loss_types", []):
-        reasons.append("preferred_by_previous_evidence")
-    if str(forecast_steps) in preferences.get("forecast_steps", []):
-        reasons.append("matches_refined_horizon_constraint")
-    if not reasons:
-        reasons.append("coverage_candidate")
-    return reasons
-
-
-def _ordered_values(values: list[Any], preferred_values: list[Any]) -> list[Any]:
-    preferred = [str(item) for item in preferred_values]
-    return sorted(
-        values,
-        key=lambda item: (
-            0 if str(item) in preferred else 1,
-            preferred.index(str(item)) if str(item) in preferred else 999,
-            item,
-        ),
-    )
-
-
-def _short_window_metrics(
-    *, prediction: np.ndarray, target: np.ndarray
-) -> dict[str, Any]:
-    early_stop = min(47, prediction.shape[1])
-    middle_start = min(47, prediction.shape[1])
-    middle_stop = min(95, prediction.shape[1])
-    early_rel = _rel_mse(prediction[:, :early_stop], target[:, :early_stop])
-    metrics = {
-        "early": {
-            "evaluated": early_stop > 0,
-            "future_start": 0,
-            "future_stop": int(early_stop),
-            "rel_mse": early_rel,
-            "score": 100.0 * float(np.exp(-20.0 * early_rel)),
+    prompt_path.write_text(prompt, encoding="utf-8")
+    selected = evidence.get("selected_candidate") if isinstance(evidence, dict) else {}
+    report = {
+        "schema_version": 1,
+        "state_hint": "FNO_TRAINING_ITERATION_CONTRACT_BUILT",
+        "previous_evidence_path": str(evidence_paths[-1]),
+        "previous_evidence_paths": [str(path) for path in evidence_paths],
+        "agent_contract": {
+            "autonomy_policy": {
+                "agent_selects_candidates": True,
+                "supervisor_must_not_pin_parameters": True,
+                "use_evidence_not_manual_tuning": True,
+                "use_available_actions_only": True,
+            },
+            "required_agent_behaviors": [
+                "read_previous_evidence",
+                "build_or_read_harness_contract",
+                "plan_candidates_from_evidence",
+                "run_bounded_optimization",
+                "record_evidence",
+                "build_and_validate_hypothesis_design",
+                "summarize_next_constraints",
+            ],
+            "graft_evaluation_required_when_available": bool(
+                graft_evaluation_available
+            ),
+            "fast_feedback_guard_active": graft_evaluation_available,
+            "previous_selected_candidate": selected,
+            "harness_state_hint": harness["state_hint"],
         },
-        "middle_guardrail": {"evaluated": middle_stop > middle_start},
+        "artifacts": {
+            "iteration_contract_path": str(output_path),
+            "prompt_path": str(prompt_path),
+            "harness_contract_path": str(harness_contract_path),
+            "optimization_evidence_path": harness["paths"]["optimization_evidence_path"],
+            "algorithm_design_path": harness["paths"]["algorithm_design_path"],
+            "algorithm_design_validation_path": harness["paths"][
+                "algorithm_design_validation_path"
+            ],
+        },
+        "next_command": "run-claude-agent-sdk-runtime",
     }
-    if middle_stop > middle_start:
-        middle_rel = _rel_mse(
-            prediction[:, middle_start:middle_stop],
-            target[:, middle_start:middle_stop],
-        )
-        metrics["middle_guardrail"].update(
-            {
-                "future_start": int(middle_start),
-                "future_stop": int(middle_stop),
-                "rel_mse": middle_rel,
-                "score": 100.0 * float(np.exp(-10.0 * middle_rel)),
-            }
-        )
-    return metrics
+    output_path.write_text(
+        json.dumps(report, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report
 
 
-def _training_decision(
-    *, loss_curve: dict[str, list[float]], metrics: dict[str, Any]
-) -> str:
-    initial = float(loss_curve["val"][0])
-    final = float(loss_curve["val"][-1])
-    early_rel = float(metrics["early"]["rel_mse"])
-    if final < initial or early_rel < 1.0:
-        return "continue_training"
-    if early_rel < 5.0:
-        return "change_loss_or_horizon"
-    return "abandon_model_family"
+def _fno_graft_harness_actions(
+    *,
+    paths: dict[str, str],
+    graft_inputs: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if graft_inputs is None:
+        return []
+    baseline_prediction_path = graft_inputs["baseline_prediction_path"]
+    task1_test_path = graft_inputs["test_path"]
+    task1_target_path = graft_inputs["target_path"]
+    return [
+        {
+            "action_id": "run_task1_fno_graft_from_optimization_report",
+            "state_hint": "TASK1_FNO_GRAFT_EVALUATOR_RAN",
+            "command": _join_command(
+                [
+                    "UV_CACHE_DIR=.uv-cache uv run --frozen pde-agent run-task1-fno-graft-from-optimization-report",
+                    f"--optimization-report-path {paths['optimization_report_path']}",
+                    f"--baseline-prediction-path {baseline_prediction_path}",
+                    f"--test-path {task1_test_path}",
+                    f"--target-path {task1_target_path}",
+                    f"--output-dir {paths['fno_graft_dir']}",
+                    "--window 10:20",
+                    "--window 10:35",
+                    "--window 10:57",
+                    "--window 20:57",
+                    "--window 35:57",
+                    "--window 57:105",
+                    "--window 10:105",
+                    "--blend-weight 0.25",
+                    "--blend-weight 0.5",
+                    "--blend-weight 0.75",
+                    "--blend-weight 1.0",
+                    "--late-non-regression-tolerance 0.1",
+                    "--force",
+                ]
+            ),
+            "reads": [
+                paths["optimization_report_path"],
+                str(baseline_prediction_path),
+                str(task1_test_path),
+                str(task1_target_path),
+            ],
+            "writes": [paths["fno_graft_report_path"]],
+            "next_action_options": [
+                "record_fno_training_optimization_evidence",
+                "build_hypothesis_algorithm_design",
+                "plan_fno_training_candidates",
+                "stop_and_report",
+            ],
+            "selection_rule": (
+                "Promote training-source work only when best_task_prediction_score_delta "
+                "is positive and late_non_regression_passed is true."
+            ),
+            "contract_repair": graft_inputs["repair"],
+        }
+    ]
 
 
-def _training_constraints(
-    *, model_family: str, decision: str, metrics: dict[str, Any]
+def _resolve_fno_graft_inputs(
+    *,
+    baseline_prediction_path: str | Path | None,
+    task1_test_path: str | Path | None,
+    task1_target_path: str | Path | None,
+    dataset_key: str,
+) -> dict[str, Any] | None:
+    if (
+        baseline_prediction_path is None
+        or task1_test_path is None
+        or task1_target_path is None
+    ):
+        return None
+    baseline = Path(baseline_prediction_path)
+    test = Path(task1_test_path)
+    target = Path(task1_target_path)
+    repair: dict[str, Any] = {
+        "applied": False,
+        "reason": "inputs_declared",
+        "requested_test_path": str(test),
+    }
+    baseline_count = _hdf5_dataset_sample_count(baseline, dataset_key=dataset_key)
+    test_count = _hdf5_dataset_sample_count(test, dataset_key=dataset_key)
+    target_count = _hdf5_dataset_sample_count(target, dataset_key=dataset_key)
+    if (
+        baseline_count is not None
+        and test_count is not None
+        and target_count is not None
+        and baseline_count != test_count
+        and baseline_count == target_count
+    ):
+        repair = {
+            "applied": True,
+            "reason": "baseline_sample_count_matches_target_not_test",
+            "requested_test_path": str(test),
+            "resolved_test_path": str(target),
+            "baseline_sample_count": baseline_count,
+            "test_sample_count": test_count,
+            "target_sample_count": target_count,
+        }
+        test = target
+    return {
+        "baseline_prediction_path": str(baseline),
+        "test_path": str(test),
+        "target_path": str(target),
+        "repair": repair,
+    }
+
+
+def _hdf5_dataset_sample_count(path: Path, *, dataset_key: str) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        with h5py.File(path, "r") as handle:
+            if dataset_key not in handle:
+                return None
+            shape = handle[dataset_key].shape
+            if not shape:
+                return None
+            return int(shape[0])
+    except OSError:
+        return None
+
+
+def _repair_training_sample_budget(
+    *,
+    source_path: Path,
+    dataset_key: str,
+    train_sample_limit: int,
+    val_sample_limit: int,
+    batch_size: int,
 ) -> dict[str, Any]:
-    constraints = {
-        "training_model_families": [model_family],
-        "prefer_training_objectives": [],
-        "refine_training_horizons": [],
-        "avoid_training_model_families": [],
+    requested_train = int(train_sample_limit)
+    requested_val = int(val_sample_limit)
+    requested_batch = int(batch_size)
+    source_sample_count = _hdf5_dataset_sample_count(source_path, dataset_key=dataset_key)
+    resolved_train = requested_train
+    resolved_val = requested_val
+    resolved_batch = requested_batch
+    applied = False
+    reason = "source_sample_count_unavailable"
+    if source_sample_count is not None:
+        reason = "budget_within_source_sample_count"
+        minimum_val = 1
+        if requested_train + requested_val > source_sample_count:
+            applied = True
+            reason = "train_val_sample_limits_exceed_source_sample_count"
+            resolved_val = min(requested_val, max(minimum_val, source_sample_count // 3))
+            resolved_train = source_sample_count - resolved_val
+            if resolved_train < 1:
+                resolved_train = max(1, source_sample_count - 1)
+                resolved_val = max(1, source_sample_count - resolved_train)
+        if resolved_batch > resolved_train:
+            applied = True
+            reason = (
+                "batch_size_exceeds_resolved_train_sample_limit"
+                if reason == "budget_within_source_sample_count"
+                else reason
+            )
+            resolved_batch = max(1, resolved_train)
+    return {
+        "applied": applied,
+        "reason": reason,
+        "source_sample_count": source_sample_count,
+        "requested_train_sample_limit": requested_train,
+        "requested_val_sample_limit": requested_val,
+        "requested_batch_size": requested_batch,
+        "resolved_train_sample_limit": resolved_train,
+        "resolved_val_sample_limit": resolved_val,
+        "resolved_batch_size": resolved_batch,
     }
-    if decision == "continue_training":
-        constraints["prefer_training_objectives"].append("short_window_mse")
-        constraints["refine_training_horizons"].append("early_window")
-    elif decision == "change_loss_or_horizon":
-        constraints["prefer_training_objectives"].extend(
-            ["early_weighted_mse", "rollout_consistency"]
-        )
-        constraints["refine_training_horizons"].append("shorter_early_window")
-    else:
-        constraints["avoid_training_model_families"].append(model_family)
-    if metrics["middle_guardrail"]["evaluated"]:
-        constraints["refine_training_horizons"].append("middle_guardrail")
-    return constraints
 
 
-def _decision_reasons(*, decision: str, metrics: dict[str, Any]) -> list[str]:
-    reasons = [decision]
-    if float(metrics["early"]["rel_mse"]) >= 1.0:
-        reasons.append("early_rel_mse_high")
-    else:
-        reasons.append("early_signal_learned")
-    if metrics["middle_guardrail"]["evaluated"]:
-        reasons.append("middle_guardrail_available")
-    return reasons
+def _write_hdf5_tensor(path: Path, array: np.ndarray) -> None:
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("tensor", data=array)
 
 
-def _rel_mse(prediction: np.ndarray, target: np.ndarray) -> float:
-    numerator = np.sum((prediction - target) ** 2, axis=(1, 2))
-    denominator = np.sum(target**2, axis=(1, 2)) + 1e-12
-    return float(np.mean(np.minimum(numerator / denominator, 5.0)))
+def _slug(value: str) -> str:
+    cleaned = []
+    for char in value.lower():
+        cleaned.append(char if char.isalnum() else "_")
+    return "_".join(part for part in "".join(cleaned).split("_") if part)
+
+
+def _float_or_default_local(value: Any, default: float) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    return default
+
+
+def _build_fno_training_iteration_prompt(
+    *,
+    workspace_dir: Path,
+    previous_evidence_path: Path,
+    previous_evidence_paths: list[Path],
+    harness_contract_path: Path,
+    harness: dict[str, Any],
+) -> str:
+    resolved_workspace = workspace_dir.expanduser().resolve()
+    evidence_lines = [f"- previous evidence: {path}" for path in previous_evidence_paths]
+    graft_action_available = any(
+        action.get("action_id") == "run_task1_fno_graft_from_optimization_report"
+        for action in harness.get("available_actions", [])
+        if isinstance(action, dict)
+    )
+    graft_lines = []
+    if graft_action_available:
+        graft_lines = [
+            f"- graft report path: {harness['paths']['fno_graft_report_path']}",
+            "",
+            "## Task-specific scoring objective",
+            "The trained FNO is not being judged as a full replacement for the current strong baseline.",
+            "Treat it as an early/middle dynamics source to graft onto the baseline prediction.",
+            "After bounded optimization, run the graft evaluation action before deciding whether the training source helped.",
+            "Promote the direction only when best_task_prediction_score_delta is positive and late_non_regression_passed is true.",
+            "",
+        ]
+    return "\n".join(
+        [
+            "# PDEAgent autonomous FNO training iteration",
+            "",
+            "You are running one evidence-driven neural-operator training iteration.",
+            "Your job is to use the previous evidence and the harness contract to choose the next bounded experiment.",
+            "Do not patch source files. Do not create directories manually. Do not probe CLI help.",
+            "Do not hand-pick hyperparameters outside the contract; select from contract actions and candidate space.",
+            "Use the paths below exactly as relative paths from the current working directory; do not rewrite them to historical absolute repository paths.",
+            "Previous evidence files can be large. Do not Read an entire evidence file first. Use Grep for selected_candidate, selection_components, graft_evidence, next_generation_constraints, and training_directive, then use bounded Read offsets around those matches.",
+            "",
+            f"- workspace: {workspace_dir}",
+            f"- current working directory: {resolved_workspace}",
+            *evidence_lines,
+            f"- harness contract: {harness_contract_path}",
+            f"- candidate plan path: {harness['paths']['candidate_plan_path']}",
+            f"- optimization evidence path: {harness['paths']['optimization_evidence_path']}",
+            *graft_lines,
+            "",
+            "## Required autonomous behavior",
+            "1. Inspect previous evidence with Grep plus bounded Read, and identify the active bottleneck from selected_candidate, selection_components, graft_evidence, next_generation_constraints, and training_directive.",
+            "2. Read the harness contract and choose available actions from it. The contract is not a blind fixed pipeline.",
+            "3. Plan candidates from evidence using the provided candidate space. Preserve early/middle/late guardrails.",
+            "4. Run one bounded optimization. If graft evaluation is available, run it and use its delta/non-regression result as the primary training-source evidence.",
+            "5. Record FNO optimization evidence, then build and validate a hypothesis algorithm design.",
+            "6. Stop if an action fails without a clear parameter repair, or after validation is written.",
+            "",
+            "## Reporting requirements",
+            "- Report generated artifact paths.",
+            "- Report selected candidate id, config, fno_selection_score, and selection_components when available.",
+            "- Report graft best_task_prediction_score_delta and late_non_regression_passed when graft evaluation is available.",
+            "- Report whether early, middle, and late metrics were evaluated.",
+            "- Report next_generation_constraints for the next iteration.",
+        ]
+    )
 
 
 def _load_windows(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -1423,8 +1733,37 @@ def _load_windows(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return data["context"].astype(np.float32), data["target"].astype(np.float32)
 
 
-def _parameter_count(model: Any) -> int:
-    return int(sum(parameter.numel() for parameter in model.parameters()))
+def _source_horizon_guard(
+    *,
+    source_path: Path,
+    dataset_key: str,
+    context_steps: int,
+    time_reduction: int,
+) -> dict[str, Any] | None:
+    if not source_path.exists():
+        return None
+    try:
+        with h5py.File(source_path, "r") as handle:
+            if dataset_key not in handle:
+                return None
+            shape = tuple(int(axis) for axis in handle[dataset_key].shape)
+    except OSError:
+        return None
+    if len(shape) < 2:
+        return None
+    reduced_time_steps = (shape[1] + int(time_reduction) - 1) // int(time_reduction)
+    max_forecast_steps = max(0, reduced_time_steps - int(context_steps))
+    return {
+        "source_path": str(source_path),
+        "dataset_key": dataset_key,
+        "raw_time_steps": shape[1],
+        "time_reduction": int(time_reduction),
+        "reduced_time_steps": int(reduced_time_steps),
+        "context_steps": int(context_steps),
+        "max_forecast_steps": int(max_forecast_steps),
+        "filtered_forecast_steps_above_max": True,
+    }
+
 
 
 def _guard_artifacts(paths: Any, *, force: bool) -> None:
@@ -1455,24 +1794,6 @@ def _positive_int_list(values: list[int], label: str) -> list[int]:
     for value in values:
         rows.append(_positive_int(int(value), label))
     return sorted(set(rows))
-
-
-def _loss_type_list(values: list[str]) -> list[str]:
-    if not values:
-        raise Task1ShortWindowTrainingError("loss_types must not be empty")
-    rows = []
-    for value in values:
-        text = str(value)
-        if text not in SUPPORTED_FNO_LOSS_TYPES:
-            raise Task1ShortWindowTrainingError(f"unsupported loss_type: {text}")
-        rows.append(text)
-    return _dedupe(rows)
-
-
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if isinstance(item, str)]
 
 
 def _load_json(path: Path, label: str) -> dict[str, Any]:
@@ -1511,15 +1832,3 @@ def _require_torch() -> Any:
             "torch is required for task1 short-window training"
         ) from exc
     return torch
-
-
-def _dedupe(values: list[str]) -> list[str]:
-    rows = []
-    seen = set()
-    for value in values:
-        text = str(value)
-        if text in seen:
-            continue
-        seen.add(text)
-        rows.append(text)
-    return rows

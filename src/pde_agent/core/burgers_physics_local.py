@@ -1,6 +1,5 @@
 """Local Burgers-equation physics checks for rank-3 rollout arrays."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

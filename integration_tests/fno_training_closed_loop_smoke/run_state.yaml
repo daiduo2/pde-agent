@@ -1,0 +1,47 @@
+# Run state contract for FNO training closed loop smoke test
+# This defines the expected behavior of the agent during one iteration
+
+schema_version: 1
+state_hint: FNO_TRAINING_CLOSED_LOOP_SMOKE_CONTRACT
+
+# Allowed actions (tools the agent may use)
+allowed_actions:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+
+# Forbidden actions (tools the agent must never use)
+forbidden_actions:
+  - Edit
+  - Write
+  - NotebookEdit
+  - WebFetch
+
+# Required reads before training (files the agent must read)
+required_reads:
+  - fno_training_iteration_report.json
+  - fno_training_memory_0000.json
+  - fno_training_convergence_0000.json
+
+# Allowed bash commands (pde-agent CLI commands)
+allowed_commands:
+  - run-fno-training-iteration
+  - build-fno-training-closed-loop-contract
+  - check-fno-training-convergence
+  - checkpoint-fno-training-loop
+  - escalate-fno-training-to-hypothesis
+  - build-fno-training-final-report
+
+# Required artifacts after completion
+required_artifacts:
+  - fno_training_iteration_report.json
+  - fno_training_memory_0000.json
+  - fno_training_convergence_0000.json
+  - fno_training_plan_0000.json
+
+# Expected final state transition
+success_transition: FNO_TRAINING_ITERATION_REPORTED
+
+# Timeout for the smoke test (seconds)
+timeout_seconds: 300

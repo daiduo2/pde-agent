@@ -1,6 +1,5 @@
 """Profile official UNet inference runtime on increasing competition shards."""
 
-from __future__ import annotations
 
 import json
 import time

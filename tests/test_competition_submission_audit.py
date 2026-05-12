@@ -21,7 +21,7 @@ def test_audit_competition_submission_passes_valid_package(tmp_path: Path) -> No
         task_id=1,
         test_path=test_path,
         output_dir=tmp_path / "submission_out",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=True,
     )
 
@@ -48,7 +48,7 @@ def test_audit_competition_submission_reports_missing_log(tmp_path: Path) -> Non
         task_id=1,
         test_path=test_path,
         output_dir=tmp_path / "submission_out",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=True,
     )
     Path(submission["artifacts"]["log_path"]).unlink()
@@ -75,7 +75,7 @@ def test_audit_competition_submission_cli_returns_payload(tmp_path: Path) -> Non
         task_id=1,
         test_path=test_path,
         output_dir=tmp_path / "submission_out",
-        submission_id="team_hermes",
+        submission_id="team_default",
         force=True,
     )
     output_path = tmp_path / "audit.json"

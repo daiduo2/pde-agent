@@ -1,6 +1,5 @@
 """Run one complete FNO candidate iteration on an existing local window file."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path

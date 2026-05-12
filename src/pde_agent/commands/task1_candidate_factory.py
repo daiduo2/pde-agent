@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,9 +5,11 @@ from pde_agent.core.json_output import success_payload
 from pde_agent.core.task1_candidate_factory import (
     FACTORY_BENCHMARK_STATE_HINT,
     FAMILY_REPORT_STATE_HINT,
+    MATERIALIZED_CANDIDATES_STATE_HINT,
     SANDBOX_STATE_HINT,
     evaluate_candidate_factory_capability,
     generate_task1_candidate_families,
+    materialize_candidate_family_item,
     run_candidate_family_sandbox,
 )
 
@@ -109,6 +110,36 @@ def evaluate_candidate_factory_capability_command(
             "family_count": report["candidate_space"]["family_count"],
             "mechanism_count": report["candidate_space"]["mechanism_count"],
             "planned_count": report["sandbox_readiness"]["planned_count"],
+        },
+        next_hint=report["next_command"],
+    )
+
+
+def materialize_candidate_family_item_command(
+    *,
+    sandbox_report_path: str,
+    output_path: str,
+    candidate_family_id: str | None,
+    force: bool,
+) -> dict[str, object]:
+    report = materialize_candidate_family_item(
+        sandbox_report_path=Path(sandbox_report_path),
+        output_path=Path(output_path),
+        candidate_family_id=candidate_family_id,
+        force=force,
+    )
+    return success_payload(
+        run_id="local",
+        command="materialize-candidate-family-item",
+        state_hint=MATERIALIZED_CANDIDATES_STATE_HINT,
+        artifacts={
+            "algorithm_candidates_path": output_path,
+            "algorithm_candidates_json": output_path,
+        },
+        metrics={
+            "algorithm_candidate_count": report["algorithm_candidate_count"],
+            "selected_candidate_family_id": report["selected_candidate_family_id"],
+            "selected_hook": report["selected_hook"],
         },
         next_hint=report["next_command"],
     )

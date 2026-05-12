@@ -1,20 +1,18 @@
-from __future__ import annotations
 
-import json
-from pathlib import Path
+from pde_agent.core.json_io import read_json, write_json
+
+__all__ = [
+    "DIAGNOSTIC_MODE",
+    "read_json",
+    "write_json",
+    "spectrum_payload",
+    "physics_payload",
+    "hypothesis_payload",
+    "interpretation_payload",
+]
 
 
 DIAGNOSTIC_MODE = "synthetic_pde_diagnostic"
-
-
-def write_json(path: Path, payload: dict[str, object]) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return str(path)
-
-
-def read_json(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def spectrum_payload(run_id: str, rollout: dict[str, object]) -> dict[str, object]:

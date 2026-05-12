@@ -1,9 +1,0 @@
-{
-  "problem_id": "PDE_Burgers_Diagnostic_Synthetic",
-  "equation": "1D Burgers",
-  "mode": "synthetic_diagnostic_fixture",
-  "input_window": 10,
-  "prediction_window": 190,
-  "spatial_resolution": 256,
-  "goal": "diagnose synthetic rollout failure and select a bounded next hypothesis"
-}

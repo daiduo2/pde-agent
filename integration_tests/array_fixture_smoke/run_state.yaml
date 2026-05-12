@@ -1,0 +1,69 @@
+run_id: array_fixture_smoke_001
+repo_root: /Users/daiduo2/pde-agent
+run_root: /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+working_directory: /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke
+command_prefix: /Users/daiduo2/pde-agent/.venv/bin/pde-agent
+
+current_state: TASK_PARSED
+
+allowed_actions:
+  - read_run_state
+  - read_bootstrap_prompt
+  - read_task_spec
+  - read_base_config
+  - read_override
+  - call_init_run
+  - call_resolve_config
+  - call_inspect_data
+  - call_eval_rollout
+  - call_analyze_spectrum
+  - call_check_physics
+  - call_interpret_error
+  - call_select_hypothesis
+  - call_record_timing
+  - call_collect_artifacts
+
+forbidden_actions:
+  - patch_code
+  - run_training
+  - call_build_submission
+  - guess_missing_paths
+  - skip_required_reads
+  - search_outside_current_directory
+  - inspect_command_help
+  - probe_command_surface
+
+required_reads:
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/run_state.yaml
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/bootstrap_prompt.md
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/task_spec.json
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/base_config.runtime.json
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/override.json
+
+required_artifacts:
+  - /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001/artifacts/manifest.json
+
+allowed_commands:
+  - name: init_run
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent init-run --run-id array_fixture_smoke_001 --runs-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs
+  - name: resolve_config
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent resolve-config --run-id array_fixture_smoke_001 --base-config-file /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/base_config.runtime.json --override-file /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/override.json --task-spec-file /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/task_spec.json --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: inspect_data
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent inspect-data --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: eval_rollout
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent eval-rollout --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: analyze_spectrum
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent analyze-spectrum --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: check_physics
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent check-physics --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: interpret_error
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent interpret-error --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: select_hypothesis
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent select-hypothesis --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: record_timing
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent record-timing --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001
+  - name: collect_artifacts
+    command: /Users/daiduo2/pde-agent/.venv/bin/pde-agent collect-artifacts --run-id array_fixture_smoke_001 --run-root /Users/daiduo2/pde-agent/integration_tests/array_fixture_smoke/runs/array_fixture_smoke_001 --config-hash array-fixture-smoke-001
+
+success_transition:
+  on_complete: HYPOTHESIS_SELECTED

@@ -17,7 +17,10 @@ from pde_agent.commands.select_hypothesis import select_hypothesis
 def test_prepare_array_fixture_smoke_renders_portable_runtime_files() -> None:
     repo_root = Path("/tmp/example-checkout")
     script_path = (
-        Path(__file__).resolve().parents[1] / "scripts" / "prepare_array_fixture_smoke.py"
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "smoke"
+        / "prepare_array_fixture_smoke.py"
     )
     spec = importlib.util.spec_from_file_location(
         "prepare_array_fixture_smoke", script_path
@@ -31,7 +34,7 @@ def test_prepare_array_fixture_smoke_renders_portable_runtime_files() -> None:
     run_state = module.render_run_state(repo_root)
 
     assert base_config["data"]["source_path"] == (
-        "/tmp/example-checkout/integration_tests/hermes_array_fixture_smoke/fixture.npz"
+        "/tmp/example-checkout/integration_tests/array_fixture_smoke/fixture.npz"
     )
     assert (
         "command_prefix: /tmp/example-checkout/.venv/bin/pde-agent"

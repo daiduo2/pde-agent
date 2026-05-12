@@ -1,6 +1,5 @@
 """KPI rollups for Hypothesis Lab trace trajectories."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -65,7 +64,7 @@ def build_hypothesis_kpi_report(
         outcome = str(obs.get("outcome") or "observed")
         if obs.get("algorithm_candidate_id"):
             outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-        if obs.get("event_type") == "hermes_runtime_audit_chain":
+        if obs.get("event_type") == "runtime_audit_chain":
             chain_event_count += 1
             if outcome == "failed":
                 chain_failed_count += 1

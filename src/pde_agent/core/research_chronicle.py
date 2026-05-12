@@ -1,6 +1,5 @@
 """Build a compact auditable research chronicle from Hermes artifacts."""
 
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -99,7 +98,7 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
     unet_lines = _unet_prediction_lines(records)
     lines.extend(unet_lines or ["- No UNet competition prediction artifact was provided."])
     lines.extend(["", "Hermes Submission Candidate:"])
-    candidate_lines = _hermes_submission_candidate_lines(records)
+    candidate_lines = _submission_candidate_lines(records)
     lines.extend(candidate_lines or ["- No Hermes submission candidate artifact was provided."])
     lines.extend(["", "Repair Policy Memory:"])
     repair_policy_lines = _repair_policy_memory_lines(records)
@@ -126,7 +125,7 @@ def _render_chronicle(records: list[dict[str, Any]]) -> str:
 def _trajectory_lines(record: dict[str, Any]) -> list[str]:
     payload = record["payload"]
     kind = record["kind"]
-    if kind == "hermes_audit":
+    if kind == "runtime_audit":
         return [
             "- Hermes audit session="
             + str(payload.get("session_id", "unknown"))
@@ -199,7 +198,7 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + " rollout_seconds="
             + str(_nested(payload, ["inference", "phase_timings", "rollout_seconds"], "unknown"))
         ]
-    if kind == "hermes_submission_candidate":
+    if kind == "submission_candidate":
         return [
             "- Hermes materialized submission candidate audit="
             + str(_nested(payload, ["audit", "decision"], "unknown"))
@@ -208,7 +207,7 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + " next="
             + str(payload.get("next_command", "unknown"))
         ]
-    if kind == "hermes_runtime_closed_loop":
+    if kind == "runtime_closed_loop":
         return [
             "- Hermes runtime closed loop best_score="
             + str(_nested(payload, ["heartbeat", "best_score"], "unknown"))
@@ -223,7 +222,7 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
                 )
             )
         ]
-    if kind == "hermes_runtime_audit_chain":
+    if kind == "runtime_audit_chain":
         metrics = payload.get("metrics")
         if not isinstance(metrics, dict):
             metrics = {}
@@ -235,7 +234,7 @@ def _trajectory_lines(record: dict[str, Any]) -> list[str]:
             + " memory_bridge_passed="
             + str(metrics.get("auto_repair_memory_bridge_passed", "unknown"))
         ]
-    if kind == "hermes_heartbeat":
+    if kind == "adaptive_heartbeat":
         return [
             "- Hermes heartbeat best_candidate="
             + str(_nested(payload, ["best_candidate", "candidate_id"], "unknown"))
@@ -432,10 +431,10 @@ def _unet_prediction_lines(records: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _hermes_submission_candidate_lines(records: list[dict[str, Any]]) -> list[str]:
+def _submission_candidate_lines(records: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for record in records:
-        if record["kind"] != "hermes_submission_candidate":
+        if record["kind"] != "submission_candidate":
             continue
         payload = record["payload"]
         metrics = _nested(payload, ["materialized", "submission", "metrics"], {})
@@ -460,7 +459,7 @@ def _repair_policy_memory_lines(records: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for record in records:
         payload = record["payload"]
-        if record["kind"] == "hermes_runtime_closed_loop":
+        if record["kind"] == "runtime_closed_loop":
             candidate_plan = payload.get("candidate_plan")
             if not isinstance(candidate_plan, dict):
                 candidate_plan = {}
@@ -487,7 +486,7 @@ def _repair_policy_memory_lines(records: list[dict[str, Any]]) -> list[str]:
                     actions=candidate_plan.get("repair_policy_recommended_actions"),
                 )
             )
-        if record["kind"] == "hermes_runtime_audit_chain":
+        if record["kind"] == "runtime_audit_chain":
             metrics = payload.get("metrics")
             if not isinstance(metrics, dict):
                 metrics = {}
@@ -525,7 +524,7 @@ def _repair_policy_memory_lines(records: list[dict[str, Any]]) -> list[str]:
                     actions=_auto_repair_actions(repair_convergence),
                 )
             )
-        if record["kind"] == "hermes_heartbeat":
+        if record["kind"] == "adaptive_heartbeat":
             parameters = payload.get("parameters")
             if not isinstance(parameters, dict):
                 parameters = {}
@@ -604,27 +603,27 @@ def _auto_repair_actions(repair_convergence: dict[str, Any]) -> list[dict[str, s
 def _artifact_kind(payload: dict[str, Any]) -> str:
     state = _state(payload)
     if "session_id" in payload and "tool_call_summary" in payload:
-        return "hermes_audit"
+        return "runtime_audit"
     if state == "BURGERS_SPECTRAL_VISCOSITY_BENCHMARK_COMPLETED":
         return "strategy_benchmark"
     if state == "COMPETITION_TASK_PIPELINE_COMPLETED":
         return "competition_pipeline"
-    if state == "HERMES_LOCAL_STRATEGY_LOOP_RAN":
+    if state == "LOCAL_STRATEGY_LOOP_RAN":
         return "local_strategy_loop"
     if state == "LOCAL_STRATEGY_LEADERBOARD_UPDATED":
         return "local_strategy_leaderboard"
-    if state == "HERMES_OPERATOR_TUNING_LOOP_RAN":
+    if state == "OPERATOR_TUNING_LOOP_RAN":
         return "operator_tuning"
     if state == "UNET_COMPETITION_PREDICTION_READY":
         return "unet_prediction"
-    if state == "HERMES_SUBMISSION_CANDIDATE_READY":
-        return "hermes_submission_candidate"
-    if state == "HERMES_RUNTIME_CLOSED_LOOP_RAN":
-        return "hermes_runtime_closed_loop"
-    if state == "HERMES_RUNTIME_AUDIT_CHAIN_RAN":
-        return "hermes_runtime_audit_chain"
-    if state == "HERMES_HEARTBEAT_RAN":
-        return "hermes_heartbeat"
+    if state == "SUBMISSION_CANDIDATE_READY":
+        return "submission_candidate"
+    if state == "RUNTIME_CLOSED_LOOP_RAN":
+        return "runtime_closed_loop"
+    if state == "RUNTIME_AUDIT_CHAIN_RAN":
+        return "runtime_audit_chain"
+    if state == "HEARTBEAT_RAN":
+        return "adaptive_heartbeat"
     return "generic"
 
 

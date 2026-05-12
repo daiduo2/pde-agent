@@ -1,6 +1,5 @@
 """Failure-memory driven hypothesis-to-algorithm designer core."""
 
-from __future__ import annotations
 
 import json
 import re
