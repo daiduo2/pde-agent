@@ -4598,8 +4598,10 @@ def test_complete_bounded_executor_authoring_task_command_records_trace_event(
             "registry": {"event_count": 2},
         }
 
+    import pde_agent.commands.literature_algorithm_lab_executor as _exec_mod
+
     monkeypatch.setattr(
-        command_module,
+        _exec_mod,
         "complete_bounded_executor_authoring_task",
         fake_complete_bounded_executor_authoring_task,
     )
@@ -4931,8 +4933,10 @@ def test_literature_algorithm_lab_cli_submit_mineru_agent_parse(
             "next_command": "poll-mineru-parse",
         }
 
+    import pde_agent.commands.literature_algorithm_lab_mineru as _mineru_mod
+
     monkeypatch = __import__("pytest").MonkeyPatch()
-    monkeypatch.setattr(command_module, "submit_mineru_parse_task", fake_submit)
+    monkeypatch.setattr(_mineru_mod, "submit_mineru_parse_task", fake_submit)
     try:
         result = CliRunner().invoke(
             app,
