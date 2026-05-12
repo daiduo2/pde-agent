@@ -1,12 +1,12 @@
-"""Agent bridge from literature algorithm candidates into strategy growth."""
+"""literature_expansion facade - re-exports from submodules."""
 
+from __future__ import annotations
 
 import json
 import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
 from pde_agent.core.checkpoint_family_sandbox import run_checkpoint_family_sandbox
 from pde_agent.core.literature_algorithm_lab import (
     ALGORITHM_CANDIDATE_PROMOTION_STATE_HINT,
@@ -41,31 +41,89 @@ from pde_agent.core.literature_registry_policy import (
     summarize_registry_policy,
 )
 from pde_agent.core.strategy_growth import record_strategy_proposal
-
-
-STATE_HINT = "LITERATURE_STRATEGY_EXPANSION_RAN"
-HANDOFF_STATE_HINT = "AGENT_CANDIDATE_EXPANSION_HANDOFF_RAN"
-QUEUE_STATE_HINT = "EXPANSION_SANDBOX_QUEUE_RAN"
-QUEUE_EVALUATION_STATE_HINT = "EXPANSION_SANDBOX_QUEUE_EVALUATED"
-BLOCKED_EXECUTOR_TASKS_STATE_HINT = (
-    "EXPANSION_BLOCKED_EXECUTOR_TASKS_PREPARED"
-)
-FAILURE_MEMORY_STATE_HINT = "LITERATURE_FAILURE_MEMORY_RECORDED"
-LOCAL_ASSET_CANDIDATES_STATE_HINT = "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT"
-REGISTRY_SUMMARY_STATE_HINT = "LITERATURE_REGISTRY_SUMMARY_BUILT"
-REFINEMENT_STATE_HINT = "ALGORITHM_CANDIDATE_REFINEMENT_PREPARED"
 from pde_agent.core.state_hint_registry import (
     STRATEGY_PROPOSAL_RECORDED as PROMOTED_STRATEGY_PROPOSAL_STATE_HINT,
 )
-EVIDENCE_ACCUMULATION_PLAN_STATE_HINT = "CANDIDATE_EVIDENCE_ACCUMULATION_PLANNED"
-SHORT_SANDBOX_COMMANDS = {"run-hypothesis-lab", "run-blueprint-sandbox"}
-CheckpointFamilyRunner = Callable[..., dict[str, Any]]
-LocalStrategyRunner = Callable[..., dict[str, Any]]
 
+from pde_agent.core.literature_expansion_helpers import (
+    _append_unique,
+    _append_unique_value,
+    _bounded_local_strategy_deadline_seconds,
+    _bounded_local_strategy_max_rounds,
+    _bounded_local_strategy_objective,
+    _bounded_local_strategy_required_reference_steps,
+    _calibration_weights_from_candidate,
+    _candidate_key,
+    _candidate_list,
+    _candidate_reference_sample_limit,
+    _candidate_route,
+    _candidate_satisfies_mutation_constraint,
+    _checkpoint_family_report_path,
+    _checkpoint_segment_scores,
+    _expansion_has_viable_actions,
+    _extract_reference_shape_steps,
+    _failed_candidate_families_for_outcome,
+    _first_bool_grid_value,
+    _first_float_grid_value,
+    _first_hdf5_dataset_name,
+    _float_or_default,
+    _fno_finetune_steps_from_candidate,
+    _guard_output,
+    _learning_constraint_reason,
+    _local_strategy_candidate_gate_issues,
+    _local_strategy_loop_report_path,
+    _local_strategy_mutation_axes,
+    _local_strategy_node_id_from_candidate_id,
+    _local_strategy_segment_scores,
+    _next_command,
+    _object_items,
+    _queue_artifact_paths,
+    _queue_failure_codes,
+    _queue_segment_scores,
+    _read_json,
+    _recovery_plan,
+    _require_file,
+    _sandbox_queue_next_command,
+    _slug,
+    _string_list,
+    _task_id_from_candidate,
+    _text,
+    _unique_paths,
+    _write_json,
+)
+
+"""Agent bridge from literature algorithm candidates into strategy growth."""
+
+STATE_HINT = "LITERATURE_STRATEGY_EXPANSION_RAN"
+
+HANDOFF_STATE_HINT = "AGENT_CANDIDATE_EXPANSION_HANDOFF_RAN"
+
+QUEUE_STATE_HINT = "EXPANSION_SANDBOX_QUEUE_RAN"
+
+QUEUE_EVALUATION_STATE_HINT = "EXPANSION_SANDBOX_QUEUE_EVALUATED"
+
+BLOCKED_EXECUTOR_TASKS_STATE_HINT = (
+    "EXPANSION_BLOCKED_EXECUTOR_TASKS_PREPARED"
+)
+
+FAILURE_MEMORY_STATE_HINT = "LITERATURE_FAILURE_MEMORY_RECORDED"
+
+LOCAL_ASSET_CANDIDATES_STATE_HINT = "LOCAL_ASSET_ALGORITHM_CANDIDATES_BUILT"
+
+REGISTRY_SUMMARY_STATE_HINT = "LITERATURE_REGISTRY_SUMMARY_BUILT"
+
+REFINEMENT_STATE_HINT = "ALGORITHM_CANDIDATE_REFINEMENT_PREPARED"
+
+EVIDENCE_ACCUMULATION_PLAN_STATE_HINT = "CANDIDATE_EVIDENCE_ACCUMULATION_PLANNED"
+
+SHORT_SANDBOX_COMMANDS = {"run-hypothesis-lab", "run-blueprint-sandbox"}
+
+CheckpointFamilyRunner = Callable[..., dict[str, Any]]
+
+LocalStrategyRunner = Callable[..., dict[str, Any]]
 
 class LiteratureExpansionError(RuntimeError):
     pass
-
 
 def run_candidate_expansion_handoff(
     *,
@@ -191,15 +249,6 @@ def run_candidate_expansion_handoff(
     _write_json(report_path, report)
     return report
 
-
-def _expansion_has_viable_actions(expansion: dict[str, Any]) -> bool:
-    for key in ["action_count", "executable_count", "proposal_count"]:
-        value = expansion.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return True
-    return False
-
-
 def _apply_learning_constraints_to_candidates(
     candidates: dict[str, Any],
     *,
@@ -299,7 +348,6 @@ def _apply_learning_constraints_to_candidates(
     _write_json(Path(str(updated["algorithm_candidates_path"])), updated)
     return updated, skipped
 
-
 def _merge_registry_summary_learning_constraints(
     constraints: Any,
     *,
@@ -352,7 +400,6 @@ def _merge_registry_summary_learning_constraints(
         return merged
     return merged
 
-
 def _append_unique_constraint_value(
     constraints: dict[str, Any],
     key: str,
@@ -361,7 +408,6 @@ def _append_unique_constraint_value(
     values = _string_list(constraints.get(key))
     _append_unique_value(values, value)
     constraints[key] = values
-
 
 def _registry_variant_reason_codes(action: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
@@ -376,13 +422,11 @@ def _registry_variant_reason_codes(action: dict[str, Any]) -> list[str]:
             _append_unique_value(reasons, reason)
     return reasons
 
-
 def _registry_variant_constraint_candidate_id(action: dict[str, Any]) -> str:
     candidate_id = _text(action.get("candidate_id"), "candidate_id")
     if action.get("candidate_family") != "local_strategy_skill":
         return candidate_id
     return _local_strategy_base_candidate_id_from_variant(candidate_id)
-
 
 def _local_strategy_base_candidate_id_from_variant(candidate_id: str) -> str:
     for axis in _local_strategy_mutation_axes():
@@ -390,16 +434,6 @@ def _local_strategy_base_candidate_id_from_variant(candidate_id: str) -> str:
         if candidate_id.endswith(suffix):
             return candidate_id[: -len(suffix)]
     return candidate_id
-
-
-def _learning_constraint_reason(constraints: dict[str, Any]) -> str:
-    reason_codes = constraints.get("reason_codes")
-    if isinstance(reason_codes, list):
-        for reason in reason_codes:
-            if isinstance(reason, str) and reason:
-                return reason
-    return "learning_constraint_avoid_family"
-
 
 def _learning_constraint_reason_for_candidate(
     candidate: dict[str, Any],
@@ -414,36 +448,6 @@ def _learning_constraint_reason_for_candidate(
     if candidate.get("candidate_family") in saturated:
         return "candidate_family_saturated"
     return _learning_constraint_reason(constraints)
-
-
-def _candidate_satisfies_mutation_constraint(
-    candidate: dict[str, Any],
-    *,
-    constraints: dict[str, Any],
-) -> bool:
-    mutation_required = {
-        item
-        for item in constraints.get("mutation_required_for_families", [])
-        if isinstance(item, str) and item
-    }
-    mutation_required_ids = {
-        item
-        for item in constraints.get("mutation_required_for_algorithm_candidate_ids", [])
-        if isinstance(item, str) and item
-    }
-    family = candidate.get("candidate_family")
-    candidate_id = candidate.get("algorithm_candidate_id")
-    if (
-        (not isinstance(family, str) or family not in mutation_required)
-        and candidate_id not in mutation_required_ids
-    ):
-        return False
-    evidence = candidate.get("mutation_evidence")
-    if not isinstance(evidence, dict):
-        return False
-    mutation_type = evidence.get("mutation_type")
-    return isinstance(mutation_type, str) and bool(mutation_type.strip())
-
 
 def _mutate_candidate_for_learning_constraint(
     candidate: dict[str, Any],
@@ -478,7 +482,6 @@ def _mutate_candidate_for_learning_constraint(
         )
     return None
 
-
 def _constraints_request_local_strategy_variant(constraints: dict[str, Any]) -> bool:
     reasons = set(_string_list(constraints.get("reason_codes")))
     by_candidate = constraints.get("reason_codes_by_algorithm_candidate_id")
@@ -488,7 +491,6 @@ def _constraints_request_local_strategy_variant(constraints: dict[str, Any]) -> 
     if "local_strategy_failed_legal_retest_requires_variant" in reasons:
         return True
     return bool(reasons.intersection({"score_regressed", "ablation_missing_or_weak"}))
-
 
 def _mutate_local_strategy_candidate_for_learning_constraint(
     candidate: dict[str, Any],
@@ -540,7 +542,6 @@ def _mutate_local_strategy_candidate_for_learning_constraint(
     mutated["risk_controls"] = risks
     return mutated
 
-
 def _select_local_strategy_mutation_axis(
     previous_mutation_types: list[str],
 ) -> dict[str, Any] | None:
@@ -550,7 +551,6 @@ def _select_local_strategy_mutation_axis(
         if mutation_type not in previous:
             return axis
     return None
-
 
 def _registry_avoided_local_strategy_mutation_types(
     registry_summary: dict[str, Any],
@@ -589,12 +589,6 @@ def _registry_avoided_local_strategy_mutation_types(
         if isinstance(mutation_type, str) and mutation_type:
             _append_unique_value(mutation_types, mutation_type)
     return mutation_types
-
-
-def _append_unique_value(values: list[str], value: str) -> None:
-    if value not in values:
-        values.append(value)
-
 
 def _handoff_expansion_exhaustion(
     *,
@@ -641,7 +635,6 @@ def _handoff_expansion_exhaustion(
         ),
     }
 
-
 def _merge_prior_expansion_exhaustion(
     expansion_exhaustion: dict[str, Any],
     *,
@@ -670,89 +663,6 @@ def _merge_prior_expansion_exhaustion(
         if key not in merged and isinstance(prior_expansion_exhaustion.get(key), str):
             merged[key] = prior_expansion_exhaustion[key]
     return merged
-
-
-def _local_strategy_node_id_from_candidate_id(candidate_id: str) -> str:
-    if candidate_id.startswith("candidate_local_strategy_"):
-        return "local_strategy_" + candidate_id.removeprefix(
-            "candidate_local_strategy_"
-        )
-    return candidate_id
-
-
-def _local_strategy_mutation_axes() -> list[dict[str, Any]]:
-    return [
-        {
-            "id_suffix": "mutation_robust_reference_ablation_v0",
-            "mutation_type": "robust_reference_ablation_retry",
-            "implementation_hook": "robust_reference_ablation",
-            "hypothesis": (
-                "The parent local strategy improved a narrow legal-reference "
-                "window but failed on a wider window; a robust "
-                "reference-ablation retry should prefer smoother handoffs and "
-                "require wider-window evidence before promotion."
-            ),
-            "mechanism": (
-                "Reuse the bounded local strategy executor, but mark this "
-                "candidate as a mutation that must search a wider legal "
-                "reference window and report whether each early sub-window "
-                "source remains stable under ablation."
-            ),
-            "parameter_grid": {
-                "reference_sample_limits": [128],
-                "requires_wider_reference_ablation": [True],
-            },
-            "risk_controls": [
-                "mutation must not repeat the narrow-window-only promotion path"
-            ],
-        },
-        {
-            "id_suffix": "mutation_source_stability_ablation_v0",
-            "mutation_type": "source_stability_ablation_retry",
-            "implementation_hook": "source_stability_ablation",
-            "hypothesis": (
-                "The robust reference-ablation retry did not improve the legal "
-                "window; the next test should isolate whether early-window "
-                "source switching is unstable across reference samples."
-            ),
-            "mechanism": (
-                "Reuse the bounded local strategy executor, but require source "
-                "stability diagnostics for each early subsegment before any "
-                "handoff patch is accepted."
-            ),
-            "parameter_grid": {
-                "reference_sample_limits": [128],
-                "source_stability_guard": [True],
-            },
-            "risk_controls": [
-                "mutation must report per-source stability before promotion"
-            ],
-        },
-        {
-            "id_suffix": "mutation_handoff_smoothing_ablation_v0",
-            "mutation_type": "handoff_smoothing_ablation_retry",
-            "implementation_hook": "handoff_smoothing_ablation",
-            "hypothesis": (
-                "If source stability is not sufficient, the remaining failure "
-                "mode may be a discontinuous early-to-middle handoff; a "
-                "smoothing ablation should test conservative blend weights."
-            ),
-            "mechanism": (
-                "Reuse the bounded local strategy executor with explicit "
-                "handoff blend weights so that the sandbox can measure whether "
-                "the early segment improves without degrading the middle "
-                "segment."
-            ),
-            "parameter_grid": {
-                "reference_sample_limits": [128],
-                "handoff_smoothing_weights": [0.25, 0.5],
-            },
-            "risk_controls": [
-                "mutation must not trade early score for middle-segment regression"
-            ],
-        },
-    ]
-
 
 def _mutate_checkpoint_candidate_for_learning_constraint(
     candidate: dict[str, Any],
@@ -799,7 +709,6 @@ def _mutate_checkpoint_candidate_for_learning_constraint(
     risks.append("finetune retry must beat current best, not only direct checkpoint")
     mutated["risk_controls"] = risks
     return mutated
-
 
 def run_literature_strategy_expansion(
     *,
@@ -957,7 +866,6 @@ def run_literature_strategy_expansion(
     _write_json(report_path, report)
     return report
 
-
 def run_expansion_sandbox_queue(
     *,
     expansion_report_path: str | Path,
@@ -1071,7 +979,6 @@ def run_expansion_sandbox_queue(
     _write_json(report_path, report)
     return report
 
-
 def _filter_sandbox_queue_by_candidate_id(
     *,
     sandbox_queue: list[str],
@@ -1093,7 +1000,6 @@ def _filter_sandbox_queue_by_candidate_id(
             f"selected algorithm candidate not found in sandbox queue: {candidate_id}"
         )
     return matches
-
 
 def _run_expansion_sandbox_item(
     *,
@@ -1247,7 +1153,6 @@ def _run_expansion_sandbox_item(
         "next_command": "evaluate-expansion-sandbox-queue",
     }
 
-
 def _run_checkpoint_family_sandbox_item(
     *,
     plan: dict[str, Any],
@@ -1332,7 +1237,6 @@ def _run_checkpoint_family_sandbox_item(
         "score_delta_vs_baseline": None,
         "next_command": "evaluate-expansion-sandbox-queue",
     }
-
 
 def _run_bounded_local_strategy_sandbox_item(
     *,
@@ -1450,7 +1354,6 @@ def _run_bounded_local_strategy_sandbox_item(
         "next_command": "evaluate-expansion-sandbox-queue",
     }
 
-
 def _skip_expansion_sandbox_item(
     *,
     plan: dict[str, Any],
@@ -1483,7 +1386,6 @@ def _skip_expansion_sandbox_item(
         "selected_candidate_present": isinstance(candidate, dict),
         "next_command": "review-expansion-sandbox-queue",
     }
-
 
 def _error_expansion_sandbox_item(
     *,
@@ -1519,7 +1421,6 @@ def _error_expansion_sandbox_item(
         "next_command": "review-expansion-sandbox-queue",
     }
 
-
 def _classify_sandbox_exception(error: Exception) -> dict[str, Any]:
     error_type = error.__class__.__name__
     message = str(error)
@@ -1539,30 +1440,11 @@ def _classify_sandbox_exception(error: Exception) -> dict[str, Any]:
         return {"outcome": "blocked", "reason_codes": reason_codes}
     return {"outcome": "failed", "reason_codes": reason_codes}
 
-
-def _extract_reference_shape_steps(message: str) -> int | None:
-    match = re.search(r"got\s+\(\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*\)", message)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
 def _plan_candidate_key(plan: dict[str, Any]) -> str:
     candidate = plan.get("selected_candidate")
     if not isinstance(candidate, dict):
         return f"unknown_card|{plan.get('candidate_family') or 'unknown_family'}"
     return _candidate_key(candidate)
-
-
-def _sandbox_queue_next_command(items: list[dict[str, Any]]) -> str:
-    if any(item.get("outcome") == "passed" for item in items):
-        return "evaluate-expansion-sandbox-queue"
-    if any(item.get("outcome") == "failed" for item in items):
-        return "summarize-literature-registry"
-    if any(item.get("status") == "skipped" for item in items):
-        return "review-expansion-sandbox-queue"
-    return "run-literature-strategy-expansion"
-
 
 def evaluate_expansion_sandbox_queue(
     *,
@@ -1690,7 +1572,6 @@ def evaluate_expansion_sandbox_queue(
     _write_json(report_path, report)
     return report
 
-
 def _materialize_queue_sandbox_evidence(
     *,
     queue_item: dict[str, Any],
@@ -1755,7 +1636,6 @@ def _materialize_queue_sandbox_evidence(
     }
     _write_json(output_file, evidence)
     return evidence
-
 
 def _materialize_local_strategy_sandbox_evidence(
     *,
@@ -1826,7 +1706,6 @@ def _materialize_local_strategy_sandbox_evidence(
     _write_json(output_file, evidence)
     return evidence
 
-
 def _materialize_checkpoint_family_sandbox_evidence(
     *,
     queue_item: dict[str, Any],
@@ -1887,7 +1766,6 @@ def _materialize_checkpoint_family_sandbox_evidence(
     _write_json(output_file, evidence)
     return evidence
 
-
 def _write_queue_item_registry_event(
     *,
     queue_item: dict[str, Any],
@@ -1931,22 +1809,6 @@ def _write_queue_item_registry_event(
     _write_json(output_file, report)
     return report
 
-
-def _queue_failure_codes(reason_codes: list[str], *, outcome: str) -> list[str]:
-    lowered = " ".join(reason_codes).lower()
-    if "reference_horizon_incompatible" in lowered:
-        return ["data_contract_incompatible"]
-    if "unsupported" in lowered or "checkpoint" in lowered:
-        return ["unsupported_executor"]
-    if "task1retrievalpriorerror" in lowered:
-        return ["data_contract_incompatible"]
-    if "runtime" in lowered or "timeout" in lowered:
-        return ["runtime_exceeded"]
-    if outcome == "blocked":
-        return ["unsupported_executor"]
-    return ["sandbox_rule_failed"]
-
-
 def _queue_evidence_score(best: dict[str, Any], verifier: dict[str, Any]) -> float:
     for key in ["task1_total_score_proxy", "segment_score"]:
         value = best.get(key)
@@ -1954,33 +1816,8 @@ def _queue_evidence_score(best: dict[str, Any], verifier: dict[str, Any]) -> flo
             return float(value)
     return _float_or_default(verifier.get("best_segment_score"), 0.0)
 
-
-def _queue_segment_scores(best: dict[str, Any]) -> dict[str, Any]:
-    segments = best.get("segments")
-    if not isinstance(segments, dict):
-        return {}
-    return {
-        key: value.get("score")
-        for key, value in segments.items()
-        if isinstance(value, dict) and isinstance(value.get("score"), int | float)
-    }
-
-
 def _queue_inference_seconds(best: dict[str, Any]) -> float:
     return _float_or_default(best.get("elapsed_seconds"), 0.0)
-
-
-def _queue_artifact_paths(lab_report: dict[str, Any]) -> list[str]:
-    artifacts = lab_report.get("artifacts")
-    if not isinstance(artifacts, dict):
-        return []
-    paths = []
-    for key in ["sandbox_report_path", "best_submission_dir", "best_prediction_path"]:
-        value = artifacts.get(key)
-        if isinstance(value, str) and value.strip():
-            paths.append(value)
-    return paths
-
 
 def _checkpoint_paths_from_candidate(candidate: dict[str, Any]) -> list[Path]:
     resources = (
@@ -1989,82 +1826,6 @@ def _checkpoint_paths_from_candidate(candidate: dict[str, Any]) -> list[Path]:
         else {}
     )
     return [Path(item) for item in _string_list(resources.get("checkpoint_paths"))]
-
-
-def _task_id_from_candidate(candidate: dict[str, Any]) -> int:
-    value = candidate.get("target_task")
-    if isinstance(value, int) and value in {1, 2}:
-        return value
-    if isinstance(value, str):
-        stripped = value.lower().replace("task", "").replace("-", "").strip()
-        if stripped in {"1", "2"}:
-            return int(stripped)
-    return 1
-
-
-def _calibration_weights_from_candidate(candidate: dict[str, Any]) -> list[float]:
-    grid = (
-        candidate.get("parameter_grid")
-        if isinstance(candidate.get("parameter_grid"), dict)
-        else {}
-    )
-    values = grid.get("calibration_weights")
-    weights = [
-        float(item)
-        for item in values
-        if isinstance(item, int | float) and not isinstance(item, bool)
-    ] if isinstance(values, list) else []
-    return weights or [0.0, 0.25, 0.5, 1.0]
-
-
-def _fno_finetune_steps_from_candidate(candidate: dict[str, Any]) -> int:
-    grid = (
-        candidate.get("parameter_grid")
-        if isinstance(candidate.get("parameter_grid"), dict)
-        else {}
-    )
-    values = grid.get("fno_finetune_steps")
-    if isinstance(values, list):
-        numeric = [
-            int(item)
-            for item in values
-            if isinstance(item, int | float) and not isinstance(item, bool)
-        ]
-        return max(numeric) if numeric else 0
-    return 0
-
-
-def _checkpoint_family_report_path(report: dict[str, Any]) -> Path:
-    for value in [
-        report.get("checkpoint_family_report_path"),
-        report.get("artifacts", {}).get("checkpoint_family_report_path")
-        if isinstance(report.get("artifacts"), dict)
-        else None,
-    ]:
-        if isinstance(value, str) and value.strip():
-            return Path(value)
-    raise LiteratureExpansionError(
-        "checkpoint family sandbox report missing report path"
-    )
-
-
-def _checkpoint_segment_scores(best: dict[str, Any]) -> dict[str, Any]:
-    segment_score = best.get("segment_score")
-    if isinstance(segment_score, dict):
-        return {
-            key: value
-            for key, value in segment_score.items()
-            if isinstance(value, int | float) and not isinstance(value, bool)
-        }
-    segments = best.get("segments")
-    if isinstance(segments, dict):
-        return {
-            key: value.get("score")
-            for key, value in segments.items()
-            if isinstance(value, dict) and isinstance(value.get("score"), int | float)
-        }
-    return {}
-
 
 def _is_bounded_local_strategy_candidate(
     *,
@@ -2077,7 +1838,6 @@ def _is_bounded_local_strategy_candidate(
         return False
     return _local_strategy_candidate_generator(candidate) is not None
 
-
 def _local_strategy_candidate_generator(candidate: dict[str, Any]) -> str | None:
     executor = (
         candidate.get("executor_spec")
@@ -2088,19 +1848,6 @@ def _local_strategy_candidate_generator(candidate: dict[str, Any]) -> str | None
     if "hypothesis_lab_early_subsegment_patch_search" in hooks:
         return "hypothesis_lab_early_subsegment_patch_search"
     return None
-
-
-def _bounded_local_strategy_max_rounds(candidate_generator: str | None) -> int:
-    if candidate_generator == "hypothesis_lab_early_subsegment_patch_search":
-        return 5
-    return 1
-
-
-def _bounded_local_strategy_objective(candidate_generator: str | None) -> str:
-    if candidate_generator == "hypothesis_lab_early_subsegment_patch_search":
-        return "early_accuracy"
-    return "score"
-
 
 def _bounded_local_strategy_reference_sample_limit(
     *,
@@ -2116,7 +1863,6 @@ def _bounded_local_strategy_reference_sample_limit(
     if candidate_generator == "hypothesis_lab_early_subsegment_patch_search":
         return 64
     return None
-
 
 def _bounded_local_strategy_reference_contract(
     *,
@@ -2147,15 +1893,6 @@ def _bounded_local_strategy_reference_contract(
         "required_steps": required_steps,
     }
 
-
-def _bounded_local_strategy_required_reference_steps(
-    candidate_generator: str | None,
-) -> int | None:
-    if candidate_generator == "hypothesis_lab_early_subsegment_patch_search":
-        return 200
-    return None
-
-
 def _hdf5_effective_tensor_shape(path: Path) -> tuple[int, int, int]:
     file = _require_file(path, "reference HDF5")
     import h5py
@@ -2172,22 +1909,6 @@ def _hdf5_effective_tensor_shape(path: Path) -> tuple[int, int, int]:
     effective_width = width // 4 if width == 1024 else width
     return batch, effective_steps, effective_width
 
-
-def _candidate_reference_sample_limit(candidate: dict[str, Any] | None) -> int | None:
-    if not isinstance(candidate, dict):
-        return None
-    grid = candidate.get("parameter_grid")
-    if not isinstance(grid, dict):
-        return None
-    values = grid.get("reference_sample_limits")
-    if not isinstance(values, list):
-        return None
-    for value in values:
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return None
-
-
 def _local_strategy_candidate_options(candidate: dict[str, Any]) -> dict[str, Any]:
     grid = candidate.get("parameter_grid")
     if not isinstance(grid, dict):
@@ -2200,41 +1921,6 @@ def _local_strategy_candidate_options(candidate: dict[str, Any]) -> dict[str, An
     if smoothing_weight is not None:
         options["handoff_smoothing_weight"] = smoothing_weight
     return options
-
-
-def _first_bool_grid_value(value: Any) -> bool | None:
-    values = value if isinstance(value, list) else [value]
-    for item in values:
-        if isinstance(item, bool):
-            return item
-    return None
-
-
-def _first_float_grid_value(value: Any) -> float | None:
-    values = value if isinstance(value, list) else [value]
-    for item in values:
-        if isinstance(item, int | float) and not isinstance(item, bool):
-            return float(item)
-    return None
-
-
-def _bounded_local_strategy_deadline_seconds(candidate_generator: str | None) -> float:
-    if candidate_generator == "hypothesis_lab_early_subsegment_patch_search":
-        return 300.0
-    return 120.0
-
-
-def _local_strategy_loop_report_path(report: dict[str, Any]) -> Path:
-    for value in [
-        report.get("loop_report_path"),
-        report.get("artifacts", {}).get("loop_report_path")
-        if isinstance(report.get("artifacts"), dict)
-        else None,
-    ]:
-        if isinstance(value, str) and value.strip():
-            return Path(value)
-    raise LiteratureExpansionError("local strategy loop missing report path")
-
 
 def _select_local_strategy_evidence_candidate(
     *,
@@ -2262,40 +1948,6 @@ def _select_local_strategy_evidence_candidate(
         key=lambda item: _float_or_default(item.get("score"), -1e30),
     )
 
-
-def _local_strategy_candidate_gate_issues(candidate: dict[str, Any]) -> list[str]:
-    issues = []
-    value = candidate.get("candidate_gate_issues")
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, str) and item.strip() and item not in issues:
-                issues.append(item.strip())
-    return issues
-
-
-def _local_strategy_segment_scores(best: dict[str, Any]) -> dict[str, Any]:
-    segment_score = best.get("segment_score")
-    if isinstance(segment_score, dict):
-        return {
-            key: value
-            for key, value in segment_score.items()
-            if isinstance(value, int | float) and not isinstance(value, bool)
-        }
-    segments = best.get("segments")
-    if isinstance(segments, dict):
-        return {
-            key: value.get("score")
-            for key, value in segments.items()
-            if isinstance(value, dict) and isinstance(value.get("score"), int | float)
-        }
-    signals = best.get("objective_signals")
-    if isinstance(signals, dict):
-        early = signals.get("early_segment_score")
-        if isinstance(early, int | float) and not isinstance(early, bool):
-            return {"early": float(early)}
-    return {}
-
-
 def _local_strategy_inference_seconds(best: dict[str, Any]) -> float:
     signals = best.get("objective_signals")
     if isinstance(signals, dict):
@@ -2303,18 +1955,6 @@ def _local_strategy_inference_seconds(best: dict[str, Any]) -> float:
         if isinstance(value, int | float) and not isinstance(value, bool):
             return float(value)
     return _float_or_default(best.get("inference_time"), 0.0)
-
-
-def _unique_paths(paths: list[str]) -> list[Path]:
-    seen: set[str] = set()
-    unique = []
-    for path in paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        unique.append(Path(path))
-    return unique
-
 
 def prepare_expansion_blocked_executor_authoring_tasks(
     *,
@@ -2369,14 +2009,12 @@ def prepare_expansion_blocked_executor_authoring_tasks(
     _write_json(report_path, report)
     return report
 
-
 def _blocked_queue_items(queue: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         item
         for item in _object_items(queue.get("items"))
         if item.get("status") == "skipped" and item.get("outcome") == "blocked"
     ]
-
 
 def _prepare_blocked_executor_authoring_task(
     *,
@@ -2464,7 +2102,6 @@ def _prepare_blocked_executor_authoring_task(
         "next_command": authoring["next_command"],
     }
 
-
 def _blocked_queue_executor_design_request(
     *,
     queue_item: dict[str, Any],
@@ -2531,7 +2168,6 @@ def _blocked_queue_executor_design_request(
         "next_command": "create-bounded-executor-design-spec",
     }
 
-
 def build_local_asset_algorithm_candidates(
     *,
     local_strategy_library_path: str | Path,
@@ -2550,7 +2186,6 @@ def build_local_asset_algorithm_candidates(
         )
     except LiteratureLocalAssetCandidateError as exc:
         raise LiteratureExpansionError(str(exc)) from exc
-
 
 def _authoring_context_path(
     *,
@@ -2574,15 +2209,6 @@ def _authoring_context_path(
         target.create_dataset(dataset_name, data=data)
     return output_path
 
-
-def _first_hdf5_dataset_name(handle: Any) -> str:
-    for key in handle.keys():
-        node = handle[key]
-        if hasattr(node, "shape"):
-            return str(key)
-    raise LiteratureExpansionError("HDF5 file contains no dataset")
-
-
 def _first_hdf5_tensor_dataset_name(handle: Any) -> str:
     tensor = handle.get("tensor")
     if tensor is not None and getattr(tensor, "ndim", len(getattr(tensor, "shape", ()))) == 3:
@@ -2592,7 +2218,6 @@ def _first_hdf5_tensor_dataset_name(handle: Any) -> str:
         if len(getattr(node, "shape", ())) == 3:
             return str(key)
     return _first_hdf5_dataset_name(handle)
-
 
 def record_literature_candidate_outcome(
     *,
@@ -2643,7 +2268,6 @@ def record_literature_candidate_outcome(
     _write_json(output_file, memory)
     return memory
 
-
 def summarize_literature_registry(
     *,
     registry_path: str | Path,
@@ -2666,7 +2290,6 @@ def summarize_literature_registry(
     )
     _write_json(output_file, report)
     return report
-
 
 def refine_algorithm_candidate(
     *,
@@ -2694,7 +2317,6 @@ def refine_algorithm_candidate(
     _write_json(output_file, report)
     return report
 
-
 def record_promoted_algorithm_strategy_proposal(
     *,
     candidate_promotion_path: str | Path,
@@ -2709,7 +2331,6 @@ def record_promoted_algorithm_strategy_proposal(
         )
     except LiteraturePromotionMaterializationError as exc:
         raise LiteratureExpansionError(str(exc)) from exc
-
 
 def convert_candidate_promotion_to_strategy_evidence(
     *,
@@ -2728,7 +2349,6 @@ def convert_candidate_promotion_to_strategy_evidence(
     except LiteraturePromotionMaterializationError as exc:
         raise LiteratureExpansionError(str(exc)) from exc
 
-
 def plan_candidate_evidence_accumulation(
     *,
     strategy_promotion_report_path: str | Path,
@@ -2745,7 +2365,6 @@ def plan_candidate_evidence_accumulation(
         )
     except LiteraturePromotionMaterializationError as exc:
         raise LiteratureExpansionError(str(exc)) from exc
-
 
 def _rank_candidates(
     candidates: list[dict[str, Any]],
@@ -2798,50 +2417,6 @@ def _rank_candidates(
             int(item["source_order"]),
         ),
     )
-
-
-def _candidate_route(
-    candidate: dict[str, Any],
-    *,
-    checkpoint_paths: list[Path],
-) -> tuple[str, float]:
-    executor = candidate.get("executor_spec")
-    if not isinstance(executor, dict):
-        return "invalid", 0.0
-    cli_command = executor.get("cli_command")
-    if (
-        cli_command == "blocked_requires_executor_design"
-        and executor.get("unsupported_hook") == "fourier_neural_operator_architecture"
-        and checkpoint_paths
-    ):
-        return "checkpoint_adapter", 100.0
-    if cli_command == "blocked_requires_executor_design":
-        return "executor_design", 10.0
-    return "existing_executor", 80.0
-
-
-def _candidate_key(candidate: dict[str, Any]) -> str:
-    grounding = candidate.get("source_grounding")
-    if not isinstance(grounding, dict):
-        grounding = {}
-    card_id = grounding.get("algorithm_card_id")
-    executor = candidate.get("executor_spec")
-    hook = executor.get("unsupported_hook") if isinstance(executor, dict) else None
-    family = candidate.get("candidate_family")
-    mutation = candidate.get("mutation_evidence")
-    mutation_type = (
-        mutation.get("mutation_type")
-        if isinstance(mutation, dict)
-        and isinstance(mutation.get("mutation_type"), str)
-        and mutation.get("mutation_type")
-        else None
-    )
-    return "|".join(
-        str(part)
-        for part in [card_id or "unknown_card", hook or family or "unknown_family"]
-        + ([mutation_type] if mutation_type else [])
-    )
-
 
 def _expand_candidate(
     *,
@@ -2931,7 +2506,6 @@ def _expand_candidate(
         "next_command": sandbox["next_command"],
     }
 
-
 def _record_design_strategy_proposal(
     *,
     request: dict[str, Any],
@@ -2974,152 +2548,14 @@ def _record_design_strategy_proposal(
         output_path=output_path,
     )
 
-
-def _candidate_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    candidates = payload.get("algorithm_candidates")
-    if not isinstance(candidates, list):
-        raise LiteratureExpansionError("algorithm_candidates must be a list")
-    result = []
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            raise LiteratureExpansionError("algorithm candidate must be an object")
-        result.append(candidate)
-    return result
-
-
-def _next_command(actions: list[dict[str, Any]], *, skipped_count: int = 0) -> str:
-    for action in actions:
-        if action.get("executable") is True:
-            return str(action["next_command"])
-    for action in actions:
-        if action.get("strategy_proposal_path"):
-            return str(action["next_command"])
-    if skipped_count > 0:
-        return "build-local-asset-algorithm-candidates"
-    return "review-literature-expansion"
-
-
-def _recovery_plan(
-    *,
-    actions: list[dict[str, Any]],
-    skipped_candidates: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    if actions or not skipped_candidates:
-        return None
-    return {
-        "reason": "candidate_pool_exhausted",
-        "next_command": "build-local-asset-algorithm-candidates",
-        "recommended_inputs": {
-            "local_strategy_library_path": "runs/local_strategy_library.json",
-            "checkpoint_paths": [
-                "data/pdebench/checkpoints/burgers_FNO.tar",
-                "data/pdebench/checkpoints/burgers_Unet.tar",
-            ],
-            "max_strategy_candidates": 5,
-        },
-        "follow_up_command": "run-literature-strategy-expansion",
-    }
-
-
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-
-
-def _append_unique(memory: dict[str, Any], key: str, value: str) -> None:
-    values = memory.setdefault(key, [])
-    if not isinstance(values, list):
-        values = []
-        memory[key] = values
-    if value not in values:
-        values.append(value)
-
-
-def _failed_candidate_families_for_outcome(
-    *,
-    candidate_key: str,
-    reason_codes: list[str],
-) -> list[str]:
-    reason_text = " ".join(
-        code.lower() for code in reason_codes if isinstance(code, str)
-    )
-    key_text = candidate_key.lower()
-    if (
-        "checkpoint_adapter" in reason_text
-        or "checkpoint_weight" in reason_text
-        or "best_is_persistence" in reason_text
-        or (
-            "fourier_neural_operator_architecture" in key_text
-            and "checkpoint" in reason_text
-        )
-    ):
-        return ["official_checkpoint_family"]
-    return []
-
-
 def _read_failure_memory(path: Path) -> dict[str, Any]:
     memory = _read_json(path)
     if memory.get("state_hint") != FAILURE_MEMORY_STATE_HINT:
         raise LiteratureExpansionError("failure memory has invalid state_hint")
     return memory
 
-
 def _read_registry_summary(path: Path) -> dict[str, Any]:
     summary = _read_json(path)
     if summary.get("state_hint") != REGISTRY_SUMMARY_STATE_HINT:
         raise LiteratureExpansionError("registry summary has invalid state_hint")
     return summary
-
-
-def _object_items(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, dict)]
-
-
-def _float_or_default(value: Any, default: float) -> float:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int | float):
-        return float(value)
-    return default
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise LiteratureExpansionError(f"missing JSON artifact: {path}")
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise LiteratureExpansionError("JSON artifact must be an object")
-    return value
-
-
-def _require_file(path: Path, label: str) -> Path:
-    if not path.is_file():
-        raise LiteratureExpansionError(f"{label} not found: {path}")
-    return path
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _guard_output(path: Path, *, force: bool) -> None:
-    if path.exists() and not force:
-        raise LiteratureExpansionError(f"artifact already exists: {path}")
-
-
-def _text(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise LiteratureExpansionError(f"{label} must be a non-empty string")
-    return value.strip()
-
-
-def _slug(value: str) -> str:
-    text = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")
-    return text[:80] or "candidate"
