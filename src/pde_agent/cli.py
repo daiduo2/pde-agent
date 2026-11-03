@@ -21,7 +21,14 @@ from pde_agent.cli_commands import (
     cli_strategy,
     cli_submission,
     cli_task1_training,
+    cli_task2_training,
 )
+
+# Trigger agent tool registrations on CLI startup
+try:
+    import pde_agent.core.agent_tools  # noqa: F401
+except Exception:
+    pass  # agent tools are optional (torch-dependent)
 
 app = typer.Typer()
 
@@ -41,6 +48,7 @@ cli_spectral.register_commands(app)
 cli_strategy.register_commands(app)
 cli_submission.register_commands(app)
 cli_task1_training.register_commands(app)
+cli_task2_training.register_commands(app)
 
 if __name__ == "__main__":
     app()

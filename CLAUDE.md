@@ -16,6 +16,10 @@ definition. If a capability looks reusable, it belongs in `src/pde_agent/core/`
 first, with a thin command wrapper on top. `scripts/` are for operational
 prep, audit, and smoke entrypoints, not a second business-logic layer.
 
+For autonomous model training iteration, see [docs/agent_autonomous_iteration_guide.md](docs/agent_autonomous_iteration_guide.md)
+which documents the `neural_operator` framework, available CLI commands,
+registered components, the hypothesis-lab pipeline, and agent red lines.
+
 ## Build and Development Commands
 
 All commands use `uv`. The project has a `uv.lock` file and uses `--frozen` in CI/fixtures.

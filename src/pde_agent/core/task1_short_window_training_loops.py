@@ -95,6 +95,7 @@ def run_task1_short_window_training_loop(
     forecast_steps: int = 47,
     time_reduction: int = 5,
     space_reduction: int = 4,
+    window_stride: int = 1,
     model_family: str = "conv1d_residual",
     fno_modes: int = 8,
     fno_width: int = 32,
@@ -105,6 +106,7 @@ def run_task1_short_window_training_loop(
     batch_size: int = 16,
     learning_rate: float = 1e-3,
     seed: int = 0,
+    noise_sigma: float = 0.0,
     force: bool = False,
 ) -> dict[str, Any]:
     torch = _require_torch()
@@ -157,6 +159,7 @@ def run_task1_short_window_training_loop(
         forecast_steps=forecast_steps,
         time_reduction=time_reduction,
         space_reduction=space_reduction,
+        window_stride=window_stride,
         force=force,
     )
     val_windows = build_local_windows(
@@ -169,6 +172,7 @@ def run_task1_short_window_training_loop(
         forecast_steps=forecast_steps,
         time_reduction=time_reduction,
         space_reduction=space_reduction,
+        window_stride=window_stride,
         force=force,
     )
     train_context, train_target = _load_windows(artifacts["train_windows_path"])
@@ -196,14 +200,22 @@ def run_task1_short_window_training_loop(
         depth=fno_depth,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_steps)
     train_context_t = torch.as_tensor(train_context_model, dtype=torch.float32)
     train_target_t = torch.as_tensor(train_target_model, dtype=torch.float32)
     val_context_t = torch.as_tensor(val_context_model, dtype=torch.float32)
     val_target_t = torch.as_tensor(val_target_model, dtype=torch.float32)
     rng = np.random.default_rng(seed)
     loss_curve = {"train": [], "val": []}
+    best_val_loss = float("inf")
+    best_model_state = None
+    best_val_step = 0
+    epochs_no_improve = 0
+    patience = 20
+    stopped_early = False
+    actual_train_steps = 0
     start_time = time.perf_counter()
-    for _ in range(train_steps):
+    for step in range(train_steps):
         model.train()
         indices = rng.choice(
             train_context.shape[0],
@@ -212,6 +224,9 @@ def run_task1_short_window_training_loop(
         )
         batch_context = train_context_t[indices]
         batch_target = train_target_t[indices]
+        if noise_sigma > 0.0:
+            batch_context = batch_context + torch.randn_like(batch_context) * noise_sigma
+            batch_target = batch_target + torch.randn_like(batch_target) * noise_sigma
         optimizer.zero_grad()
         prediction = model(batch_context)
         train_loss = _training_loss(
@@ -224,6 +239,7 @@ def run_task1_short_window_training_loop(
             raise Task1ShortWindowTrainingError("training loss is non-finite")
         train_loss.backward()
         optimizer.step()
+        scheduler.step()
         model.eval()
         with torch.no_grad():
             val_prediction = model(val_context_t)
@@ -233,9 +249,23 @@ def run_task1_short_window_training_loop(
                 target=val_target_t,
                 loss_type=loss_type,
             )
+        val_loss_float = float(val_loss.detach().cpu().item())
         loss_curve["train"].append(float(train_loss.detach().cpu().item()))
-        loss_curve["val"].append(float(val_loss.detach().cpu().item()))
+        loss_curve["val"].append(val_loss_float)
+        actual_train_steps += 1
+        if val_loss_float < best_val_loss:
+            best_val_loss = val_loss_float
+            best_model_state = model.state_dict()
+            best_val_step = step + 1
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+        if epochs_no_improve >= patience:
+            stopped_early = True
+            break
     train_runtime = time.perf_counter() - start_time
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
     with torch.no_grad():
         prediction_model = model(val_context_t).detach().cpu().numpy().astype(np.float32)
     prediction = _denormalize_prediction(
@@ -257,10 +287,13 @@ def run_task1_short_window_training_loop(
                 "forecast_steps": forecast_steps,
                 "space_points": int(train_context.shape[2]),
                 "train_steps": train_steps,
+                "actual_train_steps": actual_train_steps,
                 "loss_type": loss_type,
                 "normalization": normalization,
                 "learning_rate": lr,
                 "seed": int(seed),
+                "best_val_step": best_val_step,
+                "stopped_early": stopped_early,
             },
         },
         artifacts["checkpoint_path"],
@@ -287,9 +320,12 @@ def run_task1_short_window_training_loop(
         "train_sample_limit": train_sample_limit,
         "val_sample_limit": val_sample_limit,
         "train_steps": train_steps,
+        "actual_train_steps": actual_train_steps,
         "batch_size": batch_size,
         "learning_rate": lr,
         "seed": int(seed),
+        "best_val_step": best_val_step,
+        "stopped_early": stopped_early,
     }
     metrics = _short_window_metrics(prediction=prediction, target=val_target)
     decision = _training_decision(loss_curve=loss_curve, metrics=metrics)
@@ -316,6 +352,9 @@ def run_task1_short_window_training_loop(
             "forecast_steps": forecast_steps,
         },
         "train_steps": train_steps,
+        "actual_train_steps": actual_train_steps,
+        "best_val_step": best_val_step,
+        "stopped_early": stopped_early,
         "metrics": metrics,
         "decision": decision,
         "reason_codes": _decision_reasons(decision=decision, metrics=metrics),
@@ -342,6 +381,9 @@ def run_task1_short_window_training_loop(
         },
         "training": {
             "train_steps": train_steps,
+            "actual_train_steps": actual_train_steps,
+            "best_val_step": best_val_step,
+            "stopped_early": stopped_early,
             "runtime_seconds": train_runtime,
             "loss_curve": loss_curve,
         },

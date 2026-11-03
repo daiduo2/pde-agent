@@ -21,6 +21,7 @@ def build_local_windows(
     forecast_steps: int,
     time_reduction: int,
     space_reduction: int,
+    window_stride: int = 1,
     force: bool = False,
 ) -> dict[str, Any]:
     source = Path(source_path)
@@ -34,6 +35,8 @@ def build_local_windows(
         time_reduction=time_reduction,
         space_reduction=space_reduction,
     )
+    if window_stride < 1:
+        raise LocalWindowError("window_stride must be >= 1")
     if not source.exists():
         raise LocalWindowError(f"source path does not exist: {source}")
     if output.exists() and not force:
@@ -73,9 +76,24 @@ def build_local_windows(
             dtype=np.float32,
         )
 
-    context = reduced[:, :context_steps, :]
-    target = reduced[:, context_steps:required_steps, :]
-    full_reference = reduced[:, :required_steps, :]
+    # Sliding window extraction
+    if window_stride > 1:
+        max_start = reduced_time - required_steps
+        starts = list(range(0, max_start + 1, window_stride))
+        if not starts:
+            raise LocalWindowError("window_stride too large for reduced time dimension")
+        all_windows = [reduced[:, s:s + required_steps, :] for s in starts]
+        stacked = np.concatenate(all_windows, axis=0)
+        context = stacked[:, :context_steps, :]
+        target = stacked[:, context_steps:required_steps, :]
+        full_reference = stacked[:, :required_steps, :]
+        actual_window_count = context.shape[0]
+    else:
+        context = reduced[:, :context_steps, :]
+        target = reduced[:, context_steps:required_steps, :]
+        full_reference = reduced[:, :required_steps, :]
+        actual_window_count = actual_sample_count
+
     metadata = {
         "source_path": str(source),
         "dataset_key": dataset_key,
@@ -85,6 +103,8 @@ def build_local_windows(
         "start_index": start_index,
         "sample_limit": sample_limit,
         "actual_sample_count": actual_sample_count,
+        "window_stride": window_stride,
+        "actual_window_count": actual_window_count,
         "context_steps": context_steps,
         "forecast_steps": forecast_steps,
         "time_reduction": time_reduction,

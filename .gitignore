@@ -25,6 +25,10 @@ integration_tests/hermes_diagnostic_smoke/runs/*
 integration_tests/hermes_diagnostic_smoke/reports/*
 !integration_tests/hermes_diagnostic_smoke/reports/.gitkeep
 
+# Local Claude Code settings and locks
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # Local PDEBench data and generated experiment outputs
 data/**/*.h5
 data/**/*.hdf5

@@ -35,6 +35,9 @@ class Conv1DResidualRollout:
     def state_dict(self) -> dict[str, Any]:
         return self.network.state_dict()
 
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.network.load_state_dict(state_dict)
+
     def train(self) -> None:
         self.network.train()
 
@@ -95,6 +98,14 @@ class FNOLiteRollout:
             "local_layers": [layer.state_dict() for layer in self.local_layers],
             "project": self.project.state_dict(),
         }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.lift.load_state_dict(state_dict["lift"])
+        for layer, layer_state in zip(self.spectral_layers, state_dict["spectral_layers"]):
+            layer.load_state_dict(layer_state)
+        for layer, layer_state in zip(self.local_layers, state_dict["local_layers"]):
+            layer.load_state_dict(layer_state)
+        self.project.load_state_dict(state_dict["project"])
 
     def train(self) -> None:
         self.lift.train()
@@ -180,6 +191,14 @@ class FNOAutoregressiveOneStep:
             layer.eval()
         self.project.eval()
 
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.lift.load_state_dict(state_dict["lift"])
+        for layer, sd in zip(self.spectral_layers, state_dict["spectral_layers"]):
+            layer.load_state_dict(sd)
+        for layer, sd in zip(self.local_layers, state_dict["local_layers"]):
+            layer.load_state_dict(sd)
+        self.project.load_state_dict(state_dict["project"])
+
     def __call__(self, context: Any) -> Any:
         window = context
         predictions = []
@@ -215,6 +234,9 @@ class SpectralConv1D:
 
     def state_dict(self) -> dict[str, Any]:
         return {"weight": self.weight}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.weight.data.copy_(state_dict["weight"].data)
 
     def train(self) -> None:
         return None
@@ -350,3 +372,106 @@ def denormalize_prediction(
 
 def parameter_count(model: Any) -> int:
     return int(sum(parameter.numel() for parameter in model.parameters()))
+
+
+# ---------------------------------------------------------------------------
+# Registry registration — enables agent discovery and dynamic extension
+# ---------------------------------------------------------------------------
+
+
+def _register_builtin_models() -> None:
+    """Register existing models to the neural_operator component registry."""
+    try:
+        from pde_agent.core.neural_operator.registry import register_model
+        from pde_agent.core.neural_operator.config import ModelConfig
+    except Exception:
+        return  # registry not available, skip
+
+    @register_model("conv1d_residual")
+    def _build_conv1d_residual(cfg: ModelConfig) -> Any:
+        import torch
+        return Conv1DResidualRollout(
+            torch=torch,
+            context_steps=cfg.t_in,
+            forecast_steps=cfg.t_out,
+            hidden_channels=cfg.width,
+        )
+
+    @register_model("fno_lite")
+    def _build_fno_lite(cfg: ModelConfig) -> Any:
+        import torch
+        return FNOLiteRollout(
+            torch=torch,
+            context_steps=cfg.t_in,
+            forecast_steps=cfg.t_out,
+            space_points=256,
+            hidden_channels=cfg.width,
+            modes=cfg.modes,
+            depth=cfg.depth,
+        )
+
+    @register_model("fno_ar1")
+    def _build_fno_ar1(cfg: ModelConfig) -> Any:
+        import torch
+        return FNOAutoregressiveOneStep(
+            torch=torch,
+            context_steps=cfg.t_in,
+            forecast_steps=cfg.t_out,
+            space_points=256,
+            hidden_channels=cfg.width,
+            modes=cfg.modes,
+            depth=cfg.depth,
+        )
+
+
+def _register_builtin_losses() -> None:
+    """Register existing losses to the neural_operator component registry."""
+    try:
+        from pde_agent.core.neural_operator.registry import register_loss
+        from pde_agent.core.neural_operator.config import LossConfig
+    except Exception:
+        return  # registry not available, skip
+
+    @register_loss("mse")
+    def _build_mse_loss(_cfg: LossConfig) -> Any:
+        import torch
+        return lambda pred, target: torch.nn.functional.mse_loss(pred, target)
+
+    @register_loss("early_weighted_mse")
+    def _build_early_weighted_mse(_cfg: LossConfig) -> Any:
+        import torch
+        def loss_fn(pred: Any, target: Any) -> Any:
+            weights = torch.linspace(
+                1.5, 0.75, steps=pred.shape[1],
+                dtype=pred.dtype, device=pred.device,
+            ).view(1, -1, 1)
+            return torch.mean(weights * (pred - target) ** 2)
+        return loss_fn
+
+    @register_loss("horizon_weighted_mse")
+    def _build_horizon_weighted_mse(_cfg: LossConfig) -> Any:
+        import torch
+        def loss_fn(pred: Any, target: Any) -> Any:
+            first = max(1, pred.shape[1] // 4)
+            second = max(first + 1, pred.shape[1] // 2)
+            weights = torch.full((pred.shape[1],), 0.75, dtype=pred.dtype, device=pred.device)
+            weights[:first] = 1.5
+            weights[first:second] = 1.0
+            return torch.mean(weights.view(1, -1, 1) * (pred - target) ** 2)
+        return loss_fn
+
+    @register_loss("spectral_mse")
+    def _build_spectral_mse(_cfg: LossConfig) -> Any:
+        import torch
+        def loss_fn(pred: Any, target: Any) -> Any:
+            base = torch.nn.functional.mse_loss(pred, target)
+            pred_spec = torch.fft.rfft(pred, dim=-1)
+            target_spec = torch.fft.rfft(target, dim=-1)
+            spectral = torch.mean(torch.abs(pred_spec - target_spec) ** 2)
+            return base + 0.01 * spectral
+        return loss_fn
+
+
+# Trigger registrations on module import
+_register_builtin_models()
+_register_builtin_losses()

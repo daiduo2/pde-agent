@@ -15,6 +15,7 @@ from pde_agent.cli_commands import cli_spectral
 from pde_agent.cli_commands import cli_strategy
 from pde_agent.cli_commands import cli_submission
 from pde_agent.cli_commands import cli_task1_training
+from pde_agent.cli_commands import cli_task2_training
 
 __all__ = [
     "cli_agent_runtime",
@@ -32,4 +33,5 @@ __all__ = [
     "cli_strategy",
     "cli_submission",
     "cli_task1_training",
+    "cli_task2_training",
 ]

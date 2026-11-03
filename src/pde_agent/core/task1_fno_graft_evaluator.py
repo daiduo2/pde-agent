@@ -239,10 +239,24 @@ def predict_task1_fno_checkpoint(
         raise Task1FNOGraftEvaluatorError(
             "graft source checkpoint forecast_steps must be in 1..190"
         )
+    model_space_points = int(metadata.get("space_points", SPACE_POINTS))
+    actual_space_points = int(context.shape[2])
+
+    # Apply spatial reduction if the model was trained on downsampled data
+    context_for_model = context.astype(np.float32)
+    if actual_space_points != model_space_points and actual_space_points % model_space_points == 0:
+        stride = actual_space_points // model_space_points
+        context_for_model = context_for_model[:, :, ::stride]
+    elif actual_space_points != model_space_points:
+        raise Task1FNOGraftEvaluatorError(
+            f"spatial mismatch: model expects {model_space_points} points, "
+            f"got {actual_space_points} and cannot evenly downsample"
+        )
+
     normalized_context, dummy_target, stats = _normalize_windows(
-        context=context.astype(np.float32),
+        context=context_for_model,
         target=np.zeros(
-            (context.shape[0], forecast_steps, context.shape[2]),
+            (context.shape[0], forecast_steps, model_space_points),
             dtype=np.float32,
         ),
         normalization=str(metadata.get("normalization", "none")),
@@ -253,7 +267,7 @@ def predict_task1_fno_checkpoint(
         model_family=model_family,
         context_steps=int(metadata.get("context_steps", CONTEXT_STEPS)),
         forecast_steps=forecast_steps,
-        space_points=int(metadata.get("space_points", SPACE_POINTS)),
+        space_points=model_space_points,
         hidden_channels=int(metadata.get("width", 32)),
         modes=int(metadata.get("modes", 8)),
         depth=int(metadata.get("depth", 1)),
@@ -272,8 +286,13 @@ def predict_task1_fno_checkpoint(
         stats=stats,
         normalization=str(metadata.get("normalization", "none")),
     )
+
+    # Upsample future back to actual spatial resolution if needed
+    if future.shape[2] != actual_space_points:
+        future = _spatial_upsample(future, target_width=actual_space_points)
+
     prediction = np.empty(
-        (context.shape[0], PREDICTION_STEPS, SPACE_POINTS),
+        (context.shape[0], PREDICTION_STEPS, actual_space_points),
         dtype=np.float32,
     )
     prediction[:, :CONTEXT_STEPS, :] = context
@@ -282,6 +301,26 @@ def predict_task1_fno_checkpoint(
         :, :forecast_steps, :
     ]
     return prediction
+
+
+def _spatial_upsample(array: np.ndarray, *, target_width: int) -> np.ndarray:
+    """Upsample the spatial dimension (last axis) to target_width."""
+    if array.shape[2] == target_width:
+        return array
+    import numpy as np
+
+    # Use linear interpolation along the spatial axis
+    current_width = array.shape[2]
+    # Create coordinate grids
+    x_old = np.linspace(0, 1, current_width)
+    x_new = np.linspace(0, 1, target_width)
+    result = np.empty(
+        (array.shape[0], array.shape[1], target_width), dtype=np.float32
+    )
+    for i in range(array.shape[0]):
+        for t in range(array.shape[1]):
+            result[i, t, :] = np.interp(x_new, x_old, array[i, t, :])
+    return result
 
 
 def _load_model_state(*, model: Any, state: dict[str, Any]) -> None:
