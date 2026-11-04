@@ -1,29 +1,98 @@
+<div align="center">
+
 # pde-agent
 
-CLI-first diagnostic harness for PDE agent experiments.
+**A CLI-first diagnostic harness for autonomous PDE modeling experiments.**
 
-Repository contract:
+[![GitHub](https://img.shields.io/badge/GitHub-daiduo2%2Fpde--agent-181717?logo=github)](https://github.com/daiduo2/pde-agent)
+![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
+![Interface](https://img.shields.io/badge/interface-CLI%20%C2%B7%20JSON-0A7EA4)
+![Runtime](https://img.shields.io/badge/agent-Claude%20Code%20SDK-8A2BE2)
+![Status](https://img.shields.io/badge/status-research%20preview-D97706)
 
-- `core/` owns business logic and reusable algorithms.
-- `commands/` stays thin and JSON-only.
-- `scripts/` are grouped operational wrappers, not feature modules.
-- `runs/` contains artifacts, not source.
-- `integration_tests/` define protocol canaries.
-- The active autonomous runtime is Claude Code SDK via `claude-agent-sdk`.
+[Overview](#overview) · [Architecture](#architecture) · [Quickstart](#quickstart) · [CLI](#cli-at-a-glance) · [Contracts](#contracts-and-artifacts) · [Development](#development)
 
-See [docs/repo_contract.md](docs/repo_contract.md) for the stable layer model.
+</div>
 
-Initial MVP goals:
+## Overview
 
-- strict JSON-only CLI contract
-- explicit `run_id` and run directory tree
-- resolved config generation
-- manifest-centered artifact contract
-- Claude SDK agent-runtime hooks
+`pde-agent` wraps every step of a PDE surrogate-modeling experiment into a
+deterministic CLI command that returns machine-readable JSON. It is built around
+the PDEBench 1D Burgers benchmark and neural operators such as FNO, UNet, and
+DeepONet, but its contracts — window arrays, rollout scoring, physics
+diagnostics, and evidence-gated promotion — are model-agnostic.
 
-## Local PDEBench Window Scoring
+Instead of a pile of notebooks, you get a loop that an agent can drive and a
+human can audit:
 
-Create a short local validation window from the public Burgers HDF5 file:
+```
+build a local window → predict → score → diagnose errors and physics
+→ propose a bounded next experiment → execute and evaluate candidates
+→ promote only what survives a rubric
+```
+
+**What makes it different**
+
+- **Contract-first.** One capability maps to one core implementation and one
+  thin CLI wrapper. No second business-logic layer.
+- **Evidence-gated.** An idea becomes a reusable strategy only after a
+  proposal, rubric, promotion report, and ledger entry.
+- **Agent-constrained.** Claude Code SDK sessions run behind an allow-listed
+  command surface and are checked by executable protocol canaries.
+- **JSON-only.** Every command returns the same envelope, so runs are
+  resumable, diffable, and easy to chain.
+
+## Architecture
+
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="pde-agent system architecture" width="100%">
+</p>
+
+The system is organized as five layers:
+
+| Layer | Location | Responsibility |
+| --- | --- | --- |
+| Interfaces | Typer CLI · Claude Code SDK · Textual TUI | Humans and agents enter through one command surface |
+| Command layer | `src/pde_agent/commands/` (130 wrappers) | Parse options, call core logic, print one JSON object |
+| Core layer | `src/pde_agent/core/` (233 modules) | Training loops, diagnostics, hypothesis/literature engines, contracts |
+| Data & compute | PDEBench HDF5 · window NPZ · checkpoints · PyTorch | Shared inputs for every task |
+| Artifacts & memory | `runs/` · ledgers · manifests · registries | Reproducible outputs that feed the next iteration |
+
+The diagram source is [`docs/assets/architecture.drawio`](docs/assets/architecture.drawio).
+Re-export it after edits with:
+
+```bash
+drawio -x -f png -s 2 -o docs/assets/architecture.png docs/assets/architecture.drawio
+```
+
+For the full layer model and ownership rules, see
+[`docs/repo_contract.md`](docs/repo_contract.md).
+
+## Quickstart
+
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/), the public
+PDEBench Burgers file at
+`data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5`, and — for the operator
+adapters — the official `burgers_FNO.tar` / `burgers_Unet.tar` checkpoints under
+`data/pdebench/checkpoints/`.
+
+```bash
+git clone https://github.com/daiduo2/pde-agent.git
+cd pde-agent
+uv sync --extra data --extra torch
+```
+
+If you still need the dataset, fetch it into place (pass the PDEBench URL):
+
+```bash
+uv run --frozen --extra data python scripts/data/download_pdebench_file.py \
+  --url "<pdebench-burgers-url>" --progress
+```
+
+> **Note:** the training modules import `h5py` eagerly, so invoke the CLI with
+> `--extra data` (for example `uv run --frozen --extra data pde-agent --help`).
+
+### 1. Build a local evaluation window
 
 ```bash
 uv run --frozen --extra data pde-agent build-local-windows \
@@ -38,43 +107,11 @@ uv run --frozen --extra data pde-agent build-local-windows \
   --space-reduction 4
 ```
 
-Score a prediction NPZ containing a `prediction` array with shape `[N, T, X]`:
+For the public Task-1 file, `--time-reduction 5` maps the raw 201 time samples
+to 41 reduced steps, so a 10-step context leaves at most 31 local forecast
+steps.
 
-```bash
-uv run --frozen pde-agent score-local-rollout \
-  --prediction-path data/derived/local_predictions_task1_val.npz \
-  --target-path data/derived/local_windows_task1_val.npz \
-  --output-path runs/local_score.json
-```
-
-This score is a local proxy for short-horizon model iteration. It is not the hidden 190-step competition evaluator.
-
-Build a suite of real-HDF5 windows for horizon stress tests:
-
-```bash
-uv run --frozen --extra data pde-agent build-local-window-suite \
-  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
-  --output-dir data/derived/window_suites/task1_public \
-  --dataset-key tensor \
-  --start-index 0 \
-  --sample-limit 32 \
-  --context-steps 10 \
-  --forecast-steps 8 \
-  --forecast-steps 16 \
-  --forecast-steps 31 \
-  --time-reduction 5 \
-  --space-reduction 4 \
-  --force
-```
-
-For the public Task-1 file, `time_reduction=5` maps the raw 201 time samples to
-41 reduced steps, so a 10-step context leaves at most 31 local forecast steps.
-The same command can build 47/95/190-step suites once the longer validation or
-test data is available.
-
-## Local PDE Diagnostic Chain
-
-After building a local windows NPZ, generate a weak persistence baseline and run the first PDE diagnostic loop:
+### 2. Score a baseline and diagnose it
 
 ```bash
 uv run --frozen pde-agent generate-baseline-prediction \
@@ -106,388 +143,25 @@ uv run --frozen pde-agent select-pde-hypothesis \
   --output-path runs/selected_pde_hypothesis.json
 ```
 
-This chain is intended to give the agent a reproducible failed baseline,
-numerical error diagnosis, physics proxy diagnosis, and bounded next-experiment
-proposal.
+Each step consumes the artifacts of the previous one. Nothing is hidden in
+process memory; every hand-off is a file path in JSON.
 
-## Lightweight Spectral Baseline
+### 3. Run one FNO iteration
 
-The lightweight spectral residual baseline is a NumPy-only local smoke model for fast diagnostic loops. It trains a small ridge-regression residual model from a local windows NPZ and writes checkpoint/prediction NPZ artifacts that are compatible with the existing scoring and PDE diagnostic commands. It is intended for deterministic local sanity checks, not as the final contest model.
-
-```bash
-uv run --frozen pde-agent train-spectral-residual-baseline \
-  --windows-path data/derived/local_windows_task1_val.npz \
-  --checkpoint-path runs/spectral_residual_checkpoint.npz \
-  --modes 16 \
-  --ridge 1e-3
-
-uv run --frozen pde-agent predict-local-model \
-  --windows-path data/derived/local_windows_task1_val.npz \
-  --checkpoint-path runs/spectral_residual_checkpoint.npz \
-  --output-path data/derived/local_spectral_prediction_task1_val.npz
-
-uv run --frozen pde-agent score-local-rollout \
-  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
-  --target-path data/derived/local_windows_task1_val.npz \
-  --output-path runs/local_spectral_score.json
-
-uv run --frozen pde-agent diagnose-rollout-error \
-  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
-  --target-path data/derived/local_windows_task1_val.npz \
-  --score-path runs/local_spectral_score.json \
-  --output-path runs/local_spectral_rollout_error.json
-
-uv run --frozen pde-agent check-burgers-physics-local \
-  --prediction-path data/derived/local_spectral_prediction_task1_val.npz \
-  --target-path data/derived/local_windows_task1_val.npz \
-  --output-path runs/local_spectral_burgers_physics.json \
-  --nu 0.001
-
-uv run --frozen pde-agent select-pde-hypothesis \
-  --score-path runs/local_spectral_score.json \
-  --error-diagnosis-path runs/local_spectral_rollout_error.json \
-  --physics-check-path runs/local_spectral_burgers_physics.json \
-  --output-path runs/local_spectral_pde_hypothesis.json
-
-uv run --frozen pde-agent plan-next-experiment \
-  --score-path runs/local_spectral_score.json \
-  --error-diagnosis-path runs/local_spectral_rollout_error.json \
-  --physics-check-path runs/local_spectral_burgers_physics.json \
-  --hypothesis-path runs/local_spectral_pde_hypothesis.json \
-  --output-path runs/local_spectral_next_experiment_plan.json
-
-uv run --frozen pde-agent generate-experiment-config \
-  --plan-path runs/local_spectral_next_experiment_plan.json \
-  --output-path runs/local_spectral_experiment_config.json
-```
-
-`plan-next-experiment` writes machine-readable JSON only. It does not modify model
-code, execute experiments, or write human-readable research notes. The planned
-next step is `generate-experiment-config`, which expands bounded candidate
-parameters into explicit candidate experiment records. It does not run candidates;
-`execute-candidate-experiment` is a future hook.
-
-## Spectral Residual Evidence Sweep
-
-Run the spectral residual ridge baseline across multiple real-HDF5 sample starts
-and write strategy evidence directly:
+Build a small smoke window, then run the evidence-backed local FNO loop:
 
 ```bash
-uv run --frozen --extra data pde-agent run-spectral-residual-evidence-sweep \
+uv run --frozen --extra data pde-agent build-local-windows \
   --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
-  --output-dir runs/spectral_residual_evidence_sweep_001 \
+  --output-path data/derived/local_windows_task1_smoke.npz \
   --dataset-key tensor \
   --start-index 0 \
-  --start-index 8 \
-  --start-index 16 \
-  --start-index 24 \
-  --sample-limit 8 \
+  --sample-limit 32 \
   --context-steps 10 \
   --forecast-steps 31 \
   --time-reduction 5 \
-  --space-reduction 4 \
-  --spectral-modes 16 \
-  --spectral-ridge 0.001 \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
-```
+  --space-reduction 4
 
-The command writes `spectral_residual_evidence_summary.json` with state hint
-`STRATEGY_EVIDENCE_SUMMARY_BUILT`, so it can feed `recommend-strategy-next-action`
-or `evaluate-strategy-promotion` directly. This sweep uses the same windows for
-fitting and scoring; it is a stability gate for a local baseline, not hidden-test
-evidence.
-
-When promotion returns `revise`, let the agent plan the next bounded sweep from
-the evidence, promotion report, and ledger row:
-
-```bash
-uv run --frozen pde-agent plan-next-spectral-residual-experiment \
-  --evidence-summary-path runs/spectral_residual_evidence_sweep_001/spectral_residual_evidence_summary.json \
-  --promotion-report-path runs/spectral_residual_evidence_sweep_001/growth/promotion_report.json \
-  --ledger-path runs/spectral_residual_evidence_sweep_001/growth/strategy_ledger.jsonl \
-  --output-path runs/spectral_residual_evidence_sweep_001/growth/next_spectral_residual_experiment_plan.json
-```
-
-The plan expands start indices and proposes a `modes`/`ridge` grid. Its ranking
-policy prioritizes zero failure rate and low score-delta variance before mean
-score, allowing the loop to keep converging without waiting for manual next-step
-selection.
-
-The active autonomous path is Claude SDK. Strategy-growth artifacts still use
-the same evidence gate: starting from a `NEXT_EXPERIMENT_PLANNED` artifact, the
-agent should generate and audit the experiment config, execute supported
-candidate grids, route strategy decisions, evaluate promotion, append the
-ledger, materialize a skill draft, install it into an isolated root, and
-register it for later lookup.
-
-```bash
-uv run --frozen pde-agent build-scientific-tool-catalog \
-  --output-path runs/agent_tool_catalog.json \
-  --force
-```
-
-For FNO training work, prefer the Claude SDK closed-loop task surface:
-
-```bash
-uv run --frozen pde-agent build-claude-fno-training-closed-loop-task \
-  --output-dir runs/claude_fno_training_task \
-  --workspace-dir . \
-  --force
-
-uv run --frozen pde-agent lookup-strategy-skill \
-  --registry-path runs/strategy_registry.json \
-  --applicable-pde "1D Burgers" \
-  --model-family SpectralResidual \
-  --output-path runs/strategy_lookup.json
-```
-
-## Burgers Spectral Viscosity Benchmark
-
-The Burgers spectral viscosity benchmark is a real-HDF5 local evaluation chain
-for the retrieved strategy `burgers_spectral_viscosity_real_hdf5_v0`. It builds
-a persistence baseline from the public Burgers file, runs a bounded DeepONet
-strategy sweep plus a bounded UNet strategy sweep with supervised,
-physics-residual, and spectral proxy arms, combines the operator evidence, and
-routes the next action through the existing strategy decision gate.
-
-This is a quantitative agent benchmark, not the final contest model. Failed
-spectral-viscosity evidence is still useful: the report records the negative
-score deltas, failure rate, physics metrics, and router decision instead of
-forcing promotion.
-
-```bash
-uv run --frozen --extra data pde-agent run-burgers-spectral-viscosity-benchmark \
-  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
-  --output-dir runs/burgers_spectral_viscosity_benchmark_001 \
-  --dataset-key tensor \
-  --sample-limit 8 \
-  --min-evaluation-windows 4 \
-  --train-steps 4 \
-  --hidden-width 8 \
-  --latent-dim 4 \
-  --unet-base-channels 8 \
-  --unet-depth 2 \
-  --learning-rate 0.01 \
-  --seed 5 \
-  --spectral-weight 0.05 \
-  --spectral-weight 0.1 \
-  --physics-weight 0.005 \
-  --force
-```
-
-The command writes `burgers_spectral_viscosity_benchmark_report.json` plus the
-underlying baseline, DeepONet sweep, UNet sweep, combined operator evidence, and
-strategy-decision artifacts.
-
-## UNet Strategy Sweep
-
-UNet support adds a local convolutional operator-family baseline for the same
-window, scoring, Burgers residual, and operator-evidence contracts used by
-DeepONet. It is intended as a bounded evidence generator, not a tuned contest
-model.
-
-```bash
-uv run --frozen --extra torch pde-agent run-unet-strategy-sweep \
-  --windows-path runs/burgers_spectral_viscosity_benchmark_001/baseline/windows_f031.npz \
-  --baseline-score-path runs/burgers_spectral_viscosity_benchmark_001/baseline/persistence_score.json \
-  --output-dir runs/unet_strategy_sweep_001 \
-  --start-index 0 \
-  --training-strategy unet_supervised \
-  --training-strategy unet_spectral \
-  --training-strategy unet_physics_residual \
-  --train-steps 4 \
-  --base-channels 8 \
-  --depth 2 \
-  --learning-rate 0.01 \
-  --seed 5 \
-  --force
-```
-
-The command writes `unet_strategy_sweep_summary.json`, a CSV summary, candidate
-artifacts, evaluation reports, and `unet_evidence/evidence_summary.json`.
-
-## Official UNet Backend V0
-
-The official UNet adapter is separate from the trainable local UNet sweep. It
-loads the PDEBench 1D Burgers checkpoint archive `burgers_Unet.tar`, reconstructs
-the checkpoint-defined 1D encoder-decoder UNet, and performs autoregressive
-rollout from the same local window NPZ contract used by FNO and persistence.
-
-```bash
-uv run --frozen --extra torch pde-agent inspect-unet-checkpoint \
-  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
-  --output-path runs/unet_checkpoint_metadata.json
-
-uv run --frozen --extra torch pde-agent predict-unet-local \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
-  --metadata-path runs/unet_checkpoint_metadata.json \
-  --output-path data/derived/local_unet_prediction_task1_smoke.npz \
-  --force
-```
-
-Run the official UNet through the bundled score, rollout-error, and Burgers
-physics diagnostics:
-
-```bash
-uv run --frozen --extra torch pde-agent diagnose-unet-rollout \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
-  --output-dir runs/unet_rollout_diagnosis \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
-```
-
-The diagnosis writes `unet_prediction.npz`, `unet_score.json`,
-`unet_rollout_error.json`, `unet_burgers_physics.json`, and
-`unet_rollout_summary.json` with state hint `UNET_ROLLOUT_DIAGNOSED`.
-
-## Official Operator Comparison
-
-Compare the provided official FNO and UNet checkpoints against persistence and
-the local spectral residual ridge baseline on the same real-HDF5 Burgers window:
-
-```bash
-uv run --frozen --extra torch pde-agent run-official-operator-comparison \
-  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
-  --output-dir runs/official_operator_comparison_001 \
-  --dataset-key tensor \
-  --fno-checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --unet-checkpoint-path data/pdebench/checkpoints/burgers_Unet.tar \
-  --sample-limit 8 \
-  --context-steps 10 \
-  --forecast-steps 31 \
-  --time-reduction 5 \
-  --space-reduction 4 \
-  --spectral-modes 16 \
-  --spectral-ridge 0.001 \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
-```
-
-This writes `official_operator_comparison_report.json` with a ranked leaderboard,
-per-model artifact paths, and a narrow recommendation. It does not train or
-finetune the official checkpoints.
-
-Convert that comparison into the strategy evidence contract and route it through
-the existing decision gate:
-
-```bash
-uv run --frozen pde-agent convert-official-comparison-evidence \
-  --comparison-report-path runs/official_operator_comparison_001/official_operator_comparison_report.json \
-  --output-path runs/official_operator_comparison_001/strategy_evidence_summary.json \
-  --long-window-threshold 31 \
-  --force
-
-uv run --frozen pde-agent recommend-strategy-next-action \
-  --evidence-summary-path runs/official_operator_comparison_001/strategy_evidence_summary.json \
-  --output-path runs/official_operator_comparison_001/strategy_decision.json \
-  --min-evaluation-windows 4
-```
-
-## FNO Backend V0
-
-FNO support is optional and requires the torch extra. V0 can inspect
-torch-serialized FNO-style checkpoints and can run fixture-compatible local
-prediction. `predict-fno-local` supports the official PDEBench 1D Burgers FNO
-checkpoint schema used by `burgers_FNO.tar`. It reconstructs the FNO1d model
-from checkpoint tensor shapes and performs autoregressive rollout from the local
-windows context. Training and finetuning are intentionally not included in this
-adapter phase.
-
-```bash
-uv run --frozen --extra torch pde-agent inspect-fno-checkpoint \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --output-path runs/fno_checkpoint_metadata.json
-
-uv run --frozen --extra torch pde-agent predict-fno-local \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --metadata-path runs/fno_checkpoint_metadata.json \
-  --output-path data/derived/local_fno_prediction_task1_smoke.npz \
-  --force
-```
-
-The prediction command writes the same `prediction` NPZ contract consumed by
-`score-local-rollout`. It never falls back to persistence or the spectral
-baseline while claiming to be FNO.
-
-## FNO Rollout Diagnosis
-
-Run the official FNO adapter through the local diagnostic chain and collect one
-agent-readable summary:
-
-```bash
-uv run --frozen --extra torch pde-agent diagnose-fno-rollout \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --output-dir runs/fno_rollout_diagnosis \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
-```
-
-The command writes `fno_prediction.npz`, `fno_score.json`,
-`fno_rollout_error.json`, `fno_burgers_physics.json`, and
-`fno_rollout_summary.json`. It does not train or finetune FNO; it only packages
-the existing local prediction, scoring, error diagnosis, and physics checks into
-one reproducible artifact bundle.
-
-Select the next bounded PDE hypothesis directly from that FNO summary:
-
-```bash
-uv run --frozen pde-agent select-pde-hypothesis-from-fno-summary \
-  --summary-path runs/fno_rollout_diagnosis/fno_rollout_summary.json \
-  --output-path runs/fno_rollout_diagnosis/selected_pde_hypothesis.json
-```
-
-This bridge reuses `select-pde-hypothesis`; it only extracts the score,
-rollout-error, and Burgers-physics artifact paths from the FNO summary so the
-agent does not need to manually pass three separate paths.
-
-Plan the next bounded experiment from the same FNO summary plus the selected
-hypothesis:
-
-```bash
-uv run --frozen pde-agent plan-next-experiment-from-fno-summary \
-  --summary-path runs/fno_rollout_diagnosis/fno_rollout_summary.json \
-  --hypothesis-path runs/fno_rollout_diagnosis/selected_pde_hypothesis.json \
-  --output-path runs/fno_rollout_diagnosis/next_experiment_plan.json
-```
-
-This produces the same `NEXT_EXPERIMENT_PLANNED` artifact as
-`plan-next-experiment`, while keeping the FNO path contract compact for the
-agent.
-
-For agent runs, prefer the one-command dry-run wrapper:
-
-```bash
-uv run --frozen --extra torch pde-agent run-fno-iteration-dryrun \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --output-dir runs/fno_iteration_001 \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
-```
-
-The dry-run wrapper writes the FNO diagnosis artifacts, selected hypothesis,
-next experiment plan, experiment config, and `iteration_manifest.json`. It does
-not execute candidate experiments; its purpose is to stabilize the agent-facing
-scientific loop before adding finetuning.
-
-Run the default single-window FNO iteration loop:
-
-```bash
 uv run --frozen --extra torch pde-agent run-fno-iteration \
   --windows-path data/derived/local_windows_task1_smoke.npz \
   --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
@@ -497,125 +171,191 @@ uv run --frozen --extra torch pde-agent run-fno-iteration \
   --force
 ```
 
-This is the recommended local FNO entrypoint for ordinary V1 iterations after a
-local window file exists. It runs the dry-run, audits the experiment config,
-executes all generated candidates, evaluates them against the same window, and
-writes `fno_iteration_report.json` plus `candidate_comparison.json`. The current
-V1 planner emits two scheduled-sampling candidates with
-`teacher_forcing_decay = 0.85` and `0.9`.
+This runs the dry-run diagnosis, audits the generated experiment config,
+executes the scheduled-sampling candidates, evaluates them on the same window,
+and writes `fno_iteration_report.json` plus `candidate_comparison.json`.
 
-Before any future executor consumes the generated config, audit it:
+> Local scores are a proxy for short-horizon iteration. They are **not** the
+> hidden 190-step competition evaluator.
 
-```bash
-uv run --frozen pde-agent audit-experiment-config \
-  --config-path runs/fno_iteration_001/experiment_config.json \
-  --output-path runs/fno_iteration_001/experiment_config_audit.json
-```
-
-The audit writes `EXPERIMENT_CONFIG_AUDITED`. Semantic problems produce a
-`rejected` audit report with issue codes instead of silently continuing to
-candidate execution.
-
-Prepare an isolated workspace for the first approved candidate:
+### 4. Hand the loop to an agent
 
 ```bash
-uv run --frozen pde-agent prepare-candidate-execution \
-  --audit-path runs/fno_iteration_001/experiment_config_audit.json \
-  --candidate-index 0 \
-  --output-dir runs/fno_iteration_001/candidates \
-  --force
+uv run --frozen --extra agent pde-agent run-claude-agent-sdk-runtime \
+  --prompt "Diagnose runs/local_score.json and propose the next bounded experiment." \
+  --output-path runs/agent_output.json \
+  --workspace-dir . \
+  --allowed-bash-prefix "uv run --frozen pde-agent"
 ```
 
-This writes `candidate_execution_plan.json` plus `artifacts/` and `logs/`
-directories under the selected candidate workspace. It still does not run
-training; it only prepares the boundary that a future executor will consume.
+The runtime defaults to read-only tools (`Read`, `Glob`, `Grep`, `Bash`) and
+only permits shell commands starting with `uv run --frozen pde-agent`.
+`Edit`, `Write`, `NotebookEdit`, and `WebFetch` are denied unless explicitly
+enabled.
 
-Execute the V1 FNO scheduled-sampling finetune candidate:
+For a pre-built closed-loop task, use
+`build-claude-fno-training-closed-loop-task --workspace-dir . --source-path <hdf5>`
+and point `run-claude-agent-sdk-runtime --prompt-file` at the generated prompt.
+
+## CLI at a glance
+
+The CLI exposes **222 commands**. Every command supports `--help` and follows
+the same JSON envelope.
+
+| Domain | Representative commands |
+| --- | --- |
+| Local windows & scoring | `build-local-windows` · `build-local-window-suite` · `score-local-rollout` · `generate-baseline-prediction` |
+| Diagnostics & planning | `diagnose-rollout-error` · `check-burgers-physics-local` · `select-pde-hypothesis` · `plan-next-experiment` |
+| Neural operators | `inspect-fno-checkpoint` · `predict-fno-local` · `diagnose-fno-rollout` · `run-fno-iteration` · `run-unet-strategy-sweep` · `run-deeponet-strategy-sweep` |
+| Hypothesis Lab | `run-hypothesis-lab` · `plan-hypothesis-candidates` · `build-hypothesis-kpi-report` · `build-hypothesis-lab-next-policy` |
+| Literature Lab | `run-literature-algorithm-v2-pipeline` · `extract-algorithm-cards` · `compile-algorithm-candidates` · `run-bounded-executor-sandbox` |
+| Strategy & promotion | `record-strategy-proposal` · `evaluate-strategy-promotion` · `append-strategy-ledger` · `lookup-strategy-skill` |
+| Agent runtime & cockpit | `run-claude-agent-sdk-runtime` · `build-scientific-tool-catalog` · `supervisor-tui-runs` · `cockpit-chat` |
+
+Other verified entrypoints worth knowing:
+
+- **Official operator comparison** — `run-official-operator-comparison`
+  ranks the provided FNO/UNet checkpoints against persistence and the spectral
+  residual baseline on the same window.
+- **Spectral residual baseline** — `train-spectral-residual-baseline` trains a
+  NumPy-only ridge residual model for fast, deterministic sanity checks.
+- **Agent task contracts** — `build-claude-fno-training-closed-loop-task`,
+  `build-claude-hypothesis-lab-closure-task`, and
+  `build-claude-literature-candidate-closure-task`.
+- **Cockpit** — `supervisor-tui-runs` and `cockpit-chat` provide a Textual UI
+  over run state and agent dialogue.
+
+Run `uv run --frozen --extra data pde-agent <command> --help` for exact
+options and defaults.
+
+## Contracts and artifacts
+
+### One command, one JSON object
+
+```json
+{
+  "run_id": "local-score-001",
+  "command": "score-local-rollout",
+  "status": "ok",
+  "state_hint": "LOCAL_ROLLOUT_SCORED",
+  "artifacts": {"score_json_path": "runs/local_score.json"},
+  "metrics": {"rel_mse": 0.05, "rmse": 0.12},
+  "next_hint": "use this score to compare local model variants",
+  "errors": []
+}
+```
+
+- `state_hint` drives the external state machine.
+- `artifacts` contains paths the next command may consume.
+- `metrics` holds numbers for comparison and evidence tracking.
+- `next_hint` is guidance for the agent, not a command string.
+
+### Run directories and manifests
+
+Every run gets a `run_id` and a directory under `runs/<run_id>/`.
+`artifacts/manifest.json` is the source of truth for what exists; commands
+reference each other through artifact paths rather than hard-coded filenames.
 
 ```bash
-uv run --frozen --extra torch pde-agent execute-fno-finetune-candidate \
-  --candidate-plan-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/candidate_execution_plan.json \
-  --windows-path data/derived/local_windows_task1_smoke.npz \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --max-train-steps 16 \
-  --learning-rate 1e-4 \
-  --force
+uv run --frozen pde-agent init-run --run-id demo_001 --runs-root runs
 ```
 
-The evidence-backed V1 defaults are `training_strategy = scheduled_sampling`,
-`rollout_steps = 10`, `teacher_forcing_decay = 0.85`,
-`max_train_steps = 16`, and `learning_rate = 1e-4`. The planner keeps
-`teacher_forcing_decay = 0.9` as the nearby fallback candidate. The
-`--max-train-steps` flag is optional; omitting it uses the V1 default. Existing
-candidate plans that omit `training_strategy` still default to
-`scheduled_sampling`.
+### Array contract
 
-This executor supports `use_scheduled_sampling_rollout_finetune`. Candidate
-plans may also set `training_strategy = late_weighted_scheduled_sampling` for
-older experiments, which uses the same rollout finetune loop but linearly
-increases loss weight for later rollout steps. It writes `finetuned_fno_checkpoint.pt`,
-`candidate_prediction.npz`, and `candidate_execution_report.json`; it does not
-claim score improvement.
+Local windows and predictions are NPZ files with rank-3 `[N, T, X]` arrays:
 
-Evaluate that candidate against the same local windows and optional baseline:
+- `context` — known history
+- `prediction` / `target` — rollout and ground truth
+- metadata must include `problem_id` and `source_mode`
+
+Validate bundles with `core/array_contract.py` before consuming them in new
+algorithms.
+
+### Evidence gate
+
+New strategies cannot bypass evaluation:
+
+1. `strategy_proposal.json` — hypothesis, mechanism, plan, observables, risks
+2. `experiment_rubric.json` — quantitative evaluation standard
+3. `promotion_report.json` — evidence against the rubric
+4. `strategy_ledger.jsonl` — success, failure, or revise
+
+Promotion (`promote_to_skill_candidate = true`) only marks a candidate.
+Installing a skill or patching model code is a separate audited step.
+
+## Repository layout
+
+```
+pde-agent/
+├── src/pde_agent/
+│   ├── cli.py               # Typer entry point; registers 220+ commands
+│   ├── cli_commands/        # 19 domain-grouped command modules
+│   ├── commands/            # 130 thin wrappers: parse → core → JSON
+│   ├── core/                # 233 modules: algorithms, contracts, state machines
+│   └── templates/           # agent-facing prompt and state templates
+├── scripts/
+│   ├── audit/               # session and protocol audit entrypoints
+│   ├── data/                # dataset download and preflight helpers
+│   ├── manual/              # explicitly manual diagnostic utilities
+│   └── smoke/               # fixture preparation entrypoints
+├── integration_tests/       # protocol canaries and agent session fixtures
+├── docs/                    # repository, run-state, and runtime contracts
+├── tests/                   # 124 pytest files, 1100+ tests
+└── runs/                    # generated artifacts (gitignored)
+```
+
+## Development
 
 ```bash
-uv run --frozen --extra torch pde-agent evaluate-fno-candidate \
-  --candidate-report-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/candidate_execution_report.json \
-  --target-path data/derived/local_windows_task1_smoke.npz \
-  --output-dir runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/evaluation \
-  --baseline-score-path runs/fno_iteration_001/fno_score.json \
-  --nu 0.001 \
-  --dt 1.0 \
-  --dx 1.0 \
-  --force
+# Full test suite
+uv run --frozen pytest
+
+# A single test file, with optional backends installed
+uv run --frozen --extra data --extra torch pytest tests/test_fno_backend_v0.py
 ```
 
-The evaluator writes candidate-scoped score, rollout-error, Burgers-physics,
-selected-hypothesis, and `candidate_evaluation_report.json` artifacts. This is
-the comparison boundary for the next multi-candidate step; short-window
-improvement is only a local proxy, not hidden 190-step evidence.
+Before adding a capability:
 
-Compare one or more evaluated candidates:
+1. Put reusable behavior in `core/`, not in a script.
+2. Add one thin wrapper in `commands/` and register it in `cli.py`.
+3. Return the standard JSON envelope via `core/json_output.py`.
+4. Add pytest coverage. Torch-dependent tests should skip gracefully.
+5. For agent-facing behavior, add an audit and an integration fixture before
+   calling it stable.
 
-```bash
-uv run --frozen pde-agent compare-fno-candidates \
-  --evaluation-report-path runs/fno_iteration_001/candidates/use_scheduled_sampling_rollout_finetune_001/artifacts/evaluation/candidate_evaluation_report.json \
-  --output-path runs/fno_iteration_001/fno_candidate_comparison_report.json \
-  --force
-```
+See [`docs/repo_contract.md`](docs/repo_contract.md) and
+[`CLAUDE.md`](CLAUDE.md) for the complete rules.
 
-For multiple candidates, repeat `--evaluation-report-path`. The comparator sorts
-by local score, then `rel_mse`, then `rmse`, then candidate id for deterministic
-ties. It writes `fno_candidate_comparison_report.json` with the winner,
-rejection reasons, and `next_command = prepare-next-fno-iteration`; it does not
-rerun diagnostics or mutate candidate artifacts.
+## Status and scope
 
-Run a bounded evidence sweep across windows and train-step budgets:
+- **Research preview.** Interfaces, state hints, and artifact schemas may change.
+- **Local scores are proxies.** The hidden evaluator uses the full 190-step
+  horizon; short-window improvements are not competition evidence.
+- **Checkpoint adapters are bounded.** The official FNO/UNet adapters evaluate
+  provided checkpoints; finetuning is a separate, audited path.
+- **Claude Code SDK is the active runtime.** Hermes-era documents and artifacts
+  remain for compatibility and historical context only.
 
-```bash
-uv run --frozen --extra torch --extra data pde-agent run-fno-evidence-sweep \
-  --source-path data/pdebench/burgers/1D_Burgers_Sols_Nu0.001.hdf5 \
-  --checkpoint-path data/pdebench/checkpoints/burgers_FNO.tar \
-  --output-dir runs/fno_evidence_sweep_001 \
-  --dataset-key tensor \
-  --start-index 0 \
-  --start-index 128 \
-  --start-index 512 \
-  --sample-limit 8 \
-  --context-steps 10 \
-  --forecast-steps 31 \
-  --time-reduction 5 \
-  --space-reduction 4 \
-  --train-steps 1 \
-  --train-steps 3 \
-  --train-steps 5 \
-  --train-steps 8 \
-  --learning-rate 1e-4 \
-  --force
-```
+## Documentation
 
-The sweep writes `evidence_summary.json` and `evidence_summary.csv`, with
-per-candidate scores, per-cell winners, aggregate strategy statistics, and a
-recommendation on whether to add more training strategies. V0 sweeps one
-forecast horizon at a time.
+| Document | What it covers |
+| --- | --- |
+| [`docs/repo_contract.md`](docs/repo_contract.md) | Layer model, ownership rules, agent workflow discipline |
+| [`docs/run_state_contract.md`](docs/run_state_contract.md) | External state machine and state-hint contract |
+| [`CLAUDE.md`](CLAUDE.md) | Architecture, command/core split, development rules |
+| [`docs/unet-runtime-optimization-plan.md`](docs/unet-runtime-optimization-plan.md) | UNet runtime optimization plan |
+| [`docs/hermes_hypothesis_lab_runbook.md`](docs/hermes_hypothesis_lab_runbook.md) | Historical hypothesis-lab runbook |
+| [`integration_tests/`](integration_tests/) | Executable protocol fixtures and canaries |
+
+## Acknowledgements
+
+Built on [PDEBench](https://github.com/pdebench/PDEBench) for the Burgers
+benchmark, the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)
+for the autonomous runtime, and [Typer](https://typer.tiangolo.com/),
+[uv](https://docs.astral.sh/uv/), [PyTorch](https://pytorch.org/),
+[NumPy](https://numpy.org/), [h5py](https://www.h5py.org/), and
+[Textual](https://textual.textualize.io/).
+
+<div align="center">
+<sub>Built for reproducible, evidence-gated PDE research.</sub>
+</div>

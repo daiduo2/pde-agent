@@ -1,0 +1,176 @@
+<mxfile host="app.diagrams.net" agent="ZCode" version="30.2.4" type="device">
+  <diagram id="pde-agent-architecture" name="Architecture">
+    <mxGraphModel dx="1400" dy="1010" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1010" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="pde-agent — System Architecture" style="text;html=1;align=left;verticalAlign=middle;fontSize=26;fontStyle=1;fontColor=#1f2328;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="14" width="800" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="CLI-first diagnostic harness for autonomous PDE modeling experiments" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontColor=#57606a;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="52" width="900" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band1" value="Interfaces &amp;amp; runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="92" width="1320" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="if1" value="&lt;b&gt;Human operator&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#57606a&quot;&gt;Typer CLI · strict JSON stdout&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e0f0;strokeColor=#9673a6;fontSize=12;fontColor=#3d2c4d;" vertex="1" parent="1">
+          <mxGeometry x="70" y="138" width="380" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="if2" value="&lt;b&gt;Claude Code SDK runtime&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#57606a&quot;&gt;autonomous agent · bounded tool surface&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e0f0;strokeColor=#9673a6;fontSize=12;fontColor=#3d2c4d;" vertex="1" parent="1">
+          <mxGeometry x="510" y="138" width="380" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="if3" value="&lt;b&gt;Supervisor TUI&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#57606a&quot;&gt;Textual cockpit · run monitoring&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e0f0;strokeColor=#9673a6;fontSize=12;fontColor=#3d2c4d;" vertex="1" parent="1">
+          <mxGeometry x="950" y="138" width="380" height="58" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band2" value="Command layer · src/pde_agent/commands/ · 130 thin wrappers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="247" width="1320" height="145" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd1" value="&lt;b&gt;Task 1 / Task 2&lt;/b&gt;&lt;br&gt;FNO · UNet · DeepONet" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="70" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd2" value="&lt;b&gt;Hypothesis Lab&lt;/b&gt;&lt;br&gt;candidates · memory · policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="284" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd3" value="&lt;b&gt;Literature Lab&lt;/b&gt;&lt;br&gt;cards · blueprints · sandbox" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="498" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd4" value="&lt;b&gt;Diagnostics&lt;/b&gt;&lt;br&gt;score · residual · spectrum" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="712" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd5" value="&lt;b&gt;Strategy &amp;amp; promotion&lt;/b&gt;&lt;br&gt;rubric · evidence · ledger" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="926" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd6" value="&lt;b&gt;Runtime &amp;amp; cockpit&lt;/b&gt;&lt;br&gt;agent tasks · TUI · submission" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontColor=#1a3550;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="287" width="190" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band3" value="Core layer · src/pde_agent/core/ · 233 modules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="427" width="1320" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="core1" value="&lt;b&gt;Neural operators&lt;/b&gt;&lt;br&gt;FNO / UNet / DeepONet model&lt;br&gt;training &amp;amp; rollout loops" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="70" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="core2" value="&lt;b&gt;PDE diagnostics&lt;/b&gt;&lt;br&gt;relative MSE · rollout error&lt;br&gt;Burgers residual · spectrum" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="284" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="core3" value="&lt;b&gt;Hypothesis Lab engine&lt;/b&gt;&lt;br&gt;session · sandbox · failure&lt;br&gt;taxonomy · creative escalation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="498" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="core4" value="&lt;b&gt;Literature pipeline&lt;/b&gt;&lt;br&gt;source mining · algorithm cards&lt;br&gt;blueprints · bounded executors" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="712" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="core5" value="&lt;b&gt;Strategy gates&lt;/b&gt;&lt;br&gt;proposal · rubric · promotion&lt;br&gt;ledger · skill registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="926" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="core6" value="&lt;b&gt;Run contract&lt;/b&gt;&lt;br&gt;run_id · manifest · resolved&lt;br&gt;config · [N, T, X] arrays" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#1f3d1f;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="467" width="190" height="115" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band4L" value="Data &amp;amp; compute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="632" width="640" height="165" as="geometry" />
+        </mxCell>
+        <mxCell id="data1" value="&lt;b&gt;PDEBench HDF5&lt;/b&gt; — 1D Burgers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontColor=#5c4a00;" vertex="1" parent="1">
+          <mxGeometry x="65" y="672" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="data2" value="&lt;b&gt;Local window NPZ&lt;/b&gt; — [N, T, X]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontColor=#5c4a00;" vertex="1" parent="1">
+          <mxGeometry x="365" y="672" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="data3" value="&lt;b&gt;Official checkpoints&lt;/b&gt; — FNO / UNet .tar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontColor=#5c4a00;" vertex="1" parent="1">
+          <mxGeometry x="65" y="732" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="data4" value="&lt;b&gt;Compute stack&lt;/b&gt; — PyTorch · NumPy · h5py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontColor=#5c4a00;" vertex="1" parent="1">
+          <mxGeometry x="365" y="732" width="280" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band4R" value="Artifacts &amp;amp; memory · runs/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="720" y="632" width="640" height="165" as="geometry" />
+        </mxCell>
+        <mxCell id="art1" value="&lt;b&gt;runs/ artifacts&lt;/b&gt; — JSON · CSV · NPZ · PT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontColor=#5c3d00;" vertex="1" parent="1">
+          <mxGeometry x="745" y="672" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="art2" value="&lt;b&gt;Memory&lt;/b&gt; — ledger · skill registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontColor=#5c3d00;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="672" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="art3" value="&lt;b&gt;Contracts&lt;/b&gt; — manifests · resolved configs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontColor=#5c3d00;" vertex="1" parent="1">
+          <mxGeometry x="745" y="732" width="280" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="art4" value="&lt;b&gt;Protocol canaries&lt;/b&gt; — fixtures · session audits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontColor=#5c3d00;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="732" width="280" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="band5" value="Evidence-gated improvement loop · no strategy bypasses the promotion gate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#c9d1d9;dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=14;spacingTop=6;fontSize=13;fontStyle=1;fontColor=#57606a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="828" width="1320" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="loop1" value="&lt;b&gt;Diagnose&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="70" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop2" value="&lt;b&gt;Hypothesize&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="255" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop3" value="&lt;b&gt;Plan&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="440" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop4" value="&lt;b&gt;Audit&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="625" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop5" value="&lt;b&gt;Execute&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="810" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop6" value="&lt;b&gt;Evaluate&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="995" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop7" value="&lt;b&gt;Promote&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontColor=#5c1f1c;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="872" width="150" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="loopedge1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop1" target="loop2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="loopedge2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop2" target="loop3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="loopedge3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop3" target="loop4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="loopedge4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop4" target="loop5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="loopedge5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop5" target="loop6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="loopedge6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="loop6" target="loop7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="loopreturn" value="next iteration" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b85450;strokeWidth=1.5;dashed=1;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;fontSize=10;fontColor=#b85450;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="loop7" target="loop1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1255" y="943" />
+              <mxPoint x="145" y="943" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge1" value="invoke" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;strokeWidth=1.5;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;fontColor=#57606a;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="band1" target="band2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" value="delegate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;strokeWidth=1.5;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;fontColor=#57606a;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="band2" target="band3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" value="read" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;strokeWidth=1.5;endArrow=block;endFill=1;exitX=0.25;exitY=1;entryX=0.5;entryY=0;fontSize=10;fontColor=#57606a;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="band3" target="band4L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" value="write" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;strokeWidth=1.5;endArrow=block;endFill=1;exitX=0.75;exitY=1;entryX=0.5;entryY=0;fontSize=10;fontColor=#57606a;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="band3" target="band4R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="footer" value="Every command returns one JSON object:  run_id · command · status · state_hint · artifacts · metrics · next_hint · errors" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontColor=#57606a;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="40" y="972" width="1320" height="22" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
